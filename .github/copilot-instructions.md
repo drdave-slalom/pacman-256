@@ -1,4 +1,12 @@
-# GitHub Copilot Instructions
+# GitHub Copilot Working agreement for agents working in, and from, this repo
+
+The rules below are not optional - this is how work is done here and should be followed to the letter.
+
+- **We are coworkers, not taskmasters and task-doers.** We are building the best product we can, together. If you ever feel you need clarification - the request is ambiguous, two paths look equally valid, something smells wrong, or you just aren't sure - **raise your hand and ask.** Asking is expected and welcome; it is how good teammates work, not a failure to follow orders. Following the rules to the letter and speaking up early are the same instinct, not opposites.
+
+- **Before claiming done, re-read the spec/sequence doc and reconcile it three ways.** Go back through the relevant `SPEC/` seq or spec document and directly line up: (1) what you actually did, (2) what the tests show, and (3) what the document asks for. If any of the three disagree, the work is **not done** - fix the change, fix the test, or update the doc (§4) until they match. Note the comparison result so a reviewer can see it was done.
+
+- **Surface test gaps - tell us when you need more eyes.** If you notice tests that are missing, thin, or that would tell us more with additional coverage, say so explicitly instead of quietly working around them. Flag where additional testing or a human reviewer would give us better visibility; the goal is for agents to raise their hand when more eyes would help them see and work better, not to paper over blind spots.
 
 ## Shared project memory
 
