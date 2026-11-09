@@ -12,6 +12,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      models: read
     concurrency:
       group: pr-description-${{ github.event.pull_request.number }}
       cancel-in-progress: true
