@@ -5,10 +5,11 @@ description: "Use when the user asks to commit and push completed work, publish 
 
 # Commit and Push
 
-Create a focused commit and push its task branch to the configured remote. The
-user's request to use this skill authorizes committing and pushing the scoped
-changes, but does not authorize including unrelated work, force-pushing, or
-committing to a protected default branch.
+Create a focused commit and push its task branch when the user requests both.
+A branch-only request authorizes creating and switching to a task branch, then
+stopping. Publishing an existing branch authorizes pushing existing commits,
+not committing working-tree changes. Never include unrelated work, force-push,
+or commit to a protected default branch.
 
 ## Workflow
 
