@@ -23,13 +23,14 @@ Role guidance for GitHub Copilot working in **pacman-256**. These are standing i
 - **pacman-256** is an **original, mobile-first, arcade-style maze-chase web game** with real-time competitive multiplayer. It is a workshop/demo project for a three-person AI-assisted team, timeboxed to three days.
 - **Source of truth:** read `PROJECT-BRIEF.md` (PR #1) for full product direction. This file is context, not an implementation plan.
 - **Not Pac-Man / no 256-color palette mandate:** the brief requires original assets and *modern, stylized* art. The repo name/README are working titles only; the shipped product must be original without Pac-Man branding.
-- **Key product facts:** mobile-first browser; real-time versus play; short survival rounds (2–3 min) until one remains, eliminated players spectate; up to 4 players first; private rooms via code/invite link; touch-first controls; power-ups = speed boost + temporary shield.
+- **Key product facts:** mobile-first browser; balanced 1v1/2v2 hunter/runner teams; contact combat reverses during global vulnerability; three pickups (speed, shield, runner-only vulnerability). Consult the decision log and approved game contract over older role examples.
 - **MVP:** one complete, demonstrable multiplayer match on mobile browsers (room create/join, touch movement, one survival round with power-ups, clear winner).
 
 For path-specific instructions (e.g. per-language or per-directory guidance), see the files under `.github/instructions/` — these can apply project-specific rules to matching file paths.
 
 ## Common rules
 
+- Root commands: `npm ci`, `npm run dev`, `npm run typecheck`, `npm test`, `npm run build`; `npm run check` combines validation. See [README](../README.md) for Node/npm requirements and LAN access. T1 implements a connection-check skeleton, not gameplay.
 - Run real build/test commands before claiming something works; verify the game launches.
 - No dead code, debug leftovers, or committed secrets / private participant info.
 - Tune gameplay via data/config constants where possible.

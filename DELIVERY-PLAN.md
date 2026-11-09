@@ -82,7 +82,7 @@ Each chunk includes its tests, acceptance evidence, and a human-reviewed diff. S
 | ID | Chunk / owner | Estimate | Depends on | Acceptance checkpoint |
 |---|---|---|---|---|
 | T0 | COMPLETE: Approve MVP rules, contracts, and scope / All | Completed checkpoint | — | Shared contract reviewed and approved; see D044. |
-| T1 | Runnable skeleton and validation commands / C | 1–1.5 h | T0 | Fresh checkout starts client/server; typecheck, build, and test commands run; shared protocol is importable on both sides. |
+| T1 | Runnable skeleton and validation commands / C lane | Implemented; teammate review and physical-phone check pending | T0 | Root startup, typechecks/build/tests, shared imports, HTTP/WebSocket smoke check. See README; gameplay is not implemented. |
 | T2 | One maze and touch movement / A | 2–3 h | T1 | A player can navigate on a real phone without scrolling the page or being trapped by controls; wall collisions work. |
 | T3 | Private rooms and synchronized movement / B | 2–3 h | T1 | Two clients join one room and see each other move; invalid/full room errors are visible; server rejects invalid input. |
 | T4 | Mobile lobby and local-network phone access / C lane | 2 h | T1 | Create/join UI reaches the local server from two phones on the same network; document startup, address and firewall/network requirements. Integrate with T3 when ready. Hosting/CI follow later. |
@@ -168,8 +168,9 @@ Keep evidence concise: link tasks/specs to PRs, report real test results, and sh
 ## Next action
 
 T0 is complete; the [game contract](./docs/GAME-CONTRACT.md) is approved (D044).
-Next is T1: assign an owner and reviewer for the runnable skeleton and validation
-commands, then obtain implementation go-ahead. David coordinates contract changes;
-Chase reviews. Choose owners before parallel implementation; lanes remain flexible.
+T1 was authorized in D045 and its skeleton is implemented. Have a teammate review
+the diff and run the [README quick start](./README.md) on a second checkout, then
+check the connection from a physical phone on the LAN. Assign task owners before
+starting T2/T3/T4 in parallel. David coordinates contract changes; Chase reviews.
 Local-server validation precedes cloud work. Confirm actual test devices and
 performance targets before acceptance.
