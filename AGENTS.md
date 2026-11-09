@@ -8,18 +8,20 @@ Project-wide agent instructions for **pacman-256**. This file follows the shared
 - **Source of truth:** read `PROJECT-BRIEF.md` (PR #1) for the full product direction — concept, MVP outcome, open decisions, and the team's AI-first workflow. This file is project context, not an implementation plan.
 - **Not Pac-Man:** the brief explicitly requires original naming, characters, mazes, art, and audio. Do **not** use Pac-Man branding, characters, or assets. The repo name and README (`"Clyde is watching"`) are working/inside-joke titles only — the shipped product must be original.
 - **No 256-color palette mandate.** The "256" is just part of the repo name; the brief calls for *modern, stylized* art (2D with selective 3D depth/effects), not a constrained retro palette.
+- **Key product facts:** mobile-first browser game; real-time team-versus play with balanced 1v1 or 2v2 hunters and runners; hunters normally eliminate runners by contact, while a runner-only pickup temporarily makes unshielded hunters vulnerable. The opposing team must be eliminated to win; simultaneous team wipes draw; runners win if both teams survive 180 seconds. Eliminated players spectate. The MVP supports up to four players; 32 is a possible later goal. Private rooms, touch-first controls, and three pickups (speed, shield, global hunter vulnerability) are in scope.
+- **MVP success criterion:** one complete, demonstrable mobile-browser match: create/join a private room, move with touch controls, play a round with all three pickups, spectate after elimination, and see a clear result.
+- **Agreed technical direction:** TypeScript/Phaser client, Node.js/Colyseus room server, and shared protocol/rules. The server owns gameplay truth and validates client intent. Validate locally and over the phone's local network before cloud deployment.
 - **Confirmed rules:** consult [docs/DECISIONS.md](./docs/DECISIONS.md) and the approved [game contract](./docs/GAME-CONTRACT.md). They supersede older role examples: balanced hunter/runner teams, contact combat with vulnerability reversal, three pickups, and local-first development.
-- **MVP success criterion:** one complete team-based multiplayer match on mobile browsers, including joining, touch movement, elimination/spectating, three pickups, and a clear result.
 - The codebase is currently young; conventions below are the targets to converge on as code lands.
 
 ## Repository layout
 
 - `PROJECT-BRIEF.md` — the product brief (PR #1). The authoritative product context.
+- `.github/skills/` — project role and workflow skills (PR-reviewer, Artist, Builder, gameplay-designer, QA-tester, docs-writer, and scoping workflows).
 - `apps/client/`, `apps/server/`, `packages/shared/` — npm workspaces for Phaser/Vite, Node/Colyseus, and shared protocol/rules respectively.
 - `README.md` — real startup, validation, and local-network phone instructions.
-- `.agents/skills/` — pi role skills (PR-reviewer, Artist, Builder, gameplay-designer, QA-tester, docs-writer).
 - `AGENTS.md` — this file (shared standard).
-- `.github/copilot-instructions.md` — GitHub Copilot-specific role instructions.
+- `.github/copilot-instructions.md` — GitHub Copilot-specific role instructions; role details are in `.github/skills/`.
 - Per the brief: keep product intent/constraints/decisions in version control, write a short spec before each feature, and record architecture choices as decision notes. Assets live under `assets/` (sprites, tiles, audio) once created.
 
 ## Workflow & conventions
@@ -35,10 +37,10 @@ Project-wide agent instructions for **pacman-256**. This file follows the shared
 
 ## Roles
 
-This project uses the following roles. Each has a full definition in `.agents/skills/` (pi) and a condensed version in `.github/copilot-instructions.md`. When a task matches a role, follow that role's guidance.
+This project uses the following roles. Their detailed skill definitions are in `.github/skills/`, with concise summaries in `.github/copilot-instructions.md`. When a task matches a role, follow that role's guidance.
 
 | Role | When it applies |
-|---|---|
+| --- | --- |
 | **PR-reviewer** | Reviewing diffs, pull requests, or proposed changes. |
 | **Artist** | Creating/editing sprites, tiles, animations, UI, or audio. |
 | **Builder** | Building, running, packaging, testing, or fixing the build pipeline. |

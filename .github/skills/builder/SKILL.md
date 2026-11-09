@@ -9,10 +9,11 @@ Own the build and run pipeline for pacman-256 — an original, mobile-first web 
 
 ## Project reality (from the brief)
 
-- This is a **browser game**: a client (TypeScript, likely a game framework such as Phaser — *candidate, not decided*) plus a small real-time multiplayer service.
-- Architecture is **proposed, not decided** — do not presuppose Phaser or a specific stack. The brief asks the team to compare simplest viable options before choosing. Help surface and record that decision.
-- **Mobile-first** and **timeboxed to 3 days** with a complete MVP match as the success criterion. Prioritize a working playable build over breadth.
-- Key MVP slices: room create/join via code/invite link, touch movement, one survival round with speed+shield power-ups, clear round end + winner.
+- The agreed direction is a **TypeScript/Phaser browser client**, **Node.js/Colyseus room server**, and shared protocol/rules. Do not replace this stack or introduce a competing build system without an explicit decision.
+- The server owns gameplay truth and validates client intent. Clients render authoritative state; they must not declare positions, pickup claims, eliminations, effects, or results.
+- The product is **mobile-first**. Prioritize a complete local match and phone access over cloud deployment or stretch features.
+- Matches support balanced 1v1 or 2v2 hunters and runners. The three pickups are speed, shield, and runner-only global hunter vulnerability. Team elimination wins; simultaneous team wipes draw; runners win if both teams survive 180 seconds.
+- The repository may contain only a connection-check scaffold rather than a playable game. Verify current source and README status; never describe planned gameplay as implemented.
 
 ## Responsibilities
 
@@ -25,7 +26,7 @@ Own the build and run pipeline for pacman-256 — an original, mobile-first web 
 
 ## Workflow
 
-1. Inspect the project to learn its build system (`package.json`, config files, scripts, CI workflows). If there is no build setup yet, that's a finding — propose and scaffold one.
+1. Inspect the project to learn its build system (`package.json`, config files, scripts, CI workflows). If there is no build setup, report the gap and propose a minimal next step; do not scaffold or change the toolchain without authorization.
 2. Run the canonical build/test commands.
 3. On failure, read the actual error output and trace it to the root cause. Fix, don't paper over.
 4. Verify the game actually launches and runs (not just compiles) — ideally on a mobile viewport.
