@@ -63,8 +63,11 @@ synchronization, and incompatible-version rejection. No cloud account is require
 `npm run build` emits shared/server JavaScript and client static assets.
 
 After building, `npm start` runs the compiled server. The built client is in
-`apps/client/dist`; a future deployment must serve those assets and proxy
-`/multiplayer` to the server. `npm start` alone does not serve the client.
+`apps/client/dist`; see `deploy/` for the Kubernetes deployment, where one
+container serves both the static assets and the Colyseus server (the production
+client connects to the same-origin root). `npm start` alone does not serve the
+client. In local dev, the Vite dev server serves the client and proxies
+`/multiplayer` (stripping the prefix) to the backend.
 
 Phaser currently causes a large-bundle warning during the client build; the build
 succeeds. Mobile download/performance optimization remains follow-up work.
@@ -85,7 +88,8 @@ The artifact contains compiled client/server/shared output, workspace manifests,
 the root lockfile, and this README. Download and extract its `.tgz`, run
 `npm ci --omit=dev`, then `npm start` for the backend. Build/typecheck/dev commands
 require the source checkout and development dependencies; they are not artifact
-commands. The static client still needs a web host and `/multiplayer` proxy.
+commands. The static client is served by the game server itself (see `deploy/`);
+no separate web host or proxy is required in the deployed setup.
 
 This is CI plus build-artifact delivery, **not automatic cloud deployment**.
 AWS/Azure hosting remains deferred. No cloud credentials or GitHub secrets are

@@ -12,10 +12,13 @@ This directory holds everything needed to ship the game to a Kubernetes cluster
 
 ## How it works
 
-- The client connects to `ws(s)://<host>/multiplayer` on the same origin, so
-  a single HTTP/WebSocket endpoint is enough. The server binds `0.0.0.0`
-  (env `HOST`, default) and serves both the static client
-  (`CLIENT_DIST`, default `<cwd>/client-dist`) and the Colyseus rooms.
+- The production client connects to the same-origin root (`ws(s)://<host>/`)
+  because this server exposes Colyseus's matchmaking and room routes at the
+  root, so a single HTTP/WebSocket endpoint is enough. (The `/multiplayer`
+  prefix is only used in local dev, where the Vite dev server proxies and
+  strips it.) The server binds `0.0.0.0` (env `HOST`, default) and serves
+  both the static client (`CLIENT_DIST`, default `<cwd>/client-dist`) and
+  the Colyseus rooms.
 - The Service is `LoadBalancer`; DigitalOcean provisions a public IP
   automatically. No ingress controller is required for the MVP.
 
