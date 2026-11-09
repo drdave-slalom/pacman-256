@@ -3,7 +3,7 @@
 This is durable project memory for teammates and AI sessions. Read alongside the
 [project brief](../PROJECT-BRIEF.md) and [delivery plan](../DELIVERY-PLAN.md).
 Record confirmed decisions separately from proposals. No application implementation
-is authorized by this checkpoint.
+was authorized by the checkpoint itself. Subsequent task authorization is recorded below.
 
 ## Confirmed baseline
 
@@ -74,6 +74,7 @@ decisions below instead of the delivery plan's initial gameplay proposals.
 | D042 | Pickup claims use arrival time; exact ties use a stable seeded player priority randomized once at round start. | Accepted deterministic tie resolution without first-network-message advantage. |
 | D043 | David coordinates the shared contract; Chase reviews it. | Flexible implementation lanes remain unchanged. Proposed wire fields and technical tuning are not automatically approved by assigning ownership. |
 | D044 | Team reported draft reviewed and approved the [game contract](./GAME-CONTRACT.md) as the shared baseline on 2026-11-09. T0 is complete. | Includes lobby-only admission, all-phase host transfer, explicit leave/disconnect equivalence, interface/state/error proposals, and tunable simulation starting points. Unspecified geometry/limits, task assignments, device matrix, and performance measurement remain follow-ups. Approval of the document is not a separate go-ahead to build the app. |
+| D045 | Team explicitly authorized T1, the runnable skeleton, on 2026-11-09. | Scope: client/server/shared workspace, local startup, build/typecheck/tests, and local phone-access instructions. Does not authorize matchmaking/gameplay tasks or cloud deployment. |
 
 ### Current combat summary
 
@@ -105,7 +106,54 @@ targets remain explicit follow-ups, not approved claims of compatibility.
 
 The approved baseline defines client intents, authoritative state, effect timestamps,
 deterministic event ordering, visible errors, and acceptance tests.
-Implementation requires a separate go-ahead.
+T1 subsequently received go-ahead in D045; later tasks remain separate.
+
+## T1 implementation context (not new gameplay decisions)
+
+- npm workspaces: `apps/client` (Phaser/Vite), `apps/server` (Colyseus core and
+  WebSocket transport), `packages/shared` (protocol/types/tuning).
+- Root commands and LAN troubleshooting are in the [README](../README.md).
+  `npm ci` installs the lockfile; `npm run dev` starts all three workspaces;
+  `npm run check` runs typechecks, tests, and production builds.
+- Native Node TypeScript execution avoids an extra development runner; require
+  Node 22.18+ and npm 10+. Shared code compiles before client/server consume it.
+- The diagnostic `connection-check` room is single-client and disposable. It
+  proves protocol/state synchronization, not the four-player lobby or any round
+  behavior. Client connection failures must be visible.
+- Vite proxies same-origin `/multiplayer` HTTP/WebSocket requests to the loopback
+  server. Phones reach the development machine on LAN port 5173; no cloud needed.
+- Physical phone/browser compatibility, four-player gameplay, and teammate review
+  remain unverified. Do not report the complete game contract as implemented.
+
+### CI and artifact delivery: 2026-11-09
+
+- Team requested basic GitHub Actions CI/CD. The workflow validates pull requests,
+  main pushes, and manual runs using the root lockfile and `npm run check` on the
+  minimum Node 22.18.0 and LTS Node 24.
+- Main/manual Node 24 builds publish a seven-day downloadable build archive.
+  This delivers compiled outputs and manifests, not a hosted game or an
+  automatic cloud deployment. AWS/Azure selection remains deferred (D031).
+- Required-merge checks must be enabled in repository rules separately. No cloud
+  secrets, environment provisioning, or remote repository settings were changed.
+
+### T1 validation and AI-workflow evidence: 2026-11-09
+
+- Applied the TypeScript setup skill plus the installed Builder, QA Tester, and
+  Docs Writer role guidance. An independent code-review agent followed the
+  installed PR Reviewer guidance and reported no significant issues in the T1 diff.
+  Agent review does not replace the required teammate review.
+- On the available macOS Node 23.9.0/npm 10.9.2 environment, a clean `npm ci`
+  and `npm run check` passed: seven tests, source/test typechecks, and all builds.
+- Browser smoke check rendered a Phaser canvas and received a real authoritative
+  snapshot through the Vite HTTP/WebSocket proxy. Portrait 390x844 and landscape
+  844x390 viewport checks passed without horizontal overflow.
+- A simulated failed matchmaking HTTP request produced a visible error and left
+  retry enabled. These are diagnostic-room checks, not playable matchmaking tests.
+- `npm start` launched the compiled server and `/health` returned protocol v1.
+  Temporary validation servers were stopped after use.
+- Nonblocking warning: Phaser's client bundle is about 1.54 MB minified / 411 KB
+  gzip. Optimize/measure on target phones later; viewport emulation does not prove
+  physical iOS/Android compatibility or frame-rate performance.
 
 ## Maintaining this memory
 

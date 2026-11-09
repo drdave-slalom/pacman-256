@@ -8,13 +8,15 @@ Project-wide agent instructions for **pacman-256**. This file follows the shared
 - **Source of truth:** read `PROJECT-BRIEF.md` (PR #1) for the full product direction — concept, MVP outcome, open decisions, and the team's AI-first workflow. This file is project context, not an implementation plan.
 - **Not Pac-Man:** the brief explicitly requires original naming, characters, mazes, art, and audio. Do **not** use Pac-Man branding, characters, or assets. The repo name and README (`"Clyde is watching"`) are working/inside-joke titles only — the shipped product must be original.
 - **No 256-color palette mandate.** The "256" is just part of the repo name; the brief calls for *modern, stylized* art (2D with selective 3D depth/effects), not a constrained retro palette.
-- **Key product facts:** mobile-first browser game; real-time versus play; short survival rounds (2–3 min) until one player remains, eliminated players spectate; up to 4 players first (32 is a later goal); private rooms via code/invite link; touch-first controls adapting to orientation; power-ups start with a speed boost and a temporary shield.
-- **MVP success criterion:** one complete, demonstrable multiplayer match on mobile browsers (create/join room, touch movement, one survival round with speed+shield power-ups, clear round end + winner).
+- **Confirmed rules:** consult [docs/DECISIONS.md](./docs/DECISIONS.md) and the approved [game contract](./docs/GAME-CONTRACT.md). They supersede older role examples: balanced hunter/runner teams, contact combat with vulnerability reversal, three pickups, and local-first development.
+- **MVP success criterion:** one complete team-based multiplayer match on mobile browsers, including joining, touch movement, elimination/spectating, three pickups, and a clear result.
 - The codebase is currently young; conventions below are the targets to converge on as code lands.
 
 ## Repository layout
 
 - `PROJECT-BRIEF.md` — the product brief (PR #1). The authoritative product context.
+- `apps/client/`, `apps/server/`, `packages/shared/` — npm workspaces for Phaser/Vite, Node/Colyseus, and shared protocol/rules respectively.
+- `README.md` — real startup, validation, and local-network phone instructions.
 - `.agents/skills/` — pi role skills (PR-reviewer, Artist, Builder, gameplay-designer, QA-tester, docs-writer).
 - `AGENTS.md` — this file (shared standard).
 - `.github/copilot-instructions.md` — GitHub Copilot-specific role instructions.
@@ -23,6 +25,7 @@ Project-wide agent instructions for **pacman-256**. This file follows the shared
 ## Workflow & conventions
 
 - **Run the exact commands** in the README / BUILD docs before assuming a change works. Build and test before declaring done.
+- Root commands: `npm ci`, `npm run dev`, `npm run typecheck`, `npm test`, `npm run build`; `npm run check` combines validation. Require Node 22.18+ and npm 10+. T1 is a connection-check skeleton, not implemented gameplay.
 - Keep the game buildable and testable. No dead code, no debug leftovers (`console.log`, TODO spam).
 - Respect existing naming and structure. Prefer tuning game constants (speeds, timings, scores) in data/config over hardcoding.
 - Game changes are player-first: a fair game lets a skilled player win through skill; deaths should feel earned.
