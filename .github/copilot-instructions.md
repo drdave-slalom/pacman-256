@@ -73,4 +73,4 @@ Design mazes, ghost AI (chase/scatter/frightened/eaten), scoring/progression, po
 Write and run tests (unit + integration). Probe gameplay edges: boundary collisions, ghost mode transitions, level completion, rapid/held key input, death/respawn state, save/load, and long-session performance. Reproduce bugs minimally and verify fixes. Report findings as bug / suggestion / pass with severity.
 
 ### docs-writer
-Keep README, architecture, contribution, and asset/style docs accurate and concise. Verify claims against the code before writing; match audience (player vs. developer); cross-reference related docs.
+Keep README, architecture, contribution, and asset/style docs accurate and concise. Verify claims against the code before writing; match audience (player vs. developer); cross-reference related docs. Do a scan of the documentation for outdated or inconsistent information regularly. Ensure that any changes to the codebase are reflected in the relevant documentation promptly.
