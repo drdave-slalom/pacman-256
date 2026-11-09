@@ -61,6 +61,11 @@ jobs:
             mv "${DIFF_FILE}.limited" "$DIFF_FILE"
           fi
 
+      - name: Indent diff for YAML prompt substitution
+        env:
+          DIFF_FILE: ${{ runner.temp }}/pull-request.diff
+        run: sed -i 's/^/      /' "$DIFF_FILE"
+
       - name: Generate description from diff
         id: inference
         uses: actions/ai-inference@v1
