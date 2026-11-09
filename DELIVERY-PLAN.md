@@ -166,7 +166,8 @@ Keep evidence concise: link tasks/specs to PRs, report real test results, and sh
 
 ## Next action
 
-Complete T0 by agreeing the first shared state/message contract and its owner.
-Core gameplay rules and initial tuning are recorded. Choose task owners before
+Complete T0 by reviewing the [draft game contract](./docs/GAME-CONTRACT.md).
+David coordinates and Chase reviews; core gameplay, replay flow, movement, and
+event ordering are recorded in D039-D043. Wire details remain draft. Choose task owners before
 parallel implementation; lanes remain flexible. Local-server validation precedes
 cloud work. Confirm actual test devices and performance targets before acceptance.

@@ -68,6 +68,11 @@ decisions below instead of the delivery plan's initial gameplay proposals.
 | D036 | Resolve collisions scheduled at or before the round deadline and evaluate elimination before applying timeout victory. | Accepted deterministic deadline ordering. Exact pickup/contact ordering within one simulation step remains for the shared contract. |
 | D037 | Global vulnerability lasts 8 seconds; repeated collection refreshes the window to 8 seconds, never adds duration. Shield timers remain independent. | Approved initial tuning. A hunter whose shield expires during the window becomes vulnerable for the remaining window. |
 | D038 | One runner-only vulnerability pickup at round start, using D019's randomized safe-cell rules. Hunters cannot consume it. Respawn countdown is 10 seconds starting when the previous global vulnerability window ends, not when the pickup is collected. | Team changed the proposed collection-based 20-second respawn. With no refresh: collect at t=0, vulnerability ends at t=8, next pickup at t=18. Speed/shield respawns remain 15 seconds after collection. |
+| D039 | Server-controlled phases: lobby, countdown, playing, results. After results, host can return everyone to lobby, resetting effects and elimination but keeping connected players and teams. | Approved replay flow; promotes this small replay convenience from Should to agreed behavior. Admission during countdown/results remains a contract proposal. |
+| D040 | Continuous movement: direction requests steer/queue turns; releasing the control does not stop movement. Stop at walls or blocking opponents; resume when legal. Eliminated players cannot move. | Accepted arcade-style interaction; touch layout is still open. |
+| D041 | Expire effects, resolve movement/walls, award pickups, evaluate all contacts from the post-pickup snapshot, apply eliminations together, then victory before timeout. | Approved ordering makes newly collected protection/vulnerability effective immediately and avoids contact iteration order determining results. |
+| D042 | Pickup claims use arrival time; exact ties use a stable seeded player priority randomized once at round start. | Accepted deterministic tie resolution without first-network-message advantage. |
+| D043 | David coordinates the shared contract; Chase reviews it. | Flexible implementation lanes remain unchanged. Proposed wire fields and technical tuning are not automatically approved by assigning ownership. |
 
 ### Current combat summary
 
@@ -82,7 +87,9 @@ decisions below instead of the delivery plan's initial gameplay proposals.
 
 ### Questions blocking the shared contract
 
-- Shared state/message contract and task-level owners.
+- Review the [draft game contract](./GAME-CONTRACT.md), including wire fields,
+  admission outside lobby, host transfer outside lobby, movement geometry,
+  disconnect ordering, and simulation tuning. Assign implementation task owners.
 - Local network access from phones; cloud provider/service/budget later, not a local-first blocker.
 - Named mobile device/browser test matrix and measurable performance target.
 - Deterministic contact/pickup resolution, including events at the round deadline.
@@ -90,12 +97,13 @@ decisions below instead of the delivery plan's initial gameplay proposals.
 ## Checkpoint handoff
 
 Product rules, stack, local-first direction, and collaboration agreements are
-confirmed. T0 is not fully complete: agree the shared state/message contract and
-its owner before parallel implementation. Browser/device validation and performance
+confirmed. David coordinates the shared contract and Chase reviews it.
+T0 is not fully complete: review/approve the [draft contract](./GAME-CONTRACT.md)
+before parallel implementation. Browser/device validation and performance
 targets remain explicit follow-ups, not approved claims of compatibility.
 
-Next discussion: define room/match states, client intents, authoritative state,
-effect timestamps, deterministic event ordering, errors, and acceptance tests.
+The draft now proposes client intents, authoritative state, effect timestamps,
+deterministic event ordering, visible errors, and acceptance tests.
 Implementation requires a separate go-ahead.
 
 ## Maintaining this memory
