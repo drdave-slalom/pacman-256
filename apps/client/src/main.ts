@@ -38,7 +38,14 @@ new Phaser.Game({
   scene: PreviewScene,
 });
 
-const endpoint = new URL("/multiplayer", window.location.href);
+// In dev, the Vite dev server proxies /multiplayer to the backend and strips
+// the prefix. When the built client is served by the game server itself
+// (production/Kubernetes), Colyseus's matchmaking and room routes live at the
+// document root, so connect there directly.
+const endpoint = new URL(
+  import.meta.env.PROD ? "/" : "/multiplayer",
+  window.location.href,
+);
 endpoint.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 const client = new Client(endpoint.toString());
 
