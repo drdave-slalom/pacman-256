@@ -1,18 +1,13 @@
 ---
 name: open-pr
-description: "Use when the user asks to open or create a pull request for the current branch."
+description: "Use when the user asks to open a pull request from the current branch using GitHub CLI."
 ---
 
-# Open Pull Request
+# Open PR
 
-Prepare and create one pull request for the current branch using the repository's conventions.
+Use GitHub CLI (`gh`) only. Do not use MCP tools, GitKraken, GitLens, or another API/client.
 
-## Workflow
-
-1. Read the applicable `AGENTS.md` and repository instructions. Inspect the current branch, working tree, diff against its merge base, and recent commits. Preserve all user changes.
-2. Check whether a pull request already exists for this branch. If it does, report its link and do not create a duplicate.
-3. Search for a PR template in `.github/PULL_REQUEST_TEMPLATE.md` and `.github/PULL_REQUEST_TEMPLATE/`. If one exists, use its structure. Do not invent test results or claim checks passed unless you ran them.
-4. Summarize the change accurately and identify relevant validation already completed. Do not include unrelated working-tree changes in the PR description.
-5. If the branch is already pushed and the base branch is clear, create one PR using the available GitHub integration or authenticated `gh` CLI. Link the created PR and summarize its title and base branch.
-
-Invoking this skill authorizes creating the PR when those conditions are met. It does not authorize staging, committing, or pushing changes. If the branch is not pushed, the base is ambiguous, required checks are unknown, or authentication is unavailable, stop and explain the blocker rather than guessing or changing Git state.
+1. Run `gh auth status` and `git branch --show-current`. If authentication fails, stop and report it. If the branch is `main` or `master`, stop and ask the user to switch to a feature branch.
+2. Check for an existing PR with `gh pr list --head <current-branch> --json url --jq '.[0].url // empty'`. If one exists, return its URL and stop.
+3. Otherwise run `gh pr create --base main --fill`. Let `gh` handle pushing the branch if needed. Do not commit, amend, or push separately.
+4. Return the PR URL. If creation fails, report the CLI error; do not switch tools or modify Git state to work around it.
