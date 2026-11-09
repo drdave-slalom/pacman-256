@@ -6,7 +6,16 @@ The rules below are not optional - this is how work is done here and should be f
 
 - **Before claiming done, re-read the spec/sequence doc and reconcile it three ways.** Go back through the relevant `SPEC/` seq or spec document and directly line up: (1) what you actually did, (2) what the tests show, and (3) what the document asks for. If any of the three disagree, the work is **not done** - fix the change, fix the test, or update the doc (§4) until they match. Note the comparison result so a reviewer can see it was done.
 
+- **Communicate assumptions explicitly.** Whenever you make an assumption about the spec, the code, or the tests, state it clearly. This helps reviewers understand your reasoning and prevents misunderstandings.
+
+- **Check your work against the spec and tests.** Before claiming a task is complete, ensure that your implementation aligns with the spec and passes all relevant tests. This helps catch discrepancies early and maintains consistency across the project.
+
 - **Surface test gaps - tell us when you need more eyes.** If you notice tests that are missing, thin, or that would tell us more with additional coverage, say so explicitly instead of quietly working around them. Flag where additional testing or a human reviewer would give us better visibility; the goal is for agents to raise their hand when more eyes would help them see and work better, not to paper over blind spots.
+
+## Communication Style
+- **Be clear and concise.** Use straightforward language and avoid ambiguity. This helps teammates quickly understand your messages and reduces the risk of miscommunication. Keep any code comments to a minimum of 100 words. Avoid overly verbose explanations in the main text; reserve detailed reasoning for comments or documentation when necessary. Comments are for clarification, not for repeating what the code already expresses or worse yet, explaining the decision behind the implementation.
+- **Ask questions when in doubt.** If something is unclear or you need more information, don't hesitate to ask. This ensures that everyone is on the same page and prevents misunderstandings.
+- **Provide timely updates.** Keep your teammates informed about your progress, blockers, and any changes to your plans. This helps maintain alignment and allows for proactive problem-solving.
 
 ## Shared project memory
 
@@ -31,7 +40,7 @@ Role guidance for GitHub Copilot working in **pacman-256**. These are standing i
 - **pacman-256** is an **original, mobile-first, arcade-style maze-chase web game** with real-time competitive multiplayer. It is a workshop/demo project for a three-person AI-assisted team, timeboxed to three days.
 - **Source of truth:** read `PROJECT-BRIEF.md` (PR #1) for full product direction. This file is context, not an implementation plan.
 - **Not Pac-Man / no 256-color palette mandate:** the brief requires original assets and *modern, stylized* art. The repo name/README are working titles only; the shipped product must be original without Pac-Man branding.
-- **Key product facts:** mobile-first browser; real-time versus play; short survival rounds (2–3 min) until one remains, eliminated players spectate; up to 4 players first; private rooms via code/invite link; touch-first controls; power-ups = speed boost + temporary shield.
+- **Key product facts:** mobile-first browser; real-time team-versus play with balanced 1v1 or 2v2 hunters and runners; hunters normally eliminate runners on contact, while a runner-only pickup temporarily makes unshielded hunters vulnerable; eliminate the opposing team to win, simultaneous team wipes draw, and runners win if both teams survive 180 seconds; eliminated players spectate; private rooms via code or invite link; touch-first controls; pickups are speed boost, shield, and global hunter vulnerability.
 - **MVP:** one complete, demonstrable multiplayer match on mobile browsers (room create/join, touch movement, one survival round with power-ups, clear winner).
 
 For path-specific instructions (e.g. per-language or per-directory guidance), see the files under `.github/instructions/` — these can apply project-specific rules to matching file paths.
