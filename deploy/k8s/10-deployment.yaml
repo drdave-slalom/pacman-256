@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maze-game
+  namespace: maze-workshop
+  labels:
+    app.kubernetes.io/name: maze-game
+    app.kubernetes.io/part-of: maze-workshop
+spec:
+  # Single replica is fine for this MVP; bump the count when the multiplayer
+  # matchmaking and lobby state live in a shared store.
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: maze-game
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: maze-game
+    spec:
+      containers:
+        - name: maze-game
+          # Placeholder tag: the deploy workflow replaces it with the exact
+          # SHA image it just built and pushed to GHCR.
+          image: ghcr.io/drdave-slalom/pacman-256:ci
+          ports:
+            - name: game
+              containerPort: 2567
+          env:
+            - name: PORT
+              value: "2567"
+            - name: NODE_ENV
+              value: production
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: game
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: game
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

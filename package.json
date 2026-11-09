@@ -9,12 +9,12 @@
     "npm": ">=10"
   },
   "scripts": {
-    "dev": "npm run build --workspace @maze/shared && concurrently --kill-others --names shared,server,client \"npm run dev --workspace @maze/shared\" \"npm run dev --workspace @maze/server\" \"npm run dev --workspace @maze/client\"",
-    "build": "npm run build --workspace @maze/shared && npm run build --workspace @maze/server && npm run build --workspace @maze/client",
-    "typecheck": "npm run build --workspace @maze/shared && npm run typecheck --workspaces && tsc --project tsconfig.tests.json",
-    "test": "npm run build --workspace @maze/shared && node --experimental-strip-types --test packages/shared/src/*.test.ts apps/server/src/*.test.ts",
+    "dev": "(cd packages/shared && npm run build) && concurrently --kill-others --names shared,server,client \"(cd packages/shared && npm run dev)\" \"(cd apps/server && npm run dev)\" \"(cd apps/client && npm run dev)\"",
+    "build": "(cd packages/shared && npm run build) && (cd apps/server && npm run build) && (cd apps/client && npm run build)",
+    "typecheck": "(cd packages/shared && npm run build) && (cd packages/shared && npm run typecheck) && (cd apps/server && npm run typecheck) && (cd apps/client && npm run typecheck) && tsc --project tsconfig.tests.json",
+    "test": "(cd packages/shared && npm run build) && node --experimental-strip-types --test packages/shared/src/*.test.ts apps/server/src/*.test.ts",
     "check": "npm run typecheck && npm test && npm run build",
-    "start": "npm run start --workspace @maze/server"
+    "start": "(cd apps/server && npm run start)"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",

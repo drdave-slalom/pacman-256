@@ -13,7 +13,8 @@
     "@colyseus/core": "^0.18.27",
     "@colyseus/schema": "^5.0.45",
     "@colyseus/ws-transport": "^0.18.4",
-    "@maze/shared": "0.0.0"
+    "@maze/shared": "0.0.0",
+    "express": "^5.1.0"
   },
   "devDependencies": {
     "@colyseus/sdk": "^0.18.9",

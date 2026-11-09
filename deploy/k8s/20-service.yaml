@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: maze-game
+  namespace: maze-workshop
+  labels:
+    app.kubernetes.io/name: maze-game
+    app.kubernetes.io/part-of: maze-workshop
+spec:
+  # LoadBalancer provisions a public IP (via the DigitalOcean cloud provider)
+  # for the whole game: static client files and the /multiplayer WebSocket
+  # upgrade are both served by the same container on port 2567.
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: maze-game
+  ports:
+    - name: game
+      port: 80
+      targetPort: game

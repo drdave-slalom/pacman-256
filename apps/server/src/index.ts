@@ -6,9 +6,10 @@ if (!/^\d+$/.test(portText) || Number(portText) < 1 || Number(portText) > 65_535
 }
 
 const port = Number(portText);
+const host = process.env.HOST ?? "0.0.0.0";
 const { server } = createGameServer();
-await server.listen(port, "127.0.0.1");
-console.info(`Colyseus listening at http://127.0.0.1:${port}; health: /health`);
+await server.listen(port, host);
+console.info(`Colyseus listening at http://${host}:${port}; health: /health`);
 
 let stopping = false;
 async function shutdown(): Promise<void> {
