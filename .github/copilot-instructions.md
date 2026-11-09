@@ -33,7 +33,7 @@ The rules below are not optional - this is how work is done here and should be f
 - Shared memory reaches teammates only after normal review, commit, and push;
   never claim local edits are already shared.
 
-Role guidance for GitHub Copilot working in **pacman-256**. These are standing instructions Copilot injects into its context; they mirror the per-role skills in `.agents/skills/` (used by pi).
+Role guidance for GitHub Copilot working in **pacman-256**. These are standing instructions Copilot injects into its context; detailed role skills live in `.github/skills/`.
 
 ## Project context
 
@@ -58,7 +58,7 @@ For path-specific instructions (e.g. per-language or per-directory guidance), se
 When a task matches one of these roles, apply that role's perspective.
 
 ### PR-reviewer
-Review diffs for: correctness and edge cases (off-by-one, async errors, division by zero), game-specific failure modes (collisions, ghost AI state transitions, input timing), security (never trust input; no leaked secrets), style consistency, maintainability, and meaningful tests. Report findings tagged `[blocker]`, `[should]`, or `[nit]` with a clear summary and verdict.
+Review diffs for: correctness and edge cases (off-by-one, async errors, division by zero), game-specific failure modes (movement/contact resolution, match-phase transitions, input timing, pickup effects), security (never trust client input; no leaked secrets), style consistency, maintainability, and meaningful tests. Report findings tagged `[blocker]`, `[should]`, or `[nit]` with a clear summary and verdict.
 
 ### Artist
 Create/edit sprites, tiles, animations, UI, and audio as **original, modern, stylized** assets (no Pac-Man branding; no 256-color palette mandate). Match existing art direction and the mobile-first/touch reality. Keep sizes/anchoring consistent with the engine grid. Save assets in the paths/formats the engine loads, then verify they load and render.
@@ -67,10 +67,10 @@ Create/edit sprites, tiles, animations, UI, and audio as **original, modern, sty
 Own the build/run/package pipeline: install deps, build/bundle, run, test, package, and troubleshoot failures. Follow the project's existing scripts/config (no competing build system). Fix root causes, not symptoms; confirm the game actually runs.
 
 ### gameplay-designer
-Design mazes, ghost AI (chase/scatter/frightened/eaten), scoring/progression, power-ups, and game feel. Keep the core "eat → dodge → clear the maze" loop crisp, ramp difficulty smoothly, and tune via data. Flag trade-offs between fun and difficulty.
+Design the shared maze, movement feel, team balance, contact play, and the speed, shield, and runner-only global-vulnerability pickups. Preserve confirmed rules; bring proposed rule changes to the team. Tune approved constants via data where possible and flag trade-offs between fairness, readability, and game feel.
 
 ### QA-tester
-Write and run tests (unit + integration). Probe gameplay edges: boundary collisions, ghost mode transitions, level completion, rapid/held key input, death/respawn state, save/load, and long-session performance. Reproduce bugs minimally and verify fixes. Report findings as bug / suggestion / pass with severity.
+Write and run tests (unit + integration). Probe gameplay edges: wall and player contacts, buffered/held input, all three pickup effects and timing, shield/vulnerability interactions, simultaneous contacts, deadline outcomes, elimination/spectating, disconnects, and long-session performance. Reproduce bugs minimally and verify fixes. Report findings as bug / suggestion / pass with severity; do not claim device coverage without testing the named devices.
 
 ### docs-writer
 Keep README, architecture, contribution, and asset/style docs accurate and concise. Verify claims against the code before writing; match audience (player vs. developer); cross-reference related docs. Do a scan of the documentation for outdated or inconsistent information regularly. Ensure that any changes to the codebase are reflected in the relevant documentation promptly.
