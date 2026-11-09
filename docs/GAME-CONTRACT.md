@@ -1,15 +1,17 @@
 # Shared game contract
 
-**Date:** 2026-11-09 · **Status:** Draft for review, not implementation authorization
+**Date:** 2026-11-09 · **Status:** Approved baseline; implementation not yet authorized
 **Coordinator:** David · **Reviewer:** Chase
 **Sources:** [Confirmed decisions](./DECISIONS.md), [product brief](../PROJECT-BRIEF.md),
 [delivery plan](../DELIVERY-PLAN.md).
 
 ## Approval boundary
 
-Gameplay and interaction choices below are confirmed in the decision log.
-Message names, field shapes, error codes, coordinate conventions, and simulation
-details are proposed integration interfaces awaiting David/Chase review.
+The team reported review complete and approved this baseline on 2026-11-09
+(decision D044). This includes the proposed interfaces and clarifications below.
+Labels such as "proposed" describe their drafting origin, not a pending approval.
+Explicitly unspecified values and tunable settings remain implementation follow-ups;
+approval does not establish measured performance or browser compatibility.
 No application code, dependencies, servers, or deployments are created by this document.
 
 ## 1. State machine
@@ -168,9 +170,9 @@ spam; preserve enough diagnostic information to investigate failures.
 10. Malformed/spoofed/excessive requests cannot change authoritative truth; errors
     and connection failures remain visible and diagnosable.
 
-## Review gate
+## Approval and change control
 
-David coordinates and Chase reviews proposed interfaces and outstanding details.
-Record approval/amendments in the decision log before treating this as the contract
-for parallel tasks. Task owners, actual phone/browser matrix, and measured performance
+David coordinates and Chase reviews contract changes. Baseline approval is recorded
+as D044 in the decision log; record subsequent amendments there before changing
+shared interfaces. Task owners, actual phone/browser matrix, and measured performance
 targets remain to be assigned; this document does not assert compatibility.

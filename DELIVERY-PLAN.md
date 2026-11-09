@@ -41,8 +41,9 @@ Do not build the client, server, and infrastructure in isolation until the final
 
 ## 2. First team checkpoint: resolve blockers in 45 minutes
 
-Core rules and technology choices are now confirmed. Shared contract approval is
-the remaining T0 gate. Do not let three AI sessions invent different versions.
+T0 is complete: core rules, technology choices, and the
+[shared contract](./docs/GAME-CONTRACT.md) are approved (D044).
+Do not let three AI sessions invent different versions.
 
 | Decision | Checkpoint outcome / remaining action | Work lane (not a fixed owner) |
 |---|---|---|
@@ -80,7 +81,7 @@ Each chunk includes its tests, acceptance evidence, and a human-reviewed diff. S
 
 | ID | Chunk / owner | Estimate | Depends on | Acceptance checkpoint |
 |---|---|---|---|---|
-| T0 | Approve MVP rules, contracts, and scope / All | 45 min together | — | Team can explain how a player loses, how a round ends, and which state the server owns. |
+| T0 | COMPLETE: Approve MVP rules, contracts, and scope / All | Completed checkpoint | — | Shared contract reviewed and approved; see D044. |
 | T1 | Runnable skeleton and validation commands / C | 1–1.5 h | T0 | Fresh checkout starts client/server; typecheck, build, and test commands run; shared protocol is importable on both sides. |
 | T2 | One maze and touch movement / A | 2–3 h | T1 | A player can navigate on a real phone without scrolling the page or being trapped by controls; wall collisions work. |
 | T3 | Private rooms and synchronized movement / B | 2–3 h | T1 | Two clients join one room and see each other move; invalid/full room errors are visible; server rejects invalid input. |
@@ -166,8 +167,9 @@ Keep evidence concise: link tasks/specs to PRs, report real test results, and sh
 
 ## Next action
 
-Complete T0 by reviewing the [draft game contract](./docs/GAME-CONTRACT.md).
-David coordinates and Chase reviews; core gameplay, replay flow, movement, and
-event ordering are recorded in D039-D043. Wire details remain draft. Choose task owners before
-parallel implementation; lanes remain flexible. Local-server validation precedes
-cloud work. Confirm actual test devices and performance targets before acceptance.
+T0 is complete; the [game contract](./docs/GAME-CONTRACT.md) is approved (D044).
+Next is T1: assign an owner and reviewer for the runnable skeleton and validation
+commands, then obtain implementation go-ahead. David coordinates contract changes;
+Chase reviews. Choose owners before parallel implementation; lanes remain flexible.
+Local-server validation precedes cloud work. Confirm actual test devices and
+performance targets before acceptance.
