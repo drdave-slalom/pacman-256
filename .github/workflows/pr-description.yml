@@ -1,0 +1,118 @@
+name: Generate pull request description
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions: {}
+
+jobs:
+  generate-description:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: pr-description-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Check out the trusted base revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Verify Copilot token is configured
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        run: |
+          if [[ -z "$COPILOT_GITHUB_TOKEN" ]]; then
+            echo "::error::Configure the COPILOT_GITHUB_TOKEN repository or organization secret."
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install GitHub Copilot CLI
+        run: npm install --global @github/copilot
+
+      - name: Fetch pull request diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          DIFF_FILE: ${{ runner.temp }}/pull-request.diff
+        run: |
+          gh pr diff "$PR_NUMBER" --repo "$GH_REPO" > "$DIFF_FILE"
+          if [[ ! -s "$DIFF_FILE" ]]; then
+            echo "Pull request diff is empty."
+            exit 1
+          fi
+
+          max_diff_bytes=50000
+          diff_bytes=$(wc -c < "$DIFF_FILE")
+          if (( diff_bytes > max_diff_bytes )); then
+            head -c "$max_diff_bytes" "$DIFF_FILE" > "${DIFF_FILE}.limited"
+            printf '\n[Diff truncated at %s bytes.]\n' "$max_diff_bytes" >> "${DIFF_FILE}.limited"
+            mv "${DIFF_FILE}.limited" "$DIFF_FILE"
+          fi
+
+      - name: Generate description from diff
+        id: inference
+        uses: actions/ai-inference@v1
+        with:
+          prompt-file: ./.github/prompts/pr-description.prompt.yml
+          file_input: |
+            diff: ${{ runner.temp }}/pull-request.diff
+          model: gpt-4.1
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+
+      - name: Update the managed description section
+        uses: actions/github-script@v7
+        env:
+          GENERATED_DESCRIPTION: ${{ steps.inference.outputs.response }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const startMarker = "<!-- auto-generated-pr-description:start -->";
+            const endMarker = "<!-- auto-generated-pr-description:end -->";
+            const generated = (process.env.GENERATED_DESCRIPTION || "")
+              .replace(/<!-- auto-generated-pr-description:(?:start|end) -->/g, "")
+              .trim();
+            const requiredHeadings = [
+              "## TL;DR",
+              "## Detailed Overview",
+              "## Validation steps or testing completed",
+              "## Known issues",
+            ];
+            const missingHeadings = requiredHeadings.filter((heading) => !generated.includes(heading));
+
+            if (!generated || missingHeadings.length > 0) {
+              throw new Error(`Generated description is missing required headings: ${missingHeadings.join(", ")}`);
+            }
+
+            const { owner, repo } = context.repo;
+            const pull_number = context.payload.pull_request.number;
+            const pull = await github.rest.pulls.get({ owner, repo, pull_number });
+            const currentBody = pull.data.body || "";
+            const startIndex = currentBody.indexOf(startMarker);
+            const endIndex = currentBody.indexOf(endMarker);
+            const generatedBlock = `${startMarker}\n${generated}\n${endMarker}`;
+            let body;
+
+            if (startIndex !== -1 && endIndex > startIndex) {
+              const endAfterMarker = endIndex + endMarker.length;
+              body = `${currentBody.slice(0, startIndex)}${generatedBlock}${currentBody.slice(endAfterMarker)}`;
+            } else if (startIndex !== -1 || endIndex !== -1) {
+              throw new Error("Existing generated-description markers are incomplete; leaving the PR body unchanged.");
+            } else if (currentBody.trim()) {
+              body = `${currentBody.trimEnd()}\n\n${generatedBlock}`;
+            } else {
+              body = generatedBlock;
+            }
+
+            await github.rest.pulls.update({ owner, repo, pull_number, body });
