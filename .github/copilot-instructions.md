@@ -41,12 +41,14 @@ Role guidance for GitHub Copilot working in **pacman-256**. These are standing i
 - **Source of truth:** read `PROJECT-BRIEF.md` (PR #1) for full product direction. This file is context, not an implementation plan.
 - **Not Pac-Man / no 256-color palette mandate:** the brief requires original assets and *modern, stylized* art. The repo name/README are working titles only; the shipped product must be original without Pac-Man branding.
 - **Key product facts:** mobile-first browser; real-time team-versus play with balanced 1v1 or 2v2 hunters and runners; hunters normally eliminate runners on contact, while a runner-only pickup temporarily makes unshielded hunters vulnerable; eliminate the opposing team to win, simultaneous team wipes draw, and runners win if both teams survive 180 seconds; eliminated players spectate; private rooms via code or invite link; touch-first controls; pickups are speed boost, shield, and global hunter vulnerability.
+- The decision log and approved game contract are authoritative over older role examples.
 - **MVP:** one complete, demonstrable multiplayer match on mobile browsers (room create/join, touch movement, one survival round with power-ups, clear winner).
 
 For path-specific instructions (e.g. per-language or per-directory guidance), see the files under `.github/instructions/` — these can apply project-specific rules to matching file paths.
 
 ## Common rules
 
+- Root commands: `npm ci`, `npm run dev`, `npm run typecheck`, `npm test`, `npm run build`; `npm run check` combines validation. See [README](../README.md) for Node/npm requirements and LAN access. T1 implements a connection-check skeleton, not gameplay.
 - Run real build/test commands before claiming something works; verify the game launches.
 - No dead code, debug leftovers, or committed secrets / private participant info.
 - Tune gameplay via data/config constants where possible.

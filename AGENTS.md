@@ -11,12 +11,15 @@ Project-wide agent instructions for **pacman-256**. This file follows the shared
 - **Key product facts:** mobile-first browser game; real-time team-versus play with balanced 1v1 or 2v2 hunters and runners; hunters normally eliminate runners by contact, while a runner-only pickup temporarily makes unshielded hunters vulnerable. The opposing team must be eliminated to win; simultaneous team wipes draw; runners win if both teams survive 180 seconds. Eliminated players spectate. The MVP supports up to four players; 32 is a possible later goal. Private rooms, touch-first controls, and three pickups (speed, shield, global hunter vulnerability) are in scope.
 - **MVP success criterion:** one complete, demonstrable mobile-browser match: create/join a private room, move with touch controls, play a round with all three pickups, spectate after elimination, and see a clear result.
 - **Agreed technical direction:** TypeScript/Phaser client, Node.js/Colyseus room server, and shared protocol/rules. The server owns gameplay truth and validates client intent. Validate locally and over the phone's local network before cloud deployment.
+- **Confirmed rules:** consult [docs/DECISIONS.md](./docs/DECISIONS.md) and the approved [game contract](./docs/GAME-CONTRACT.md). They supersede older role examples: balanced hunter/runner teams, contact combat with vulnerability reversal, three pickups, and local-first development.
 - The codebase is currently young; conventions below are the targets to converge on as code lands.
 
 ## Repository layout
 
 - `PROJECT-BRIEF.md` — the product brief (PR #1). The authoritative product context.
 - `.github/skills/` — project role and workflow skills (PR-reviewer, Artist, Builder, gameplay-designer, QA-tester, docs-writer, and scoping workflows).
+- `apps/client/`, `apps/server/`, `packages/shared/` — npm workspaces for Phaser/Vite, Node/Colyseus, and shared protocol/rules respectively.
+- `README.md` — real startup, validation, and local-network phone instructions.
 - `AGENTS.md` — this file (shared standard).
 - `.github/copilot-instructions.md` — GitHub Copilot-specific role instructions; role details are in `.github/skills/`.
 - Per the brief: keep product intent/constraints/decisions in version control, write a short spec before each feature, and record architecture choices as decision notes. Assets live under `assets/` (sprites, tiles, audio) once created.
@@ -24,6 +27,7 @@ Project-wide agent instructions for **pacman-256**. This file follows the shared
 ## Workflow & conventions
 
 - **Run the exact commands** in the README / BUILD docs before assuming a change works. Build and test before declaring done.
+- Root commands: `npm ci`, `npm run dev`, `npm run typecheck`, `npm test`, `npm run build`; `npm run check` combines validation. Require Node 22.18+ and npm 10+. T1 is a connection-check skeleton, not implemented gameplay.
 - Keep the game buildable and testable. No dead code, no debug leftovers (`console.log`, TODO spam).
 - Respect existing naming and structure. Prefer tuning game constants (speeds, timings, scores) in data/config over hardcoding.
 - Game changes are player-first: a fair game lets a skilled player win through skill; deaths should feel earned.

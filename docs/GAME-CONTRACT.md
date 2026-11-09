@@ -1,6 +1,6 @@
 # Shared game contract
 
-**Date:** 2026-11-09 · **Status:** Approved baseline; implementation not yet authorized
+**Date:** 2026-11-09 · **Status:** Approved baseline; T1 skeleton authorized (D045)
 **Coordinator:** David · **Reviewer:** Chase
 **Sources:** [Confirmed decisions](./DECISIONS.md), [product brief](../PROJECT-BRIEF.md),
 [delivery plan](../DELIVERY-PLAN.md).
@@ -13,6 +13,7 @@ Labels such as "proposed" describe their drafting origin, not a pending approval
 Explicitly unspecified values and tunable settings remain implementation follow-ups;
 approval does not establish measured performance or browser compatibility.
 No application code, dependencies, servers, or deployments are created by this document.
+The team subsequently authorized T1 only; see D045 for the implementation boundary.
 
 ## 1. State machine
 

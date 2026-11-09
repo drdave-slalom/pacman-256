@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22.18.0", "24.x"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Typecheck, test, and build
+        run: npm run check
+
+      - name: Package verified build
+        if: matrix.node == '24.x' && github.event_name != 'pull_request'
+        run: |
+          tar -czf maze-workshop-build.tgz \
+            package.json package-lock.json README.md \
+            apps/client/package.json apps/client/dist \
+            apps/server/package.json apps/server/dist \
+            packages/shared/package.json packages/shared/dist
+
+      - name: Upload verified build
+        if: matrix.node == '24.x' && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: maze-workshop-${{ github.sha }}
+          path: maze-workshop-build.tgz
+          if-no-files-found: error
+          retention-days: 7

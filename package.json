@@ -1,0 +1,24 @@
+{
+  "name": "maze-workshop",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "workspaces": ["apps/*", "packages/*"],
+  "engines": {
+    "node": ">=22.18.0",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "dev": "(cd packages/shared && npm run build) && concurrently --kill-others --names shared,server,client \"(cd packages/shared && npm run dev)\" \"(cd apps/server && npm run dev)\" \"(cd apps/client && npm run dev)\"",
+    "build": "(cd packages/shared && npm run build) && (cd apps/server && npm run build) && (cd apps/client && npm run build)",
+    "typecheck": "(cd packages/shared && npm run build) && (cd packages/shared && npm run typecheck) && (cd apps/server && npm run typecheck) && (cd apps/client && npm run typecheck) && tsc --project tsconfig.tests.json",
+    "test": "(cd packages/shared && npm run build) && node --experimental-strip-types --test packages/shared/src/*.test.ts apps/server/src/*.test.ts",
+    "check": "npm run typecheck && npm test && npm run build",
+    "start": "(cd apps/server && npm run start)"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "concurrently": "^9.2.1",
+    "typescript": "^7.0.2"
+  }
+}

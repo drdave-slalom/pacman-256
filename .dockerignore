@@ -1,0 +1,10 @@
+.git
+.cache
+node_modules
+coverage
+dist
+*.tgz
+*.log
+docs
+.github
+deploy
