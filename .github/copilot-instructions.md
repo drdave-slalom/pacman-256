@@ -1,5 +1,21 @@
 # GitHub Copilot Instructions
 
+## Shared project memory
+
+- Read the [project brief](../PROJECT-BRIEF.md) for product direction and
+  [decision log](../docs/DECISIONS.md) for confirmed rules, superseded decisions,
+  and open questions before proposing architecture or behavior.
+- The [delivery plan](../DELIVERY-PLAN.md) contains draft estimates and historical
+  proposals. Confirmed, non-superseded decision-log entries take precedence.
+- Record team-approved decisions and noteworthy context in the decision log;
+  reconcile affected brief/spec/plan sections. Never record a proposal as approved.
+- Use local-server and phone-network validation before cloud deployment.
+  Roles are flexible; agree a task owner and shared-contract owner before parallel work.
+- Planning/discussion alone does not authorize implementation. Do not invent
+  unresolved game rules or build/test commands; check the current repo and ask.
+- Shared memory reaches teammates only after normal review, commit, and push;
+  never claim local edits are already shared.
+
 Role guidance for GitHub Copilot working in **pacman-256**. These are standing instructions Copilot injects into its context; they mirror the per-role skills in `.agents/skills/` (used by pi).
 
 ## Project context
