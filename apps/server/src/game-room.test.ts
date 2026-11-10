@@ -4,6 +4,7 @@ import { matchMaker } from "@colyseus/core";
 import { Client, type Room } from "@colyseus/sdk";
 import {
   CLIENT_MESSAGES,
+  DEFAULT_MOVE_SPEED_TILES_PER_SECOND,
   GAME_ROOM,
   GAME_RULES,
   INPUT_RATE_LIMIT_MAX_MESSAGES,
@@ -15,6 +16,7 @@ import {
   generateMaze,
   isWalkableIn,
   joinErrorCode,
+  spawnDirection,
   parseActionResult,
   parseInputRejected,
   type ActionResultMessage,
@@ -24,7 +26,7 @@ import {
   type InputRejectedMessage,
   type PlayerSnapshot,
 } from "@maze/shared";
-import { resolveContacts, type SpawnPlacer, type StepMove } from "./game-room.ts";
+import { SIMULATION_STEP_MS, planSimulationSteps, resolveContacts, type SpawnPlacer, type StepMove } from "./game-room.ts";
 import { createGameServer } from "./server.ts";
 
 const WAIT_MS = 3_000;
@@ -363,6 +365,9 @@ test("AC5: B observes A move after A's setDirection; positions stay walkable", {
   });
 
   host.room.send(CLIENT_MESSAGES.setDirection, { roundId: state.roundId, sequence: 1, direction });
+  await guest.waitFor((s) => playerOf(s, host.id).lastInputSequence === 1, "A's input accepted");
+  // Movement follows server simulation time: advance the fake clock past one tile (4 tiles/s).
+  harness.advance(500);
   const moved = await guest.waitFor((s) => {
     const a = playerOf(s, host.id);
     return Math.abs(a.x - spawn.x) + Math.abs(a.y - spawn.y) >= 1;
@@ -737,4 +742,123 @@ test("T5: last hunter (host) disconnecting during playing -> runner/teamEliminat
   assert.equal(results.resultReason, "teamEliminated");
   assert.equal(results.hostPlayerId, guest.id);
   expectAccepted(await guest.request("returnToLobby", {}));
+});
+
+test("T5 unit: planSimulationSteps catches up in full steps, carries leftovers, and never passes the deadline", () => {
+  const step = SIMULATION_STEP_MS;
+  const deadline = GAME_RULES.roundDurationMs;
+  const durations = (cursor: number, ends: number[]) => ends.map((end, i) => end - (i === 0 ? cursor : ends[i - 1]!));
+  // On-time callback: exactly one step.
+  assert.equal(planSimulationSteps(0, step, deadline).length, 1);
+  // Early callback (less than a step): nothing due; the leftover carries over.
+  assert.deepEqual(planSimulationSteps(0, step - 1, deadline), []);
+  // Delayed callback before the deadline: 200 ms -> 6 full steps, no partial step.
+  const delayed = planSimulationSteps(0, 200, deadline);
+  assert.equal(delayed.length, 6);
+  for (const d of durations(0, delayed)) assert.ok(Math.abs(d - step) < 1e-6);
+  // Offset callback: 50 ms from cursor 10 -> one step; the 16.7 ms remainder carries to the next tick.
+  const offset = planSimulationSteps(10, 60, deadline);
+  assert.equal(offset.length, 1);
+  assert.deepEqual(planSimulationSteps(offset[0]!, 70, deadline), [], "16.7 ms + 10 ms is still below a step");
+  assert.equal(planSimulationSteps(offset[0]!, 77, deadline).length, 1, "carried remainder completes a step");
+  // Jump past the deadline from 100 ms before: exactly 3 full steps, no zero-length partial.
+  const exact = planSimulationSteps(deadline - 100, deadline + 5_000, deadline);
+  assert.equal(exact.length, 3);
+  assert.equal(exact.at(-1), deadline);
+  // Jump past the deadline from 110 ms before: 3 full steps + a 10 ms partial, totalling exactly 110 ms.
+  const cursor = deadline - 110;
+  const across = planSimulationSteps(cursor, deadline + 5_000, deadline);
+  const parts = durations(cursor, across);
+  assert.equal(across.length, 4);
+  assert.ok(Math.abs(parts.at(-1)! - 10) < 1e-6, `partial step ${parts.at(-1)}`);
+  assert.ok(Math.abs(parts.reduce((a, b) => a + b, 0) - 110) < 1e-6);
+  assert.equal(across.at(-1), deadline);
+  for (const end of across) assert.ok(end <= deadline, "no step goes beyond the deadline");
+  // A whole round from the start in one jump: 5400 steps ending exactly at the deadline, no drift.
+  const whole = planSimulationSteps(0, deadline + 1, deadline);
+  assert.equal(whole.length, deadline / step);
+  assert.equal(whole.at(-1), deadline);
+  // Cursor already at the deadline: nothing more to simulate.
+  assert.deepEqual(planSimulationSteps(deadline, deadline + 1_000, deadline), []);
+});
+
+test("T5: a delayed tick before the deadline simulates all elapsed time, not one capped step", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t);
+  const { host, state } = await startOneVsOne(harness);
+  const start = playerOf(state, host.id);
+  const maze = generateMaze(state.mazeSeed);
+  host.room.send(CLIENT_MESSAGES.setDirection, { roundId: state.roundId, sequence: 1, direction: walkableDirection(maze, start) });
+  await host.waitFor((s) => playerOf(s, host.id).lastInputSequence === 1, "input accepted");
+  // One delayed callback covering 200 ms (6 steps); 0.8 tiles never reaches a wall from a cell center.
+  harness.advance(200);
+  const moved = await host.waitFor((s) => {
+    const p = s.players[host.id];
+    return p !== undefined && (p.x !== start.x || p.y !== start.y);
+  }, "hunter moved");
+  const end = playerOf(moved, host.id);
+  const distance = Math.abs(end.x - start.x) + Math.abs(end.y - start.y);
+  const expected = DEFAULT_MOVE_SPEED_TILES_PER_SECOND * 0.2;
+  const oneStep = DEFAULT_MOVE_SPEED_TILES_PER_SECOND * SIMULATION_STEP_MS / 1000;
+  assert.ok(Math.abs(distance - expected) <= oneStep, `moved ${distance} tiles, expected ~${expected}`);
+});
+
+type Cell = { col: number; row: number };
+const DELTAS: Record<Direction, [number, number]> = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+
+/**
+ * Adjacent walkable cells A (hunter) and B (runner) where each player's spawn direction is
+ * immediately blocked, so both stay at their cell centers, exactly 1 tile apart, until steered.
+ */
+function adjacentPair(maze: readonly string[]): { a: Cell; b: Cell; toward: Direction; back: Direction } {
+  const spawns = findSpawnCells(maze);
+  const dirH = spawnDirection(maze, spawns.hunter[0]!);
+  const dirR = spawnDirection(maze, spawns.runner[0]!);
+  const blocked = (cell: Cell, dir: Direction) => !isWalkableIn(maze, cell.col + DELTAS[dir][0], cell.row + DELTAS[dir][1]);
+  const opposite: Record<Direction, Direction> = { up: "down", down: "up", left: "right", right: "left" };
+  for (let row = 1; row < maze.length - 1; row++) {
+    for (let col = 1; col < maze[row]!.length - 1; col++) {
+      const a = { col, row };
+      if (!isWalkableIn(maze, col, row) || !blocked(a, dirH)) continue;
+      for (const toward of ["up", "down", "left", "right"] as const) {
+        const b = { col: col + DELTAS[toward][0], row: row + DELTAS[toward][1] };
+        if (isWalkableIn(maze, b.col, b.row) && blocked(b, dirR)) {
+          return { a, b, toward, back: opposite[toward] };
+        }
+      }
+    }
+  }
+  assert.fail("no adjacent blocked pair in the test maze");
+}
+
+test("T5: a delayed tick across the deadline still resolves a catch in the final 100 ms before timing out", { timeout: 15_000 }, async (t) => {
+  let pair: ReturnType<typeof adjacentPair> | undefined;
+  const placer: SpawnPlacer = (team, _position, maze) => {
+    pair ??= adjacentPair(maze);
+    const cell = team === "hunter" ? pair.a : pair.b;
+    return { x: cell.col + 0.5, y: cell.row + 0.5 };
+  };
+  const harness = await startServer(t, TEST_SEED, placer);
+  const { host, guest, state } = await startOneVsOne(harness);
+  assert.ok(pair);
+  // Cursor lands exactly 100 ms before the deadline (5397 full steps); nobody has moved.
+  harness.advance(GAME_RULES.roundDurationMs - 100);
+  const revision = host.snapshot().revision;
+  const before = await host.waitFor((s) => s.revision >= revision + 2, "ticks");
+  assert.equal(before.phase, "playing", JSON.stringify(before));
+  assert.deepEqual([playerOf(before, host.id).x, playerOf(before, host.id).y], [pair.a.col + 0.5, pair.a.row + 0.5]);
+  assert.deepEqual([playerOf(before, guest.id).x, playerOf(before, guest.id).y], [pair.b.col + 0.5, pair.b.row + 0.5]);
+  // Steer them together: 1.0 tile apart closing at 8 tiles/s reaches contact (0.6) after 50 ms —
+  // more than one capped 33 ms step, well within the remaining 100 ms.
+  host.room.send(CLIENT_MESSAGES.setDirection, { roundId: state.roundId, sequence: 1, direction: pair.toward });
+  guest.room.send(CLIENT_MESSAGES.setDirection, { roundId: state.roundId, sequence: 1, direction: pair.back });
+  await host.waitFor(
+    (s) => s.players[host.id]?.queuedDirection === pair!.toward && s.players[guest.id]?.queuedDirection === pair!.back,
+    "both turns queued",
+  );
+  harness.advance(1_000);
+  const results = await host.waitFor((s) => s.phase === "results", "results");
+  assert.equal(`${results.resultWinner}/${results.resultReason}`, "hunter/teamEliminated");
+  assert.ok(results.resultEndedAt < results.roundEndsAt, "decided before the deadline");
+  assert.ok(results.resultEndedAt > results.roundEndsAt - 100);
+  assert.equal(playerOf(results, guest.id).alive, false);
 });

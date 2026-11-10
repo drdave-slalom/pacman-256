@@ -43,8 +43,13 @@ Disconnect outcomes are defined. No pickups or vulnerability yet (T7).
 
 - `PROTOCOL_VERSION` stays 1: the new snapshot fields are additive and the T3/T4
   client ignores them.
-- **Deadline clamp:** wall-clock based (`#lastTickAt` capped at `roundEndsAt`), not an
-  accumulated simulation clock. No movement or contact runs past the deadline.
+- **Deadline handling (fixed after Copilot PR review):** the server keeps a
+  simulation cursor (`#roundStartedAt` + `#simulatedMs`). Each tick catches up with
+  fixed 1/30 s steps to `min(now, roundEndsAt)` (`planSimulationSteps`) and adds a
+  final partial step that ends exactly at the deadline. Every step runs the full D041
+  sequence. A late tick therefore never skips movement or contact, and nothing is
+  simulated past `roundEndsAt`. `resultEndedAt` is the simulation time at which the
+  outcome was decided.
 - **Round outcome:** "alive before" counts are taken at the start of each playing step,
   after disconnects are applied. Both sides empty at step start → `abandoned`; both
   emptied during the step → `simultaneousWipe`.
@@ -92,7 +97,8 @@ Owners pick these up in the named task. They aren't T5 acceptance criteria.
 **Test infrastructure (unassigned):**
 - A deterministic room-level `abandoned` test needs a hook to step the simulation
   manually. The current all-leave test accepts any decided outcome.
-- Contact on the deadline step is unit-tested only.
+- An older 2v2 test asserts `resultEndedAt === harness.now()`. It holds only while the
+  fake clock is frozen; assert against simulation time or `<= now` instead.
 - Rename the unit test "same-step elimination + last-hunter disconnect is a
   simultaneous wipe" to match its scenario (`apps/server/src/game-room.test.ts`).
 

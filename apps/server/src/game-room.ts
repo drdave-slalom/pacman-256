@@ -14,7 +14,6 @@ import {
   PATCH_INTERVAL_MS,
   PROTOCOL_VERSION,
   SERVER_MESSAGES,
-  SIMULATION_DT_SECONDS,
   SIMULATION_HZ,
   errorMessage,
   evaluateRoundOutcome,
@@ -117,6 +116,40 @@ export function resolveContacts(moves: readonly StepMove[]): Set<string> {
   return eliminated;
 }
 
+/** One full simulation step in ms (1000 / SIMULATION_HZ). */
+export const SIMULATION_STEP_MS = 1000 / SIMULATION_HZ;
+/** Tolerance for float drift when comparing step boundaries (ms; inputs are round-relative). */
+const STEP_EPSILON_MS = 1e-6;
+
+/**
+ * Plan the simulation steps that catch the cursor up to `min(targetMs, deadlineMs)`.
+ * Returns each step's end time (same time base as the inputs; use round-relative ms so
+ * the epsilon dominates rounding). Full steps run while they fit; leftover time below a
+ * full step carries over, except at the deadline, which gets one final partial step so
+ * movement and contact are processed up to the deadline and never beyond it.
+ */
+export function planSimulationSteps(
+  cursorMs: number,
+  targetMs: number,
+  deadlineMs: number,
+  stepMs: number = SIMULATION_STEP_MS,
+): number[] {
+  const limit = Math.min(targetMs, deadlineMs);
+  const ends: number[] = [];
+  let at = cursorMs;
+  while (at + stepMs <= limit + STEP_EPSILON_MS) {
+    at += stepMs;
+    if (at >= deadlineMs - STEP_EPSILON_MS) {
+      at = deadlineMs;
+    }
+    ends.push(at);
+  }
+  if (targetMs >= deadlineMs && at < deadlineMs) {
+    ends.push(deadlineMs);
+  }
+  return ends;
+}
+
 export function randomMazeSeed(): number {
   return randomInt(0, UINT32_RANGE);
 }
@@ -145,9 +178,10 @@ export class GameRoom extends Room<{ state: GameState }> {
   readonly #recentInputs = new Map<string, number[]>();
   /** Last time each client was told RATE_LIMITED (one notice per window). */
   readonly #rateLimitNoticeAt = new Map<string, number>();
-  /** Simulation time already covered during `playing` (ms); movement never runs past roundEndsAt. */
-  #lastTickAt = 0;
-  /** Alive counts at the end of the previous tick; includes players who left since. */
+  /** Epoch ms at which `playing` began (the countdown deadline). */
+  #roundStartedAt = 0;
+  /** Simulation cursor: round-relative ms already simulated; never passes the round deadline. */
+  #simulatedMs = 0;
 
   async onCreate(options: unknown): Promise<void> {
     const code = this.#joinOptionsError(options);
@@ -441,23 +475,42 @@ export class GameRoom extends Room<{ state: GameState }> {
     if (this.state.phase === "countdown" && now >= this.state.countdownEndsAt) {
       this.state.phase = "playing";
       this.state.roundEndsAt = this.state.countdownEndsAt + GAME_RULES.roundDurationMs;
-      this.#lastTickAt = this.state.countdownEndsAt;
+      this.#roundStartedAt = this.state.countdownEndsAt;
+      this.#simulatedMs = 0;
       this.state.countdownEndsAt = 0;
     }
     const maze = this.#maze;
     if (this.state.phase === "playing" && maze) {
-      this.#playingStep(now, maze);
+      this.#catchUp(now, maze);
     }
     this.#changed();
   }
 
-  /** Move → contact batch → outcome, all clamped to the round deadline. */
-  #playingStep(now: number, maze: readonly string[]): void {
-    const roundEndsAt = this.state.roundEndsAt;
-    // Alive counts at step start (after any disconnects removed players).
+  /**
+   * Advance the simulation cursor toward `min(now, roundEndsAt)` in fixed steps (plus a final
+   * partial step at the deadline), stopping as soon as the round ends. With nothing due, one
+   * zero-length step still runs so disconnects since the last tick are evaluated promptly.
+   */
+  #catchUp(now: number, maze: readonly string[]): void {
+    const deadlineMs = this.state.roundEndsAt - this.#roundStartedAt;
+    const ends = planSimulationSteps(this.#simulatedMs, now - this.#roundStartedAt, deadlineMs);
+    if (ends.length === 0) {
+      ends.push(this.#simulatedMs);
+    }
+    for (const end of ends) {
+      const dt = Math.max(0, (end - this.#simulatedMs) / 1000);
+      this.#simulatedMs = end;
+      this.#playingStep(dt, end >= deadlineMs, this.#roundStartedAt + end, maze);
+      if (this.state.phase !== "playing") {
+        return;
+      }
+    }
+  }
+
+  /** One D041 step: move → contacts on one snapshot → eliminate together → outcome. */
+  #playingStep(dt: number, deadlineReached: boolean, stepEndsAt: number, maze: readonly string[]): void {
+    // Alive counts at step start (the first step of a tick sees any disconnects since the last tick).
     const before = this.#aliveCounts();
-    const dt = Math.max(0, Math.min(SIMULATION_DT_SECONDS, (roundEndsAt - this.#lastTickAt) / 1000));
-    this.#lastTickAt = Math.min(roundEndsAt, Math.max(this.#lastTickAt, now));
     const moves: StepMove[] = [];
     this.state.players.forEach((player: PlayerState) => {
       if (!player.alive || player.team === "unassigned") {
@@ -495,13 +548,13 @@ export class GameRoom extends Room<{ state: GameState }> {
       runnersAlive: after.runner,
       huntersAliveBefore: before.hunter,
       runnersAliveBefore: before.runner,
-      deadlineReached: now >= roundEndsAt,
+      deadlineReached,
     });
     if (outcome) {
       this.state.phase = "results";
       this.state.resultWinner = outcome.winner;
       this.state.resultReason = outcome.reason;
-      this.state.resultEndedAt = outcome.reason === "timeout" ? roundEndsAt : Math.min(now, roundEndsAt);
+      this.state.resultEndedAt = Math.min(stepEndsAt, this.state.roundEndsAt);
     }
   }
 }

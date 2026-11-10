@@ -102,8 +102,12 @@ diagnostic room. Integration tests exercise it with real Colyseus SDK clients.
   cells are preferred so players start still). It runs a fixed 30 Hz simulation
   with the shared movement module and patches state about every 50 ms. When the
   countdown ends the phase becomes `playing` with `roundEndsAt` = countdown end +
-  `GAME_RULES.roundDurationMs`; movement never simulates past that deadline.
-  Teammates pass through each other.
+  `GAME_RULES.roundDurationMs`. Simulation follows round-relative server time:
+  `planSimulationSteps` catches up a delayed tick in full fixed steps
+  (`SIMULATION_STEP_MS`), carries leftover time below a step to the next tick,
+  and adds one final partial step at the deadline, so movement and contact are
+  processed up to the deadline and never beyond it. The round stops stepping as
+  soon as it ends. Teammates pass through each other.
 - **Contact and outcome (T5):** each step moves players, then checks every
   hunter × runner pair with a swept (path-aware) contact test
   (`CONTACT_DISTANCE_TILES`, 0.6 tiles) against one snapshot, so results are
@@ -222,7 +226,11 @@ incompatible-version rejection. Game-room integration tests (`game-room.test.ts`
 use an injectable fake clock and cover private-room join/failure codes, team
 selection, host-only balanced start, countdown, synchronized movement, contact
 elimination, timeout and disconnect outcomes, return to lobby, input rejection
-and rate limiting, flood disconnect, and host transfer/room disposal. Client unit
+and rate limiting, flood disconnect, and host transfer/room disposal. They also
+cover simulation catch-up: `planSimulationSteps` unit cases (full-step catch-up,
+carried leftovers, no step beyond the deadline), a delayed tick simulating all
+elapsed time, and a catch resolved in the final 100 ms across a delayed deadline
+tick. Client unit
 tests (`apps/client/src/*.test.ts`)
 cover the session model: input dedupe/sequencing/rate budgeting, pending-action
 resolution, room-code validation, interpolation, leave messages, and the
