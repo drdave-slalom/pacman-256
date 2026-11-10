@@ -1,0 +1,96 @@
+# Spec: label-driven agent pipeline on GitHub (issue → spec → build → review/QA → merge)
+
+**Status:** Draft, requested by David (2026-11-10) · **Type:** process/CI config · **Depends on:** PR #35 (D055)
+
+## Goal
+
+Run the factory SDLC on GitHub without a VS Code session. A human labels an issue,
+role agents do spec, build, review, and QA, and low-risk work merges itself.
+Humans keep two gates: spec approval and (for features/playtest work) merge.
+
+## Architecture (confirmed by David)
+
+- **Build (writer):** Copilot cloud agent, assigned through the issues API with
+  `agent_assignment.custom_agent` set to a `.github/agents` profile.
+- **Review/QA (independent, read-only):** GitHub Agentic Workflows (`gh aw`),
+  engine `copilot`, writes only through safe outputs.
+- **Glue:** plain Actions workflows driven by labels and comments.
+- **Auth:** personal repo, so a user PAT secret `COPILOT_ASSIGN_TOKEN`
+  (created by David; never committed or echoed) for Copilot assignment;
+  existing `COPILOT_GITHUB_TOKEN` for gh-aw/CLI.
+
+## Flow and label state machine
+
+| Step | Trigger | Actor | Result |
+|---|---|---|---|
+| 1. Queue | Human adds `agent:go` to an issue | `agent-dispatch.yml` | Verifies labeler has triage+ and the form has AC + validation; assigns Copilot with `custom_agent: factory-orchestrator` and instructions "spec only: write `SPEC/<id>-<slug>.md`, open a draft PR with `Closes #N`, stop". Labels: `agent:go` → `status:spec`, `agent:active`. |
+| 2. Spec gate | Human comments `/approve-spec` on the PR | `agent-gate.yml` | Verifies commenter has write+; adds `status:ready`; comments `@copilot` build instructions naming the role agent. |
+| 3. Build | `status:ready` | Copilot cloud agent | Role from the issue's `role:*` label: `role:builder`→`builder`, `role:art`→`artist`, `role:design`→`gameplay-designer`, `role:docs`→`docs-writer`; default `builder`. Implements, runs `npm run check`, fills the PR template, marks the PR ready. |
+| 4. Review + QA | PR `ready_for_review` / new push after a fix | `factory-review.md`, `factory-qa.md` (gh-aw, parallel) | Reviewer submits a PR review (approve / request changes) against the spec with `[blocker]/[should]/[nit]`. QA runs `npm ci && npm run check` plus focused tests and posts a results comment with a pass/fail marker. Label `status:review`. |
+| 5. Fix loop | Review requests changes or QA fails | `agent-gate.yml` | Adds `cycle:1`, then `cycle:2` (D050). Comments `@copilot` with blockers. After `cycle:2`, only blockers reopen work; otherwise `agent:needs-human`. |
+| 6. Merge | All gates green | `agent-gate.yml` | Eligible if the issue has `type:docs`, `type:chore`, or `follow-up` **and not** `type:feature`/`playtest`: `gh pr merge --auto --squash`. Otherwise label `agent:needs-human` and request David's review. |
+| 7. Close-out | PR merged | existing GitHub + `agent-gate.yml` | `Closes #N` closes the issue; Follow-ups section items become `follow-up` issues; remove `agent:active`. |
+
+Gates for merge: required CI (ruleset), Copilot code review completed, factory reviewer
+review = approve, QA marker = pass, no `agent:needs-human`.
+
+## Phases
+
+**Phase 0: pilot (do first; stop and report).** On one follow-up issue (a PR #35 nit):
+1. Assign Copilot via API with `custom_agent: builder`; confirm it honors the profile,
+   `AGENTS.md`, and `copilot-setup-steps.yml`.
+2. Confirm whether Copilot acts on an `@copilot` comment posted by a workflow
+   (bot/PAT identity). If not, step 5 becomes "workflow summarizes blockers; a human
+   posts one `@copilot` comment".
+3. Confirm gh-aw can load `.github/agents/pr-reviewer.agent.md` (import) or decide to
+   reference it from the workflow prompt.
+4. Confirm whether CI on Copilot PRs needs "Approve and run workflows", and record
+   the setting choice.
+Report results; adjust this spec before Phase 1.
+
+**Phase 1: build the chain** (files below). **Phase 2: docs + D056.**
+
+## Files
+
+- `.github/workflows/copilot-setup-steps.yml`: Node 22.18, `npm ci`.
+- `.github/workflows/agent-dispatch.yml`, `.github/workflows/agent-gate.yml`.
+- `.github/workflows/factory-review.md` + `.lock.yml`, `factory-qa.md` + `.lock.yml` (compiled with `gh aw compile`).
+- `.github/labels.yml`: `agent:go`, `agent:active`, `agent:needs-human`, `cycle:1`, `cycle:2`; run sync.
+- `.github/agents/factory-orchestrator.agent.md` + skill: a short "cloud mode" section (no worktrees or subagents; spec-only on dispatch; stop at the spec gate).
+- `docs/FACTORY.md`: GitHub pipeline section; `docs/DECISIONS.md`: D056 (after David confirms the final text).
+- Repo setting: allow auto-merge.
+
+## Guardrails
+
+- Only triage+ can trigger `agent:go`; only write+ can `/approve-spec`. Workflows recheck permissions via API and ignore other actors.
+- Issue/PR text is untrusted input: no `${{ }}` interpolation of user text into `run:`; gh-aw jobs stay read-only with safe outputs; no `pull_request_target` checkout of PR code.
+- Glue workflows use least-privilege `permissions:`; PAT only in the assignment step.
+- Concurrency: one active agent run per issue (`agent:active`); max open agent PRs configurable (default 3).
+- Kill switch: repo variable `AGENT_PIPELINE_ENABLED` must be `true`.
+
+## Proposed decision D056 (not yet approved)
+
+Label-driven GitHub agent pipeline per this spec. Auto-merge allowed only for
+`type:docs`, `type:chore`, and `follow-up` work after required CI, Copilot code
+review, factory reviewer approval, and QA pass; `type:feature` and `playtest` work
+needs human merge (phone/LAN validation stays human). Refines D048/D050's
+"human approval" for those low-risk types only.
+
+## Out of scope
+
+Projects board, deploy gating, Dependabot, replacing the local VS Code factory (it stays supported).
+
+## Acceptance criteria
+
+- Pilot results recorded for the four questions in Phase 0.
+- A `type:docs` issue labeled `agent:go` reaches a merged PR with only a `/approve-spec` comment from a human; the issue closes.
+- A `type:feature` issue reaches `agent:needs-human` with all gates green and is not auto-merged.
+- A non-collaborator applying labels or commenting `/approve-spec` has no effect.
+- A review blocker triggers a fix; the cycle labels stop the loop after `cycle:2` (D050).
+- With `AGENT_PIPELINE_ENABLED` unset, no workflow takes action.
+- `npm run check` passes; workflows pass `actionlint` and `gh aw compile`.
+
+## Open questions
+
+- Copilot premium-request budget per unit (each role run costs requests).
+- Whether `factory-qa` also runs a headless browser smoke (adds time; T8 territory).
