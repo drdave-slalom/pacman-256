@@ -28,19 +28,36 @@ decision history. The confirmed game rules live in `docs/GAME-CONTRACT.md`.
 
 ```text
 Ticket / spec / ask
-  → 1. Clarify (acceptance criteria)
+  → 0. Dispatch gate (implementation → spec + role agent; Lead does not implement)
+  → 1. Clarify + spec (SPEC/<task-id>-<slug>.md with acceptance criteria)
   → 2. Break down (bounded units; one executor each)
   → 3. Worktree per unit (scripts/factory-worktree.sh)
   → 4. Delegate (runtime-native subagent → narrowest role profile)
-  → 5. Review (pr-reviewer or human)
-  → 6. QA (qa-tester, when behavior must be verified)
-  → 7. Integrate + record (merge factory/<unit>, update DECISIONS.md)
+  → 5. Review (pr-reviewer, read-only; mandatory before any PR or merge)
+  → 6. QA (qa-tester, real commands; mandatory before any PR or merge)
+  → 7. Integrate + record (human approval; merge or open PR via open-pr)
+  → 8. Watch CI (gh pr checks <pr> --watch; fix via owning writer; report)
 ```
 
 ## Step-by-step
 
-1. **Clarify.** If the ask is underspecified, propose acceptance criteria or
-   a short spec before delegating. Do not skip this.
+0. **Dispatch gate (mandatory, every request).** Decide whether the ask is
+   implementation work. Implementation (application behavior, tests, build
+   config, or multi-file changes) always goes spec → role agent; the Lead does
+   not make those edits directly. Only research, read-only review, simple
+   lookups, and small non-code edits may stay direct. If subagents or the
+   needed role are unavailable, stop and ask the user; only the user may waive
+   this gate.
+
+1. **Clarify + spec.** Write one or more short specs in
+   `SPEC/<task-id>-<slug>.md`, each covering goal, scope, out-of-scope,
+   assumptions, acceptance criteria, and validation. If the ask is
+   underspecified, propose acceptance criteria and confirm before delegating.
+   Each spec is handed to the matching role agent. Before delegating, ensure
+   the spec exists at its stated path inside each assigned worktree: create
+   the worktree from a base commit containing the spec, or copy the uncommitted
+   spec from the Lead's checkout into the worktree after creation. Do not skip
+   this.
 2. **Break down.** Slice into bounded units, each with: objective/scope,
    required inputs and paths, acceptance criteria, validation commands,
    expected handoff, and an escalation boundary. One unit = one file-surface
@@ -58,28 +75,50 @@ Ticket / spec / ask
      capability with the matching `.github/agents/<role>.agent.md` profile.
      Include the complete task and context in each invocation; do not rely on
      Herdr/Pi result references. If the active Copilot harness lacks subagents,
-     use the role profile directly in a separate chat and pass the task and
-     handoff manually.
+     stop and ask the user (step 0); they may run the role profile in a
+     separate chat with the same task and handoff, or waive the gate.
    - **Herdr/Pi:** use `delegate_agent` with the matching `.pi/agents/`
      definition, pass relevant files, and forward result references exactly.
 
-   Every task must include: objective, scope, acceptance criteria, validation
-   steps, expected handoff, escalation boundary, and `WORKTREE=<abs path>`
+   Every task must include: the spec path, objective, scope, acceptance
+   criteria, validation steps, expected handoff, escalation boundary, and
+   `WORKTREE=<abs path>`
    (agents must work only inside it). Pass the full accepted handoff and
    relevant inputs to dependent Copilot subagents; with Herdr/Pi, forward its
    result reference exactly.
 
-5. **Review.** After a writer resolves, delegate `pr-reviewer` on the same
-   worktree (read-only), or review yourself. Human approval stays required
-   before integration.
+5. **Review (mandatory before any PR or merge).** After a writer resolves, delegate
+   `pr-reviewer` on the same worktree (read-only) to review the diff against
+   the spec. Human approval stays required before integration.
 
-6. **Verify.** When behavior changes, use `qa-tester` to run real commands
-   (`npm test`, `npm run typecheck`, `npm run build`, LAN smoke check) inside
-   the worktree.
+6. **QA (mandatory before any PR or merge).** Delegate `qa-tester` to verify the
+   change with real commands (`npm test`, `npm run typecheck`,
+   `npm run build`, LAN smoke check when relevant) inside the worktree.
+   Blockers from review or QA go back to the owning writer; re-run review and
+   QA on the fix.
 
-7. **Integrate + record.** As Lead: review the `factory/<unit>` branch, run
-   the build, merge into `main` (or open a PR), record the outcome in
-   `docs/DECISIONS.md`, then clean up:
+7. **Integrate + record.** As Lead, with human approval, after review and QA:
+   review the `factory/<unit>` branch and run the build. Integrate via a PR
+   with the `open-pr` skill by default; the PR body links the spec and
+   summarizes QA results, the review verdict, and the three-way reconciliation
+   of spec, change, and tests. Merge directly into `main` only with explicit
+   user approval. Record the outcome in `docs/DECISIONS.md`.
+
+8. **Watch CI.** For a PR, run `gh pr checks <pr> --watch` (it may report "no
+   checks reported" right after creation; wait and retry). For a user-approved
+   direct merge, watch the `main` push run (`ci.yml`) with
+   `gh run list --workflow ci.yml --branch main --commit <merge-sha> -L 1` and `gh run watch <run-id>`. On failure,
+   find the run ID (`gh pr checks <pr> --json name,state,link`, where the ID is
+   in the link, or `gh run list --branch <branch> --commit <head-sha> --status failure -L 1`), read
+   `gh run view <run-id> --log-failed`, dispatch code fixes to the owning
+   writer, push, and watch again. Re-run `qa-tester` (and `pr-reviewer` for
+   non-trivial fixes) on CI fixes before merge; a fix after a direct merge goes
+   through a PR or another user-approved merge. Report non-code failures (for example
+   `pr-description.yml` missing `COPILOT_GITHUB_TOKEN`, transient AI errors, or
+   generated-heading validation) to the user instead of dispatching a code
+   fix. Report the final CI status; the work is not done while CI is pending or
+   red. Only after CI is green and the PR is merged (or the direct merge's
+   `main` run is green), clean up:
 
    ```bash
    scripts/factory-worktree.sh remove <unit>
@@ -108,8 +147,16 @@ Ticket / spec / ask
 
 ## Final checks
 
+- [ ] Implementation work had a `SPEC/` spec and was done by a role agent, not
+      the Lead (or the user explicitly waived the gate).
 - [ ] Each delegated unit had a worktree, acceptance criteria, and validation.
+- [ ] `qa-tester` and `pr-reviewer` both passed before any integration; the
+      PR body links the spec and summarizes QA, review, and reconciliation.
+- [ ] CI was watched to completion; code failures were fixed by the owning
+      writer, non-code failures were reported to the user, and the final CI
+      status was reported.
 - [ ] Independent units ran in parallel; dependent work received the complete
       accepted handoff (and the Herdr/Pi result ref when applicable).
 - [ ] Writers and reviewers never shared a worktree.
-- [ ] Accepted work merged into `main`; worktrees removed; decisions recorded.
+- [ ] Accepted work integrated via PR (or user-approved merge) with green CI;
+      worktrees removed only after that; decisions recorded.
