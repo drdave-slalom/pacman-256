@@ -5,6 +5,8 @@ import {
   PROTOCOL_VERSION,
   isConnectionState,
   isProtocolCompatible,
+  parseAppRoute,
+  serializeAppRoute,
 } from "./index.ts";
 
 test("protocol compatibility requires an exact numeric version", () => {
@@ -27,6 +29,32 @@ test("connection state requires a compatible server lobby snapshot", () => {
   ]) {
     assert.equal(isConnectionState(value), false);
   }
+});
+
+test("app route hash parsing covers lobby and room views", () => {
+  assert.deepEqual(parseAppRoute(""), { view: "lobby" });
+  assert.deepEqual(parseAppRoute("#"), { view: "lobby" });
+  assert.deepEqual(parseAppRoute("#play"), { view: "lobby" });
+  assert.deepEqual(parseAppRoute("#room=ABC123"), {
+    view: "room",
+    code: "ABC123",
+  });
+  assert.deepEqual(parseAppRoute("#room=A%20B"), {
+    view: "room",
+    code: "A B",
+  });
+  assert.deepEqual(parseAppRoute("#room="), { view: "lobby" });
+  assert.deepEqual(parseAppRoute("#garbage"), { view: "lobby" });
+});
+
+test("app route serialization round-trips with the parsing", () => {
+  assert.equal(serializeAppRoute({ view: "lobby" }), "");
+  assert.equal(serializeAppRoute({ view: "room", code: "ABC123" }), "#room=ABC123");
+  assert.equal(serializeAppRoute({ view: "room", code: "A B" }), "#room=A%20B");
+  assert.deepEqual(
+    parseAppRoute(serializeAppRoute({ view: "room", code: "Q*W" })),
+    { view: "room", code: "Q*W" },
+  );
 });
 
 test("shared tuning matches the approved initial timing", () => {
