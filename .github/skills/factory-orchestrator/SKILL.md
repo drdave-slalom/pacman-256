@@ -34,7 +34,8 @@ Ticket / spec / ask
   → 3. Worktree per unit (scripts/factory-worktree.sh)
   → 4. Delegate (runtime-native subagent → narrowest role profile)
   → 5. Review (pr-reviewer, read-only; mandatory before any PR or merge)
-  → 6. QA (qa-tester, real commands; mandatory before any PR or merge)
+  → 6. QA (qa-tester, real commands; mandatory before any PR or merge;
+          fast QA may run alongside 5)
   → 7. Integrate + record (human approval; merge or open PR via open-pr)
   → 8. Watch CI (gh pr checks <pr> --watch; fix via owning writer; report)
 ```
@@ -95,7 +96,10 @@ Ticket / spec / ask
    change with real commands (`npm test`, `npm run typecheck`,
    `npm run build`, LAN smoke check when relevant) inside the worktree.
    Blockers from review or QA go back to the owning writer; re-run review and
-   QA on the fix.
+   QA on the fix. Run review and fast QA (`npm run check`, focused tests) in
+   parallel; run slow QA (browser E2E, multi-client probes) after review
+   blockers are fixed, re-running it only if its own findings are fixed. Small
+   or low-risk changes may run everything in parallel.
 
 7. **Integrate + record.** As Lead, with human approval, after review and QA:
    review the `factory/<unit>` branch and run the build. Integrate via a PR
@@ -126,7 +130,10 @@ Ticket / spec / ask
 
 ## Worktree discipline (mandatory)
 
-- One worktree per unit; one agent per worktree; never overlapping writers.
+- One worktree per unit; one writing agent per worktree; never overlapping
+  writers. A read-only reviewer may run alongside one agent in the same
+  worktree. During parallel review, `qa-tester` only runs commands and reports
+  test gaps; if QA must add tests, run it after review or in its own worktree.
 - Agents verify with `git rev-parse --show-toplevel` inside their WORKTREE and
   must not modify the primary checkout.
 - Dependencies are per-worktree (`npm ci` inside); never share node_modules.
@@ -157,6 +164,6 @@ Ticket / spec / ask
       status was reported.
 - [ ] Independent units ran in parallel; dependent work received the complete
       accepted handoff (and the Herdr/Pi result ref when applicable).
-- [ ] Writers and reviewers never shared a worktree.
+- [ ] Writers never shared a worktree; only a read-only reviewer ran alongside.
 - [ ] Accepted work integrated via PR (or user-approved merge) with green CI;
       worktrees removed only after that; decisions recorded.
