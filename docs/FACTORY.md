@@ -186,6 +186,20 @@ change lands or a decision is recorded.
 - If a definition references a disabled child, it is dropped from discovery;
   keep child definitions available.
 
+## Keeping the skill copies in sync
+
+- The `factory-orchestrator` skill is dual-located: canonical instructions in
+  `.github/skills/factory-orchestrator/SKILL.md` (GitHub Copilot), with a Pi
+  mirror at `.agents/skills/factory-orchestrator/SKILL.md`.
+- **Never edit the mirror independently.** The mirror only loads the canonical
+  file; when you change the skill, edit `.github/skills/factory-orchestrator/SKILL.md`
+  and leave the mirror untouched. Its frontmatter (`name`, `description`) must
+  stay identical to the canonical file's.
+- Both copies must stay committed together in the same change, and their
+  `description` fields must match so both tools route the skill the same way.
+
+## Validation checklist for the factory itself
+
 ## Validation checklist for the factory itself
 
 - [ ] `list_agents` shows the six role definitions (builder, pr-reviewer,
