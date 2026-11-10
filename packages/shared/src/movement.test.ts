@@ -229,3 +229,31 @@ test("reversal still applies at zero time", () => {
   assert.equal(out.queuedDirection, null);
   assert.equal(out.position.x, 1.5);
 });
+
+test("a queued turn fires at a junction even with many small steps", () => {
+  // Bug regression: with fixed small time steps the actor rarely lands exactly
+  // on a cell center, so turn detection must trigger on reaching a center
+  // rather than on frame alignment. Start at (0.5, 1.5) moving right with
+  // down queued; column 1 on row 1 opens into the interior (row 2). The turn
+  // must happen at x = 1.5, not after sailing on to the far dead end.
+  let state = stateAt(0.5, 1.5, "right", "down");
+  for (let i = 0; i < 20; i++) {
+    state = stepPlayerMove(state, 4, 0.1);
+  }
+  assert.equal(state.direction, "down");
+  assert.equal(state.queuedDirection, null);
+  assert.equal(state.position.x, 1.5); // turned at the column 1 junction
+  assert.ok(state.position.y > 1.5); // moved into the interior corridor
+});
+
+test("a queued turn at a junction is not skipped when crossing the center", () => {
+  // Start just before the column 1 junction center with down queued: the
+  // actor must stop at the center, evaluate the turn, and enter the
+  // perpendicular corridor (row 2 column 1 is open) rather than passing
+  // through and continuing straight.
+  const state = stateAt(1.47, 1.5, "right", "down");
+  const out = stepPlayerMove(state, 4, 0.1);
+  assert.equal(out.direction, "down");
+  assert.equal(out.position.x, 1.5);
+  assert.ok(out.position.y > 1.5);
+});
