@@ -89,7 +89,8 @@ Tests use Node's built-in runner and real HTTP/WebSocket connections on an
 ephemeral local port. They verify shared tuning, protocol guards, health, state
 synchronization, and incompatible-version rejection. `npm test` also runs the
 tests for the staged-documentation update script
-(`scripts/update-staged-docs.test.mjs`). No cloud account is required.
+(`scripts/update-staged-docs.test.mjs`) and the software-factory smoke tests
+(`scripts/factory-smoke.test.mjs`). No cloud account is required.
 `npm run build` emits shared/server JavaScript and client static assets.
 
 After building, `npm start` runs the compiled server. The built client is in
