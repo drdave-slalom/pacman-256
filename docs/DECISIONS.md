@@ -155,6 +155,23 @@ T1 subsequently received go-ahead in D045; later tasks remain separate.
   gzip. Optimize/measure on target phones later; viewport emulation does not prove
   physical iOS/Android compatibility or frame-rate performance.
 
+## Local software factory and worktree isolation: 2026-11-09
+
+- The team is establishing a local, agent-powered software factory (see
+  `docs/FACTORY.md`). Role-specific subagents (builder, pr-reviewer,
+  qa-tester, gameplay-designer, artist, docs-writer) are defined as project
+  Herdr agents in `.pi/agents/`, overlaying bundled definitions and loading
+  the matching `.github/skills/` role guidance.
+- Distributed agents must not conflict. Each concurrent unit of work gets its
+  own git worktree, created by `scripts/factory-worktree.sh`, on its own
+  `factory/<unit>` branch, with a separate `npm ci` (no shared node_modules).
+  Agents are instructed to operate only inside their assigned WORKTREE and to
+  verify it with `git rev-parse --show-toplevel`. Read-only roles are scoped
+  to the worktree and never write anywhere.
+- Integration remains human-gated: review the `factory/<unit>` branch, merge
+  into `main` (or open a PR), record results, then remove the worktree with
+  `scripts/factory-worktree.sh remove <unit>`.
+
 ## Maintaining this memory
 
 - Add each confirmed decision with a stable ID, date, and a short reason.
