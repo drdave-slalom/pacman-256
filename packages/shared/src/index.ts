@@ -83,6 +83,7 @@ export {
   parseDisplayName,
   parseInputRejected,
   parseJoinOptions,
+  parseReturnToLobby,
   parseSetDirection,
   parseStartMatch,
   readRequestId,
@@ -97,9 +98,13 @@ export type {
   PlayerSnapshot,
   PlayerTeam,
   QueuedDirection,
+  ReturnToLobbyMessage,
   SetDirectionMessage,
   StartMatchMessage,
 } from "./protocol.ts";
+
+export { CONTACT_DISTANCE_TILES, evaluateRoundOutcome, sweptContact } from "./round.ts";
+export type { ResultReason, ResultWinner } from "./round.ts";
 
 export { SPAWN_CORNER_INSET_TILES, findSpawnCells, spawnDirection } from "./spawn.ts";
 export type { SpawnCell, SpawnCells } from "./spawn.ts";

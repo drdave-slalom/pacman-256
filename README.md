@@ -3,11 +3,13 @@
 Original mobile-web maze-chase workshop project. T1 shipped a runnable skeleton
 (Phaser rendering, a Colyseus connection check, shared protocol/rule constants).
 T2 added a neon-styled seeded maze, continuous movement with buffered turns and
-wall collisions, and D-pad / swipe / keyboard steering. T3 adds private rooms and
+wall collisions, and D-pad / swipe / keyboard steering. T3 added private rooms and
 server-authoritative synchronized movement: create or join a room by code, pick
 teams, and the host starts a round in which every client sees every player move.
-Countdown, contact combat, pickups, and round end are later tasks (T5+); a T3
-round simply continues until players leave.
+T5 (in progress) adds a server-driven 3-second countdown, hunter-on-runner contact
+elimination, round outcomes (team elimination, timeout, simultaneous wipe,
+disconnects), and host return-to-lobby. Pickups and vulnerability reversal are
+later tasks (T7); the HUD, spectating, and results UI are T6.
 
 ## Requirements and quick start
 
@@ -35,14 +37,20 @@ is occupied rather than silently selecting a different URL.
 4. Each player picks **Hunters** or **Runners** (at most two per team).
 5. The host (the room creator, marked in the player list) sees **Start match**
    and presses it once every player has a team and the teams are balanced (1v1
-   or 2v2). The round starts immediately (no countdown yet).
+   or 2v2). The server runs a 3-second countdown (no movement or input), then the
+   round starts.
 6. Steer with the D-pad, a touch swipe on the play area, or arrow keys/WASD
    (mouse drags do not steer). Both
    windows show every player as a team-colored circle; your own player has a
    pulsing white ring. The client only sends direction intent; the server moves
-   players and the client interpolates between updates.
+   players and the client interpolates between updates. A hunter touching a runner
+   eliminates the runner; eliminated players stop moving and their input is
+   ignored. The round ends when a team is eliminated or at the 180-second deadline
+   (runners win). The host can then return everyone to the lobby (teams kept) via
+   the `returnToLobby` request; a dedicated results/return UI is T6.
 7. **Leave** returns to the join screen. When the host leaves, the
-   earliest-joined remaining player becomes host.
+   earliest-joined remaining player becomes host. Leaving during the countdown
+   that unbalances teams cancels back to the lobby.
 
 Errors are shown on the page, and the UI returns to a usable state:
 
@@ -59,7 +67,7 @@ The **Server connection check** section (below the panels) keeps the T1
 diagnostic: **Check server connection** must report `Connected: shared protocol v1, authoritative lobby state received.` and
 uses a disposable diagnostic room.
 
-## Server game room (T3)
+## Server game room (T3, extended by T5)
 
 The server registers a private game room (`GAME_ROOM`, `"game"`) next to the
 diagnostic room. Integration tests exercise it with real Colyseus SDK clients.
@@ -74,25 +82,51 @@ diagnostic room. Integration tests exercise it with real Colyseus SDK clients.
   host and balanced teams with no unassigned players. Replies are `actionResult`
   messages correlated by `requestId`. A malformed request whose `requestId`
   cannot be read gets an uncorrelated `inputRejected` instead.
+- **Countdown (T5):** `startMatch` enters `countdown` (`countdownEndsAt` =
+  start + `GAME_RULES.countdownMs`). Players are placed but cannot move, and
+  `setDirection` is rejected with `INVALID_PHASE`. If a disconnect leaves teams
+  unbalanced, the room cancels to the lobby (teams kept, round fields cleared).
 - **Play:** on start the server picks a new maze seed and round ID, syncs them to
   clients (which regenerate the maze from the seed), and places players on
   distinct spawn cells (hunters top corners, runners bottom corners; wall-adjacent
   cells are preferred so players start still). It runs a fixed 30 Hz simulation
-  with the shared movement module and patches state about every 50 ms. Players
-  pass through each other in T3.
+  with the shared movement module and patches state about every 50 ms. When the
+  countdown ends the phase becomes `playing` with `roundEndsAt` = countdown end +
+  `GAME_RULES.roundDurationMs`; movement never simulates past that deadline.
+  Teammates pass through each other.
+- **Contact and outcome (T5):** each step moves players, then checks every
+  hunter × runner pair with a swept (path-aware) contact test
+  (`CONTACT_DISTANCE_TILES`, 0.6 tiles) against one snapshot, so results are
+  order-independent. Contacted runners are eliminated (`alive: false`), stop, and
+  stay listed as spectators. `evaluateRoundOutcome` then decides, in order:
+  both teams already empty (`none/abandoned`), both emptied this step
+  (`none/simultaneousWipe`), no runners (`hunter/teamEliminated`), no hunters
+  (`runner/teamEliminated`), deadline reached (`runner/timeout`). The snapshot
+  carries `resultWinner`, `resultReason`, and `resultEndedAt`, and the phase
+  becomes `results`. Disconnects remove players before evaluation, so an emptied
+  team loses.
+- **Return to lobby (T5):** in `results`, the host sends `returnToLobby`
+  (`{ requestId }`); non-hosts get `HOST_REQUIRED`, other phases
+  `INVALID_PHASE`. Alive state, queued directions, maze seed, round ID, and all
+  countdown/deadline/result fields reset; connected players and teams are kept.
 - **Input:** `setDirection` is checked for payload, phase, round ID, and sequence.
-  Malformed, out-of-phase, and stale-round input is rejected with
-  `inputRejected`; repeated or older sequences are silently dropped. Input over
-  20 per second is dropped, with at most one `RATE_LIMITED` notice per second. A client sending more than 60 messages per second is
-  disconnected; other players are unaffected.
+  Malformed, out-of-phase (countdown, results, or an eliminated sender), and
+  stale-round input is rejected with `inputRejected`; repeated or older sequences
+  are silently dropped. Input over 20 per second is dropped, with at most one
+  `RATE_LIMITED` notice per second. A client sending more than 60 messages per
+  second is disconnected; other players are unaffected.
 - **Leave:** host transfers to the earliest-joined remaining player; Colyseus
   disposes empty rooms.
+- **Test hooks:** `createGameServer` accepts trusted `clock` and `spawnPlacer`
+  options (alongside `mazeSeedSource`) so tests can drive phase deadlines and
+  force contacts. Production rooms use `Date.now` and default spawns.
 
 ## Client (T3)
 
 - `apps/client/src/main.ts` owns the DOM flow (join, lobby, game panels), the
   Colyseus connection, and the single direction-request path shared by D-pad,
-  swipe, and keyboard. Input outside an active round is dropped. The Phaser game
+  swipe, and keyboard. Input outside an active round, or from a player who is not
+  alive (spectating), is dropped. The Phaser game
   exists only during a round, so key capture never blocks typing in forms.
 - `apps/client/src/maze-scene.ts` renders the server-seeded maze and interpolated
   players; it never moves players itself.
@@ -164,12 +198,15 @@ npm run check
 
 Tests use Node's built-in runner and real HTTP/WebSocket connections on an
 ephemeral local port. They verify shared tuning, protocol guards and validators
-(display names, join options, room messages, error-code mapping), spawn-cell
-placement across many maze seeds, health, state synchronization, and
+(display names, join options, room messages including `returnToLobby`, error-code
+mapping), spawn-cell placement across many maze seeds, swept contact and round
+outcome rules (`round.test.ts`), health, state synchronization, and
 incompatible-version rejection. Game-room integration tests (`game-room.test.ts`)
-cover private-room join/failure codes, team selection, host-only balanced start,
-synchronized movement, input rejection and rate limiting, flood disconnect, and
-host transfer/room disposal. Client unit tests (`apps/client/src/*.test.ts`)
+use an injectable fake clock and cover private-room join/failure codes, team
+selection, host-only balanced start, countdown, synchronized movement, contact
+elimination, timeout/disconnect/wipe outcomes, return to lobby, input rejection
+and rate limiting, flood disconnect, and host transfer/room disposal. Client unit
+tests (`apps/client/src/*.test.ts`)
 cover the session model: input dedupe/sequencing/rate budgeting, pending-action
 resolution, room-code validation, interpolation, and leave messages. The DOM and
 Phaser wiring in `main.ts`/`maze-scene.ts` has no automated tests. `npm test`
@@ -220,7 +257,7 @@ in GitHub branch protection/rulesets; the workflow alone does not enforce that.
 |---|---|
 | [apps/client](./apps/client/) | Phaser/Vite browser client (join/lobby/game UI, maze scene), session model, and local proxy |
 | [apps/server](./apps/server/) | Colyseus server, diagnostic room, private game room, and integration tests |
-| [packages/shared](./packages/shared/) | Browser/server protocol (room messages, validators, error codes), types, maze/spawn logic, and approved tuning |
+| [packages/shared](./packages/shared/) | Browser/server protocol (room messages, validators, error codes), types, maze/spawn logic, contact/round-outcome rules, and approved tuning |
 | [Game contract](./docs/GAME-CONTRACT.md) | Approved behavior and interface baseline |
 | [Decision log](./docs/DECISIONS.md) | Durable team decisions and implementation context |
 | [Delivery plan](./DELIVERY-PLAN.md) | Task boundaries and milestones |

@@ -161,11 +161,11 @@ function stopRenderer(): void {
 
 /**
  * The single direction-request path for the HTML D-pad, swipe, and keyboard.
- * Input outside an active round is dropped; the sender dedupes, sequences, and
+ * Input outside an active round or from a non-alive (spectating) player is dropped; the sender dedupes, sequences, and
  * budgets it.
  */
 function sendDirection(direction: Direction): void {
-  if (!room || !snapshot || !isRoundActive(snapshot)) {
+  if (!room || !snapshot || !isRoundActive(snapshot) || !snapshot.players[room.sessionId]?.alive) {
     return;
   }
   const message = directionSender.next(snapshot.roundId, direction, performance.now());
@@ -182,7 +182,7 @@ function scheduleHeldDirection(): void {
   }
   heldDirectionTimer = window.setTimeout(() => {
     heldDirectionTimer = undefined;
-    if (!room || !snapshot || !isRoundActive(snapshot)) {
+    if (!room || !snapshot || !isRoundActive(snapshot) || !snapshot.players[room.sessionId]?.alive) {
       return;
     }
     const message = directionSender.flush(snapshot.roundId, performance.now());

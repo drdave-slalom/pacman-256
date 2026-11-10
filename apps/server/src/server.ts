@@ -6,11 +6,15 @@ import { WebSocketTransport } from "@colyseus/ws-transport";
 import express from "express";
 import { CONNECTION_ROOM, GAME_ROOM, PROTOCOL_VERSION } from "@maze/shared";
 import { ConnectionRoom } from "./connection-room.ts";
-import { GameRoom, gameRoomWithSeedSource, type MazeSeedSource } from "./game-room.ts";
+import { GameRoom, gameRoomWith, type Clock, type MazeSeedSource, type SpawnPlacer } from "./game-room.ts";
 
 export interface GameServerOptions {
   /** Trusted server-side maze seed source (tests); defaults to a random uint32. */
   mazeSeedSource?: MazeSeedSource;
+  /** Trusted server-side clock (tests); defaults to Date.now. */
+  clock?: Clock;
+  /** Trusted spawn placement hook (tests only). */
+  spawnPlacer?: SpawnPlacer;
 }
 
 export function createGameServer(options: GameServerOptions = {}) {
@@ -32,7 +36,9 @@ export function createGameServer(options: GameServerOptions = {}) {
   server.define(CONNECTION_ROOM, ConnectionRoom);
   server.define(
     GAME_ROOM,
-    options.mazeSeedSource ? gameRoomWithSeedSource(options.mazeSeedSource) : GameRoom,
+    options.mazeSeedSource || options.clock || options.spawnPlacer
+      ? gameRoomWith({ seedSource: options.mazeSeedSource, clock: options.clock, spawnPlacer: options.spawnPlacer })
+      : GameRoom,
   );
   return { server, httpServer };
 }
