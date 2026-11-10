@@ -5,9 +5,18 @@
   color-scheme: dark;
 }
 
+html,
+body {
+  height: 100%;
+}
+
 body {
   margin: 0;
   padding: 1rem;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 main {
@@ -18,10 +27,13 @@ main {
 #game {
   width: 100%;
   margin: 1.5rem 0;
+  touch-action: none;
 }
 
 canvas {
   display: block;
+  touch-action: none;
+  max-width: 100%;
 }
 
 button {

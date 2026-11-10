@@ -75,6 +75,7 @@ decisions below instead of the delivery plan's initial gameplay proposals.
 | D043 | David coordinates the shared contract; Chase reviews it. | Flexible implementation lanes remain unchanged. Proposed wire fields and technical tuning are not automatically approved by assigning ownership. |
 | D044 | Team reported draft reviewed and approved the [game contract](./GAME-CONTRACT.md) as the shared baseline on 2026-11-09. T0 is complete. | Includes lobby-only admission, all-phase host transfer, explicit leave/disconnect equivalence, interface/state/error proposals, and tunable simulation starting points. Unspecified geometry/limits, task assignments, device matrix, and performance measurement remain follow-ups. Approval of the document is not a separate go-ahead to build the app. |
 | D045 | Team explicitly authorized T1, the runnable skeleton, on 2026-11-09. | Scope: client/server/shared workspace, local startup, build/typecheck/tests, and local phone-access instructions. Does not authorize matchmaking/gameplay tasks or cloud deployment. |
+| D046 | T2 (one maze + touch movement) implemented and validated for team review on 2026-11-10. Decisions: dual touch controls (on-screen D-pad and swipe/drag steering); one fixed 15×11 compact rectilinear maze (original layout); shared map plus a pure continuous-movement/buffered-turn module in `packages/shared` for reuse by the authoritative server; the client drives a locally authoritative prototype only (server movement is T3). | Validation: `npm run check` green; 26 top-level tests (5 map + 17 movement new; 3 shared index; 1 server with 3 subtests); dev-server smoke served the prototype page and /health protocol v1; no server files changed. Independent internal review found no blockers. Follow-ups: physical-phone feel pass (swipe threshold, D-pad reachability, snap-on-wall-turn hop, scroll/page-fit), browser rendering visual pass, accessibility backlogs. |
 
 ### Current combat summary
 
@@ -154,6 +155,26 @@ T1 subsequently received go-ahead in D045; later tasks remain separate.
 - Nonblocking warning: Phaser's client bundle is about 1.54 MB minified / 411 KB
   gzip. Optimize/measure on target phones later; viewport emulation does not prove
   physical iOS/Android compatibility or frame-rate performance.
+
+## T2 implementation context (not new gameplay decisions)
+
+- T2 adds the first gameplay slice in the client: the one shared maze (15×11,
+  compact rectilinear corridors, original layout) rendered from
+  `packages/shared/src/map.ts`, and touch movement driven by a pure shared
+  module (`movement.ts`) implementing approved D018/D040 semantics: continuous
+  motion, buffered turns at legal turn points, wall/bounds blocking, and
+  release does not stop movement.
+- Touch controls: on-screen D-pad (four buttons) and swipe/drag anywhere on the
+  play area both queue directions through the same path. Mobile anti-scroll:
+  `touch-action:none`, `preventDefault` on touchmove, `overscroll-behavior`,
+  and user-select off. Physical-phone feel is unverified.
+- Server/synchronized movement (T3) is intentionally out of scope; no server
+  files changed. The shared movement module is written to be reused by the
+  authoritative server when T3 lands.
+- Reviewer note: reversal applies immediately anywhere (not gated to junctions);
+  the contract lists buffered-reversal-between-junctions as still-open, so
+  confirm it during T3. Snap-on-wall-turn shifts the actor half a tile when
+  turning from a blocked wall boundary (intended; needs a device feel-check).
 
 ## Maintaining this memory
 
