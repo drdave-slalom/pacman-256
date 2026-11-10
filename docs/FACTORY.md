@@ -98,7 +98,12 @@ These apply to every request without the user restating them (D048):
    fixes blockers, then both re-verify. Run review and fast QA (`npm run
    check`, focused tests) in parallel; run slow QA (browser E2E, multi-client
    probes) after review blockers are fixed, re-running it only if its own
-   findings are fixed. Small or low-risk changes may run everything in parallel. Integrate via PR by default; merge
+   findings are fixed. Small or low-risk changes may run everything in parallel.
+   At most two review/fix cycles per unit (D050; a cycle is one review/QA pass
+   plus its fixes); from the third pass on only blockers
+   (failed acceptance criterion, crash/data integrity, security, regression)
+   reopen work, each with one targeted fix re-checked alone. Other findings
+   become PR follow-ups. CI failures are always fixed. Integrate via PR by default; merge
    directly into `main` only with explicit user approval. The PR body links the
    spec and summarizes QA results, the review verdict, and the three-way
    reconciliation of spec, change, and tests.
