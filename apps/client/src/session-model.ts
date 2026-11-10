@@ -23,6 +23,26 @@ export function isRoundActive(snapshot: GameRoomSnapshot): boolean {
   return snapshot.phase === "playing" && snapshot.roundId !== "";
 }
 
+const RESULT_LINES: Record<string, string> = {
+  "hunter:teamEliminated": "Hunters win: all runners eliminated.",
+  "runner:teamEliminated": "Runners win: all hunters eliminated.",
+  "runner:timeout": "Runners win: survived to the deadline.",
+  "none:simultaneousWipe": "Draw: both teams eliminated at once.",
+  "none:abandoned": "no winner: all players left.",
+};
+
+/**
+ * One-line round result from the server's `resultWinner`/`resultReason`
+ * (never inferred locally); `null` unless the room is in `results`.
+ */
+export function resultSummary(snapshot: GameRoomSnapshot): string | null {
+  if (snapshot.phase !== "results") {
+    return null;
+  }
+  const line = RESULT_LINES[`${snapshot.resultWinner}:${snapshot.resultReason}`];
+  return line ? `Round over: ${line}` : "Round over.";
+}
+
 /** Identity of the maze to render; changes whenever the round or seed changes. */
 export function mazeKey(snapshot: GameRoomSnapshot): string | null {
   return isRoundActive(snapshot) ? `${snapshot.roundId}:${snapshot.mazeSeed}` : null;

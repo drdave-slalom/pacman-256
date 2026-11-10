@@ -51,8 +51,16 @@ Disconnect outcomes are defined. No pickups or vulnerability yet (T7).
 - **Test hooks:** `gameRoomWith({ seedSource, clock, spawnPlacer })` is reachable only from
   trusted server code (`createGameServer` options), never from client join options.
 - **Client:** eliminated players stop sending `setDirection`. No other UI changes.
-- **Deferred to T6:** the client has no `returnToLobby` control yet. In `results` the host
-  sees the lobby view, and Start is rejected with `INVALID_PHASE`.
+- **Minimal results control (added at David's request, 2026-11-10):** without it, a room
+  can't start a second round. In `results`, the lobby view:
+  - shows a one-line server result (winner and reason, for example "Round over: Hunters
+    win — all runners eliminated.");
+  - hides Start and the team buttons;
+  - shows the host a **Back to lobby** button that sends `returnToLobby` through the
+    existing pending-action flow (a correlated `actionResult` with visible errors);
+  - tells non-hosts that they are waiting for the host.
+
+  The full HUD, spectating view, and results screen remain T6.
 - **Unit-level only:**
   - The deadline-step contact, `simultaneousWipe`, and `abandoned` are covered only by
     unit tests.
@@ -143,7 +151,8 @@ State machine (contract §1): `lobby → countdown → playing → results → l
     `INVALID_PHASE`, accepted → lobby with all alive, teams kept, round/result
     cleared; a new `startMatch` works and old-round inputs get `STALE_ROUND`.
 11. Existing T3 tests and the T3/T4 client still pass; the client does not crash on
-    countdown/results phases.
+    countdown/results phases. In `results` the host can return everyone to the lobby
+    from the client, and every player sees the server-reported result.
 12. `npm run check` (typecheck, tests, build) passes.
 
 ## Validation

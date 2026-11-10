@@ -48,8 +48,11 @@ is occupied rather than silently selecting a different URL.
    updates. A hunter touching a runner
    eliminates the runner; eliminated players stop moving and their input is
    ignored. The round ends when a team is eliminated or at the 180-second deadline
-   (runners win). The host can then return everyone to the lobby (teams kept) via
-   the `returnToLobby` request; a dedicated results/return UI is T6.
+   (runners win). In the results phase the lobby panel shows a one-line result
+   taken from the server's `resultWinner`/`resultReason` (never inferred locally),
+   and the host gets a **Back to lobby** button that sends `returnToLobby` (teams
+   kept); non-hosts see the result and wait for the host. Team buttons and Start
+   are hidden outside the lobby phase. The full results UI is T6.
 7. **Leave** returns to the join screen. When the host leaves, the
    earliest-joined remaining player becomes host. Leaving during the countdown
    that unbalances teams cancels back to the lobby.
@@ -141,10 +144,13 @@ diagnostic room. Integration tests exercise it with real Colyseus SDK clients.
   players as ghost mascots (domed body, scalloped feet, eyes that glance along
   the direction of travel); it never moves players itself.
 - `apps/client/src/session-model.ts` holds pure, unit-tested helpers (no
-  DOM/Phaser): round detection and snapshot mapping; `DirectionSender` (sends
+  DOM/Phaser): round detection and snapshot mapping; `resultSummary` (one-line
+  round result from the server's winner/reason, `null` outside `results`);
+  `DirectionSender` (sends
   only direction changes, sequences from 0 per round, and stays within a
   16-per-second budget below the server limit, holding the latest change while
-  over budget); `PendingAction` (one in-flight `chooseTeam`/`startMatch` until
+  over budget); `PendingAction` (one in-flight
+  `chooseTeam`/`startMatch`/`returnToLobby` until
   its reply, an uncorrelated `INVALID_INPUT`, or a timeout); room-code checks;
   interpolation; and player-facing disconnect messages.
 
@@ -219,7 +225,8 @@ elimination, timeout and disconnect outcomes, return to lobby, input rejection
 and rate limiting, flood disconnect, and host transfer/room disposal. Client unit
 tests (`apps/client/src/*.test.ts`)
 cover the session model: input dedupe/sequencing/rate budgeting, pending-action
-resolution, room-code validation, interpolation, and leave messages. The DOM and
+resolution, room-code validation, interpolation, leave messages, and the
+result-summary lines. The DOM and
 Phaser wiring in `main.ts`/`maze-scene.ts` has no automated tests. `npm test`
 also runs the tests for the staged-documentation update script
 (`scripts/update-staged-docs.test.mjs`) and the software-factory smoke tests

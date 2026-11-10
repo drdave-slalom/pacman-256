@@ -13,6 +13,7 @@ import {
   leaveMessage,
   mazeKey,
   playerViews,
+  resultSummary,
 } from "./session-model.ts";
 
 function player(id: string, overrides: Partial<PlayerSnapshot> = {}): PlayerSnapshot {
@@ -240,4 +241,28 @@ test("leave messages explain unexpected disconnects only", () => {
   assert.equal(leaveMessage(1006, true), null);
   assert.match(leaveMessage(CLOSE_WITH_ERROR, false) ?? "", /too many messages/);
   assert.match(leaveMessage(1006, false) ?? "", /code 1006/);
+});
+
+test("result summary is null outside the results phase", () => {
+  for (const phase of ["lobby", "countdown", "playing"] as const) {
+    assert.equal(resultSummary(snapshot({ phase, resultWinner: "hunter", resultReason: "teamEliminated" })), null);
+  }
+});
+
+test("result summary reports the server winner and reason", () => {
+  const cases = [
+    ["hunter", "teamEliminated", "Round over: Hunters win: all runners eliminated."],
+    ["runner", "teamEliminated", "Round over: Runners win: all hunters eliminated."],
+    ["runner", "timeout", "Round over: Runners win: survived to the deadline."],
+    ["none", "simultaneousWipe", "Round over: Draw: both teams eliminated at once."],
+    ["none", "abandoned", "Round over: no winner: all players left."],
+  ] as const;
+  for (const [resultWinner, resultReason, expected] of cases) {
+    assert.equal(resultSummary(snapshot({ phase: "results", resultWinner, resultReason })), expected);
+  }
+});
+
+test("result summary falls back to a generic line for empty or unexpected fields", () => {
+  assert.equal(resultSummary(snapshot({ phase: "results", resultWinner: "", resultReason: "" })), "Round over.");
+  assert.equal(resultSummary(snapshot({ phase: "results", resultWinner: "hunter", resultReason: "timeout" })), "Round over.");
 });
