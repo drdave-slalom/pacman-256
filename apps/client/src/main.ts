@@ -77,6 +77,7 @@ class MazeScene extends Phaser.Scene {
   private playerState = createPlayerMoveState();
   private dragPointerId: number | null = null;
   private dragAccum = { x: 0, y: 0 };
+  private dragLast = { x: 0, y: 0 };
 
   create(): void {
     const seed = (Math.random() * 0x100000000) >>> 0;
@@ -173,7 +174,24 @@ class MazeScene extends Phaser.Scene {
   }
 
   private setupSwipeSteering(): void {
+    const isTouchPointer = (pointer: Phaser.Input.Pointer): boolean => {
+      const event = pointer.event as Partial<PointerEvent> | undefined;
+      if (event?.pointerType) {
+        return event.pointerType === "touch";
+      }
+      if (event?.type) {
+        return event.type.startsWith("touch");
+      }
+      // Pointer Events spec: the mouse pointer id is always 0; touch ids are
+      // browser-assigned and non-zero.
+      return pointer.pointerId !== 0;
+    };
+
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      // Swipe steering is touch-only; the mouse never steers the player.
+      if (!isTouchPointer(pointer)) {
+        return;
+      }
       const overPad = this.input
         .hitTestPointer(pointer)
         .some((target) => target.getData("dpad") === true);
@@ -182,14 +200,21 @@ class MazeScene extends Phaser.Scene {
       }
       this.dragPointerId = pointer.pointerId;
       this.dragAccum = { x: 0, y: 0 };
+      this.dragLast = { x: pointer.x, y: pointer.y };
     });
 
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
       if (pointer.pointerId !== this.dragPointerId) {
         return;
       }
-      this.dragAccum.x += pointer.movementX;
-      this.dragAccum.y += pointer.movementY;
+      if (!isTouchPointer(pointer)) {
+        return;
+      }
+      // Phaser's pointer.movementX/Y are only populated while the mouse is
+      // pointer-locked, so compute deltas from the pointer's own coordinates.
+      this.dragAccum.x += pointer.x - this.dragLast.x;
+      this.dragAccum.y += pointer.y - this.dragLast.y;
+      this.dragLast = { x: pointer.x, y: pointer.y };
       const steer = dominantAxis(this.dragAccum);
       if (steer) {
         this.queueMovement(steer);
@@ -197,12 +222,14 @@ class MazeScene extends Phaser.Scene {
       }
     });
 
-    this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
+    const endDrag = (pointer: Phaser.Input.Pointer) => {
       if (pointer.pointerId === this.dragPointerId) {
         this.dragPointerId = null;
         this.dragAccum = { x: 0, y: 0 };
       }
-    });
+    };
+    this.input.on("pointerup", endDrag);
+    this.input.on("pointercancel", endDrag);
   }
 
   private setupDpad(): void {
