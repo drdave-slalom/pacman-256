@@ -2,15 +2,23 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
     <meta name="theme-color" content="#10172b" />
-    <title>Maze Workshop - Connection Check</title>
+    <title>Maze Workshop - Maze + Touch Prototype</title>
   </head>
   <body>
     <main>
       <h1>Maze Workshop</h1>
-      <p>T1 connection check. Gameplay and private rooms come next.</p>
-      <div id="game" aria-label="Game rendering preview"></div>
+      <p>
+        T2 prototype: a new maze is generated every game. Steer with the
+        on-screen D-pad or swipe on the maze. Arrow keys / WASD also work.
+        The connection check is below.
+      </p>
+      <div id="game" aria-label="Maze movement prototype"></div>
+      <p id="seed" role="status" aria-live="polite"></p>
       <button id="connect" type="button">Check server connection</button>
       <p id="status" role="status" aria-live="polite">Ready to connect.</p>
     </main>

@@ -1,8 +1,12 @@
 # Maze Workshop
 
-Original mobile-web maze-chase workshop project. T1 provides a runnable skeleton,
-not a playable game: Phaser rendering, a Colyseus connection check, and shared
-protocol/rule constants. Private rooms, movement, and combat are later tasks.
+Original mobile-web maze-chase workshop project. T1 shipped a runnable skeleton
+(Phaser rendering, a Colyseus connection check, shared protocol/rule constants).
+T2 adds the first gameplay slice in the client: a neon-styled maze generated at
+the start of every game (seeded, deterministic), continuous movement with
+buffered turns and wall collisions, and D-pad / swipe / keyboard steering.
+Private rooms, synchronized multiplayer movement, and combat remain later tasks
+(T3+).
 
 ## Requirements and quick start
 
@@ -16,11 +20,12 @@ npm ci
 npm run dev
 ```
 
-Open **http://localhost:5173**. You should see a rendered preview and a
-**Check server connection** button. Clicking it must report:
-`Connected: shared protocol v1, authoritative lobby state received.`
-The check creates a disposable diagnostic room and leaves it; it does not create
-a playable private match.
+Open **http://localhost:5173**. You should see a newly generated neon maze with
+a player blob you can steer (D-pad, swipe, or arrow keys/WASD; a maze seed is
+shown for reproducibility). A **Check server connection** button remains below:
+clicking it must report `Connected: shared protocol v1, authoritative lobby
+state received.` The check creates a disposable diagnostic room and leaves it;
+it does not create a playable private match.
 
 One command starts shared-package compilation in watch mode, the server, and Vite.
 Press Ctrl+C to stop all three. The client port is strict: startup fails if 5173

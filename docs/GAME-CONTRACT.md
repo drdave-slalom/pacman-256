@@ -67,6 +67,13 @@ per-connection rate limits; exact limits require review.
 |---|---|
 | Room | protocol version, room ID/code, host player ID, phase, monotonically increasing state revision |
 | Round | unique round ID, map ID/version, countdown end, start/deadline, global vulnerability end, vulnerability pickup respawn time |
+
+> **Map generation (amendment, D047):** the single fixed maze of D019 is
+> superseded for the MVP by a deterministic, seeded generator
+> (`packages/shared/src/maze-gen.ts`). The client generates a random-seeded
+> 21×19 maze per game today; the server will own the per-round seed and
+> regenerate the identical map (same algorithm, same seed). The static
+> `MAZE_MAP` remains the default/fallback. Corridors stay one tile wide.
 | Player | server ID, display name, team/unassigned in lobby, alive status, position, current direction, queued direction, speed/shield deadlines, last processed input sequence |
 | Pickup | stable ID, kind (`speed`, `shield`, `vulnerability`), cell, active/consumed state, next eligible spawn time |
 | Result | winning team or no winner; reason (`teamEliminated`, `timeout`, `simultaneousWipe`, `abandoned`), end time |

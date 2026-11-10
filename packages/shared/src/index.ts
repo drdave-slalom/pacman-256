@@ -36,3 +36,23 @@ export const GAME_RULES = {
   standardPickupRespawnMs: 15_000,
   vulnerabilityRespawnDelayMs: 10_000,
 } as const;
+
+export {
+  MAZE_WIDTH,
+  MAZE_HEIGHT,
+  MAZE_MAP,
+  PLAYER_SPAWN,
+  isInside,
+  isInsideIn,
+  isWalkable,
+  isWalkableIn,
+} from "./map.ts";
+
+export {
+  DEFAULT_MOVE_SPEED_TILES_PER_SECOND,
+  createPlayerMoveState,
+  stepPlayerMove,
+} from "./movement.ts";
+export type { PlayerMoveState, Vec2 } from "./movement.ts";
+
+export { findSpawnCell, generateMaze } from "./maze-gen.ts";
