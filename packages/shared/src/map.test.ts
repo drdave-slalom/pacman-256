@@ -10,8 +10,8 @@ import {
 } from "./map.ts";
 
 test("maze grid has the approved dimensions", () => {
-  assert.equal(MAZE_WIDTH, 15);
-  assert.equal(MAZE_HEIGHT, 15);
+  assert.equal(MAZE_WIDTH, 21);
+  assert.equal(MAZE_HEIGHT, 19);
   assert.equal(MAZE_MAP.length, MAZE_HEIGHT);
   for (const row of MAZE_MAP) {
     assert.equal(row.length, MAZE_WIDTH);
@@ -20,11 +20,11 @@ test("maze grid has the approved dimensions", () => {
 
 test("map helpers accept only integer cells inside the grid", () => {
   assert.equal(isInside(0, 0), true);
-  assert.equal(isInside(14, 14), true);
+  assert.equal(isInside(20, 18), true);
   assert.equal(isInside(-1, 0), false);
-  assert.equal(isInside(15, 0), false);
+  assert.equal(isInside(21, 0), false);
   assert.equal(isInside(0, -1), false);
-  assert.equal(isInside(0, 15), false);
+  assert.equal(isInside(0, 19), false);
   assert.equal(isInside(1.5, 1), false);
   assert.equal(isInside(1, 1.5), false);
 });
@@ -40,8 +40,9 @@ test("border walls and interior corridors are encoded consistently", () => {
   }
   assert.equal(isWalkable(1, 1), true);
   assert.equal(isWalkable(13, 9), true);
+  assert.equal(isWalkable(2, 2), false);
   assert.equal(isWalkable(-1, 5), false);
-  assert.equal(isWalkable(5, 15), false);
+  assert.equal(isWalkable(5, 19), false);
 });
 
 test("spawn cell is inside the maze and walkable", () => {

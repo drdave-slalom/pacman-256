@@ -49,9 +49,9 @@ test("a short step advances partway through an open cell", () => {
 test("actors never exit the maze bounds (stopping centered)", () => {
   const cases: Array<{ start: [number, number]; direction: Direction; axis: "x" | "y"; center: number }> = [
     { start: [1.5, 1.5], direction: "up", axis: "y", center: 1.5 },
-    { start: [1.5, 8.5], direction: "down", axis: "y", center: 13.5 },
+    { start: [1.5, 8.5], direction: "down", axis: "y", center: 17.5 },
     { start: [1.5, 1.5], direction: "left", axis: "x", center: 1.5 },
-    { start: [13.5, 1.5], direction: "right", axis: "x", center: 13.5 },
+    { start: [19.5, 1.5], direction: "right", axis: "x", center: 19.5 },
   ];
   for (const c of cases) {
     const out = stepPlayerMove(stateAt(c.start[0], c.start[1], c.direction), 4, 10);
