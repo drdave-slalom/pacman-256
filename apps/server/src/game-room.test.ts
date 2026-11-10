@@ -8,6 +8,7 @@ import {
   GAME_ROOM,
   GAME_RULES,
   INPUT_RATE_LIMIT_MAX_MESSAGES,
+  MAZE_HEIGHT,
   MAX_CLIENT_MESSAGES_PER_SECOND,
   PROTOCOL_VERSION,
   SERVER_MESSAGES,
@@ -279,7 +280,7 @@ test("AC2: join failures reach the SDK with mappable codes", { timeout: 20_000 }
   });
 });
 
-test("AC3: chooseTeam enforces capacity and phase with correlated results", { timeout: 15_000 }, async (t) => {
+test("AC3: chooseTeam enforces phase with correlated results; no team cap", { timeout: 15_000 }, async (t) => {
   const harness = await startServer(t);
   const a = await harness.create("A");
   const b = await harness.join(a.room.roomId, "B");
@@ -288,7 +289,7 @@ test("AC3: chooseTeam enforces capacity and phase with correlated results", { ti
   expectAccepted(await a.request("chooseTeam", { team: "hunter" }));
   expectAccepted(await a.request("chooseTeam", { team: "hunter" })); // re-choosing is accepted
   expectAccepted(await b.request("chooseTeam", { team: "hunter" }));
-  expectRejected(await c.request("chooseTeam", { team: "hunter" }), "TEAM_FULL");
+  expectAccepted(await c.request("chooseTeam", { team: "hunter" })); // third hunter allowed (no TEAM_FULL)
   expectRejected(await c.request("chooseTeam", { team: "ghost" }), "INVALID_INPUT");
   c.room.send(CLIENT_MESSAGES.chooseTeam, { team: "runner" });
   assert.equal((await c.nextRejection()).code, "INVALID_INPUT", "uncorrelatable request -> inputRejected");
@@ -303,19 +304,69 @@ test("AC3: chooseTeam enforces capacity and phase with correlated results", { ti
   expectRejected(await a.request("chooseTeam", { team: "runner" }), "INVALID_PHASE");
 });
 
-test("AC4: startMatch requires host and balanced teams; 2v2 starts with distinct spawns", { timeout: 15_000 }, async (t) => {
+test("AC4: startMatch requires host and every player assigned; 2v1 starts", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t);
+  const a = await harness.create("A");
+  const b = await harness.join(a.room.roomId, "B");
+  const c = await harness.join(a.room.roomId, "C");
+  expectRejected(await b.request("startMatch", {}), "HOST_REQUIRED");
+  expectRejected(await a.request("startMatch", {}), "INVALID_INPUT"); // nobody picked yet
+  expectAccepted(await a.request("chooseTeam", { team: "hunter" }));
+  expectRejected(await a.request("startMatch", {}), "INVALID_INPUT"); // empty runner side
+  expectAccepted(await b.request("chooseTeam", { team: "hunter" }));
+  expectRejected(await a.request("startMatch", {}), "INVALID_INPUT"); // empty runner side
+  expectAccepted(await c.request("chooseTeam", { team: "runner" }));
+  expectRejected(await b.request("startMatch", {}), "HOST_REQUIRED");
+  // 2v1 with all players assigned starts: no equal-count requirement.
+  expectAccepted(await a.request("startMatch", {}));
+  harness.advance(GAME_RULES.countdownMs);
+  const state = await c.waitFor((s) => s.phase === "playing", "playing");
+  const hunters = Object.values(state.players).filter((p) => p.team === "hunter");
+  const runners = Object.values(state.players).filter((p) => p.team === "runner");
+  assert.equal(hunters.length, 2);
+  assert.equal(runners.length, 1);
+  const maze = generateMaze(state.mazeSeed);
+  const cells = [...hunters, ...runners].map((p) => `${p.x},${p.y}`);
+  assert.equal(new Set(cells).size, 3, "assigned spawns must be distinct");
+  for (const player of [...hunters, ...runners]) {
+    assert.ok(isWalkableIn(maze, Math.floor(player.x), Math.floor(player.y)));
+    assert.equal(player.lastInputSequence, -1);
+  }
+  expectRejected(await a.request("startMatch", {}), "INVALID_PHASE");
+});
+
+test("AC4: start with an unassigned player present is rejected", { timeout: 15_000 }, async (t) => {
   const harness = await startServer(t);
   const a = await harness.create("A");
   const b = await harness.join(a.room.roomId, "B");
   const c = await harness.join(a.room.roomId, "C");
   const d = await harness.join(a.room.roomId, "D");
-  expectRejected(await b.request("startMatch", {}), "HOST_REQUIRED");
-  expectRejected(await a.request("startMatch", {}), "TEAMS_UNBALANCED");
   expectAccepted(await a.request("chooseTeam", { team: "hunter" }));
   expectAccepted(await b.request("chooseTeam", { team: "hunter" }));
   expectAccepted(await c.request("chooseTeam", { team: "runner" }));
-  expectRejected(await a.request("startMatch", {}), "TEAMS_UNBALANCED"); // D unassigned
-  expectRejected(await a.request("startMatch", { phase: "playing" }), "INVALID_INPUT");
+  // D never picked: start must be rejected and the lobby phase preserved.
+  expectRejected(await a.request("startMatch", {}), "INVALID_INPUT");
+  assert.equal(a.snapshot().phase, "lobby");
+  // Once D picks, the same all-assigned roster starts.
+  expectAccepted(await d.request("chooseTeam", { team: "runner" }));
+  expectAccepted(await a.request("startMatch", {}));
+  harness.advance(GAME_RULES.countdownMs);
+  const state = await c.waitFor((s) => s.phase === "playing", "playing");
+  const hunters = Object.values(state.players).filter((p) => p.team === "hunter");
+  const runners = Object.values(state.players).filter((p) => p.team === "runner");
+  assert.equal(hunters.length, 2);
+  assert.equal(runners.length, 2);
+});
+
+test("AC4: balanced 2v2 starts with distinct spawns", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t);
+  const a = await harness.create("A");
+  const b = await harness.join(a.room.roomId, "B");
+  const c = await harness.join(a.room.roomId, "C");
+  const d = await harness.join(a.room.roomId, "D");
+  expectAccepted(await a.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await b.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await c.request("chooseTeam", { team: "runner" }));
   expectAccepted(await d.request("chooseTeam", { team: "runner" }));
   expectRejected(await b.request("startMatch", {}), "HOST_REQUIRED");
   expectAccepted(await a.request("startMatch", {}));
@@ -333,19 +384,48 @@ test("AC4: startMatch requires host and balanced teams; 2v2 starts with distinct
   expectRejected(await a.request("startMatch", {}), "INVALID_PHASE");
 });
 
-test("AC4: balanced 1v1 starts; unassigned player blocks start", { timeout: 15_000 }, async (t) => {
+test("AC4: balanced 1v1 starts; empty side is rejected", { timeout: 15_000 }, async (t) => {
   const harness = await startServer(t);
   const a = await harness.create("A");
   const b = await harness.join(a.room.roomId, "B");
   expectAccepted(await a.request("chooseTeam", { team: "hunter" }));
-  expectRejected(await a.request("startMatch", {}), "TEAMS_UNBALANCED");
+  expectRejected(await a.request("startMatch", {}), "INVALID_INPUT");
   expectAccepted(await b.request("chooseTeam", { team: "hunter" }));
-  expectRejected(await a.request("startMatch", {}), "TEAMS_UNBALANCED");
+  expectRejected(await a.request("startMatch", {}), "INVALID_INPUT");
   expectAccepted(await b.request("chooseTeam", { team: "runner" }));
   expectAccepted(await a.request("startMatch", {}));
   harness.advance(GAME_RULES.countdownMs);
   const state = await b.waitFor((s) => s.phase === "playing", "playing");
   assert.notEqual(`${playerOf(state, a.id).x},${playerOf(state, a.id).y}`, `${playerOf(state, b.id).x},${playerOf(state, b.id).y}`);
+});
+
+test("AC4: 3v1 starts and assigns three hunter spawns", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t);
+  const a = await harness.create("A");
+  const b = await harness.join(a.room.roomId, "B");
+  const c = await harness.join(a.room.roomId, "C");
+  const d = await harness.join(a.room.roomId, "D");
+  expectAccepted(await a.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await b.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await c.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await d.request("chooseTeam", { team: "runner" }));
+  expectAccepted(await a.request("startMatch", {}));
+  harness.advance(GAME_RULES.countdownMs);
+  const state = await d.waitFor((s) => s.phase === "playing", "playing");
+  const hunters = Object.values(state.players).filter((p) => p.team === "hunter");
+  const runners = Object.values(state.players).filter((p) => p.team === "runner");
+  assert.equal(hunters.length, 3);
+  assert.equal(runners.length, 1);
+  const maze = generateMaze(state.mazeSeed);
+  const cells = [...hunters, ...runners].map((p) => `${p.x},${p.y}`);
+  assert.equal(new Set(cells).size, 4, "spawns must be distinct");
+  for (const player of [...hunters, ...runners]) {
+    assert.ok(isWalkableIn(maze, Math.floor(player.x), Math.floor(player.y)));
+    assert.equal(player.lastInputSequence, -1);
+  }
+  const midRow = Math.floor(MAZE_HEIGHT / 2);
+  for (const hunter of hunters) assert.ok(Math.floor(hunter.y) < midRow, "hunters spawn in the top half");
+  for (const runner of runners) assert.ok(Math.floor(runner.y) > midRow, "runners spawn in the bottom half");
 });
 
 test("AC5: B observes A move after A's setDirection; positions stay walkable", { timeout: 15_000 }, async (t) => {
@@ -525,7 +605,7 @@ test("T5: startMatch enters countdown with no movement or input, then playing", 
   assert.equal(playing.roundId, state.roundId);
 });
 
-test("T5: leaving during countdown unbalances teams and cancels to lobby", { timeout: 15_000 }, async (t) => {
+test("T5: leaving a 1v1 countdown empties a side and cancels to lobby (D054)", { timeout: 15_000 }, async (t) => {
   const harness = await startServer(t);
   const { host, guest } = await countdownOneVsOne(harness);
   await guest.room.leave();
@@ -549,19 +629,43 @@ async function countdownTwoVsTwo(harness: Harness) {
   return { h1, r1, h2, r2, countdown };
 }
 
-test("T5: host leaving a 2v2 countdown cancels to lobby; teams kept, round cleared, host transfers", { timeout: 15_000 }, async (t) => {
+test("T5: host leaving a 2v2 countdown continues as 2v1 (D054); host transfers, round kept", { timeout: 15_000 }, async (t) => {
   const harness = await startServer(t);
   const { h1, r1, h2, r2, countdown } = await countdownTwoVsTwo(harness);
   assert.ok(countdown.roundId.length > 0);
   await h1.room.leave();
-  const lobby = await r1.waitFor((s) => s.phase === "lobby" && !(h1.id in s.players), "cancelled to lobby");
+  const after = await r1.waitFor((s) => !(h1.id in s.players), "host removed");
+  assert.equal(after.phase, "countdown", "2v1 is still startable, so the countdown continues");
+  assert.equal(after.roundId, countdown.roundId);
+  assert.equal(after.mazeSeed, countdown.mazeSeed);
+  assert.equal(after.countdownEndsAt, countdown.countdownEndsAt);
+  assert.equal(after.hostPlayerId, r1.id, "host transfers to the earliest remaining player");
+  assert.equal(Object.keys(after.players).length, 3);
+  assert.equal(playerOf(after, r1.id).team, "runner");
+  assert.equal(playerOf(after, h2.id).team, "hunter");
+  assert.equal(playerOf(after, r2.id).team, "runner");
+  harness.advance(GAME_RULES.countdownMs);
+  const playing = await r1.waitFor((s) => s.phase === "playing", "2v1 round plays");
+  assert.equal(playing.roundId, countdown.roundId);
+});
+
+test("T5: the only runner leaving a 2v1 countdown empties a side and cancels to lobby (D054)", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t);
+  const h1 = await harness.create("H1");
+  const r1 = await harness.join(h1.room.roomId, "R1");
+  const h2 = await harness.join(h1.room.roomId, "H2");
+  expectAccepted(await h1.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await r1.request("chooseTeam", { team: "runner" }));
+  expectAccepted(await h2.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await h1.request("startMatch", {}));
+  await h2.waitFor((s) => s.phase === "countdown", "countdown");
+  await r1.room.leave();
+  const lobby = await h1.waitFor((s) => s.phase === "lobby" && !(r1.id in s.players), "cancelled to lobby");
   expectNoRoundFields(lobby);
   assert.equal(lobby.mazeSeed, 0);
-  assert.equal(lobby.hostPlayerId, r1.id, "host transfers to the earliest remaining player");
-  assert.equal(Object.keys(lobby.players).length, 3);
-  assert.equal(playerOf(lobby, r1.id).team, "runner");
-  assert.equal(playerOf(lobby, h2.id).team, "hunter");
-  assert.equal(playerOf(lobby, r2.id).team, "runner");
+  assert.equal(lobby.hostPlayerId, h1.id);
+  assert.equal(playerOf(lobby, h1.id).team, "hunter", "teams are kept");
+  assert.equal(playerOf(lobby, h2.id).team, "hunter", "teams are kept");
   for (const player of Object.values(lobby.players)) assert.equal(player.alive, true);
 });
 

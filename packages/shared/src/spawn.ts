@@ -21,8 +21,8 @@ export interface SpawnCell {
 
 /** Index `i` is the spawn for the `i`-th member of that team (join order). */
 export interface SpawnCells {
-  hunter: readonly [SpawnCell, SpawnCell];
-  runner: readonly [SpawnCell, SpawnCell];
+  hunter: readonly [SpawnCell, SpawnCell, SpawnCell];
+  runner: readonly [SpawnCell, SpawnCell, SpawnCell];
 }
 
 const NEIGHBOR: Record<Direction, SpawnCell> = {
@@ -78,14 +78,17 @@ function firstFreeCell(maze: readonly string[], taken: readonly SpawnCell[]): Sp
       }
     }
   }
-  throw new Error("Maze has fewer than four walkable spawn cells.");
+  throw new Error("Maze has fewer than six walkable spawn cells.");
 }
 
 /**
- * Four distinct walkable spawn cells for `maze`, deterministic per maze.
- * Cells with at least one wall neighbor are preferred so `spawnDirection` can
- * face a wall and players start still until their first input.
- * Throws only if the maze has fewer than four walkable cells.
+ * Six distinct walkable spawn cells for `maze` (three per team), deterministic
+ * per maze. Hunters spawn in the top half (left, right, then center-top corner)
+ * and runners in the bottom half (left, right, then center-bottom corner); the
+ * third anchor lets a 3-player team spawn (e.g. 3v1). Cells with at least one
+ * wall neighbor are preferred so `spawnDirection` can face a wall and players
+ * start still until their first input. Throws only if the maze has fewer than
+ * six walkable cells.
  */
 export function findSpawnCells(
   maze: readonly string[],
@@ -98,8 +101,10 @@ export function findSpawnCells(
   const corners: Array<{ anchor: SpawnCell; inQuadrant: (cell: SpawnCell) => boolean }> = [
     { anchor: { col: left, row: top }, inQuadrant: (c) => c.col < CENTER_COL && c.row < CENTER_ROW },
     { anchor: { col: right, row: top }, inQuadrant: (c) => c.col > CENTER_COL && c.row < CENTER_ROW },
+    { anchor: { col: CENTER_COL, row: top }, inQuadrant: (c) => c.row < CENTER_ROW },
     { anchor: { col: left, row: bottom }, inQuadrant: (c) => c.col < CENTER_COL && c.row > CENTER_ROW },
     { anchor: { col: right, row: bottom }, inQuadrant: (c) => c.col > CENTER_COL && c.row > CENTER_ROW },
+    { anchor: { col: CENTER_COL, row: bottom }, inQuadrant: (c) => c.row > CENTER_ROW },
   ];
   const taken: SpawnCell[] = [];
   for (const { anchor, inQuadrant } of corners) {
@@ -109,13 +114,18 @@ export function findSpawnCells(
         firstFreeCell(maze, taken),
     );
   }
-  const [hunterLeft, hunterRight, runnerLeft, runnerRight] = taken as [
+  const [hunterLeft, hunterRight, hunterCenter, runnerLeft, runnerRight, runnerCenter] = taken as [
+    SpawnCell,
+    SpawnCell,
     SpawnCell,
     SpawnCell,
     SpawnCell,
     SpawnCell,
   ];
-  return { hunter: [hunterLeft, hunterRight], runner: [runnerLeft, runnerRight] };
+  return {
+    hunter: [hunterLeft, hunterRight, hunterCenter],
+    runner: [runnerLeft, runnerRight, runnerCenter],
+  };
 }
 
 

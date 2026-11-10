@@ -34,11 +34,14 @@ is occupied rather than silently selecting a different URL.
    The lobby shows the room code; **Copy** puts it on the clipboard (if the
    browser blocks clipboard access, the code is shown to share manually).
 3. **Window B:** enter a name, paste the code, and choose **Join**.
-4. Each player picks **Hunters** or **Runners** (at most two per team).
+4. Each player picks **Hunters** or **Runners** (teams have no per-player cap;
+   any size up to the four-player room is allowed). The lobby shows a live
+   `Hunters: N · Runners: M` counter.
 5. The host (the room creator, marked in the player list) sees **Start match**
-   and presses it once every player has a team and the teams are balanced (1v1
-   or 2v2). The server runs a 3-second countdown (no movement or input), then the
-   round starts.
+   and presses it once every player has picked a team and each team has at least
+   one player. Start stays disabled until then. Rosters may be unbalanced (e.g.
+   3v1) and show a warning only. The server runs a 3-second countdown (no
+   movement or input), then the round starts.
 6. Steer with the D-pad, a touch swipe on the play area, or arrow keys/WASD
    (mouse drags do not steer). Both
    windows show every player as a team-colored ghost mascot (hunters yellow,
@@ -54,8 +57,9 @@ is occupied rather than silently selecting a different URL.
    kept); non-hosts see the result and wait for the host. Team buttons and Start
    are hidden outside the lobby phase. The full results UI is T6.
 7. **Leave** returns to the join screen. When the host leaves, the
-   earliest-joined remaining player becomes host. Leaving during the countdown
-   that unbalances teams cancels back to the lobby.
+   earliest-joined remaining player becomes host. If a leave during the
+   countdown empties a side (no hunters or no runners left), the room cancels
+   back to the lobby; otherwise the countdown continues (e.g. 2v2 becomes 2v1).
 
 The current view is mirrored in the URL hash, so a refresh restores it:
 `#room=<code>` reopens the room and attempts to rejoin with the display name
@@ -67,9 +71,13 @@ Errors are shown on the page, and the UI returns to a usable state:
 - Join: empty or invalid name, missing code, unknown or malformed code
   (`ROOM_NOT_FOUND`), room already has four players (`ROOM_FULL`), match already
   started (`JOIN_CLOSED`), outdated client (`PROTOCOL_MISMATCH`).
-- Lobby: team already has two players (`TEAM_FULL`), unbalanced or unassigned
-  teams (`TEAMS_UNBALANCED`), or no server reply in time. (The server also
-  enforces `HOST_REQUIRED`; non-hosts do not see the Start button.)
+- Lobby: the client shows notices when players have not picked a team, when a
+  side is empty ("Need at least one hunter and one runner to start."), and when
+  the roster is unbalanced (warning only; start is still allowed). Start is
+  disabled until everyone has picked and each team has at least one player.
+  Server rejections surface the server-provided message (falling back to the
+  mapped error-code text). (The server also enforces `HOST_REQUIRED`; non-hosts
+  do not see the Start button.)
 - Disconnects: a dropped connection or server restart shows a message and returns
   to the join screen. There is no automatic reconnect.
 
@@ -88,18 +96,26 @@ diagnostic room. Integration tests exercise it with real Colyseus SDK clients.
   (not listed for matchmaking), hold up to four players, and admit joins only in
   the lobby phase. A started room that already has four players reports
   `ROOM_FULL`; otherwise a started room reports `JOIN_CLOSED`.
-- **Lobby:** `chooseTeam` allows at most two per team; `startMatch` requires the
-  host and balanced teams with no unassigned players. Replies are `actionResult`
-  messages correlated by `requestId`. A malformed request whose `requestId`
-  cannot be read gets an uncorrelated `inputRejected` instead.
+- **Lobby:** `chooseTeam` has no per-team cap; `startMatch` requires the host,
+  every player assigned to a team, and at least one hunter and one runner
+  (D054). An empty side or an unassigned player is rejected with `INVALID_INPUT`
+  and a specific message (the server never emits `TEAM_FULL` or
+  `TEAMS_UNBALANCED`; both codes remain contract-visible, and unbalance is a
+  client-side warning only). Replies are `actionResult` messages correlated by
+  `requestId`, and rejections may carry a custom `message`. A malformed request
+  whose `requestId` cannot be read gets an uncorrelated `inputRejected` instead.
 - **Countdown (T5):** `startMatch` enters `countdown` (`countdownEndsAt` =
   start + `GAME_RULES.countdownMs`). Players are placed but cannot move, and
-  `setDirection` is rejected with `INVALID_PHASE`. If a disconnect leaves teams
-  unbalanced, the room cancels to the lobby (teams kept, round fields cleared).
+  `setDirection` is rejected with `INVALID_PHASE`. If a disconnect leaves a side
+  empty (no hunters or no runners, D054), the room cancels to the lobby (teams
+  kept, round fields cleared); an unbalanced but non-empty roster keeps counting
+  down.
 - **Play:** on start the server picks a new maze seed and round ID, syncs them to
   clients (which regenerate the maze from the seed), and places players on
-  distinct spawn cells (hunters top corners, runners bottom corners; wall-adjacent
-  cells are preferred so players start still). It runs a fixed 30 Hz simulation
+  distinct spawn cells. `findSpawnCells` returns three per team: hunters in the
+  top half (left, right, center-top) and runners in the bottom half (left, right,
+  center-bottom), so a 3-player team (e.g. 3v1) can spawn; wall-adjacent cells
+  are preferred so players start still. It runs a fixed 30 Hz simulation
   with the shared movement module and patches state about every 50 ms. When the
   countdown ends the phase becomes `playing` with `roundEndsAt` = countdown end +
   `GAME_RULES.roundDurationMs`. Simulation follows round-relative server time:
@@ -155,7 +171,8 @@ diagnostic room. Integration tests exercise it with real Colyseus SDK clients.
   16-per-second budget below the server limit, holding the latest change while
   over budget); `PendingAction` (one in-flight
   `chooseTeam`/`startMatch`/`returnToLobby` until
-  its reply, an uncorrelated `INVALID_INPUT`, or a timeout); room-code checks;
+  its reply, an uncorrelated `INVALID_INPUT`, or a timeout; rejected outcomes
+  carry the server's optional `message`); room-code checks;
   interpolation; and player-facing disconnect messages.
 
 ## Commit-time documentation updates
@@ -220,18 +237,20 @@ Tests use Node's built-in runner and real HTTP/WebSocket connections on an
 ephemeral local port. They verify shared tuning, app-route hash parsing and
 serialization, protocol guards and validators
 (display names, join options, room messages including `returnToLobby`, error-code
-mapping), spawn-cell placement across many maze seeds, swept contact and round
+mapping), spawn-cell placement across many maze seeds (three distinct cells per
+team), swept contact and round
 outcome rules (`round.test.ts`), health, state synchronization, and
 incompatible-version rejection. Game-room integration tests (`game-room.test.ts`)
 use an injectable fake clock and cover private-room join/failure codes, team
-selection, host-only balanced start, countdown, synchronized movement, contact
-elimination, timeout and disconnect outcomes, return to lobby, input rejection
-and rate limiting, flood disconnect, and host transfer/room disposal. They also
+selection without a cap, host-only start with every player assigned (2v1, 3v1,
+and 2v2 start; unassigned players or an empty side are rejected), countdown,
+synchronized movement, contact elimination, timeout and
+disconnect outcomes, return to lobby, input rejection and rate limiting, flood
+disconnect, and host transfer/room disposal. They also
 cover simulation catch-up: `planSimulationSteps` unit cases (full-step catch-up,
 carried leftovers, no step beyond the deadline), a delayed tick simulating all
 elapsed time, and a catch resolved in the final 100 ms across a delayed deadline
-tick. Client unit
-tests (`apps/client/src/*.test.ts`)
+tick. Client unit tests (`apps/client/src/*.test.ts`)
 cover the session model: input dedupe/sequencing/rate budgeting, pending-action
 resolution, room-code validation, interpolation, leave messages, and the
 result-summary lines. The DOM and

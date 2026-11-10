@@ -418,7 +418,7 @@ function finishAction(outcome: ActionOutcome): void {
   if (outcome.kind === "accepted") {
     showMessage("");
   } else if (outcome.kind === "rejected") {
-    showMessage(errorMessage(outcome.code));
+    showMessage(outcome.message ?? errorMessage(outcome.code));
   } else {
     showMessage("The server did not answer in time. Try again.");
   }
@@ -475,15 +475,35 @@ function render(): void {
   ui.runnerButton.hidden = !inLobby;
   ui.startButton.hidden = !isHost || !inLobby;
   ui.returnLobbyButton.hidden = !isHost || summary === null;
-  ui.lobbyHint.textContent = summary !== null
-    ? isHost
+  const hunters = players.filter((player) => player.team === "hunter").length;
+  const runners = players.filter((player) => player.team === "runner").length;
+  const unassigned = players.length - hunters - runners;
+  const counterText = `Hunters: ${hunters} · Runners: ${runners}`;
+  // Start requires every connected player to have picked and at least one per team.
+  const canStart = unassigned === 0 && hunters >= 1 && runners >= 1;
+  ui.startButton.disabled = pending.busy || !canStart;
+  if (summary !== null) {
+    // Results phase: the result line owns the hint; no D054 roster warning.
+    ui.lobbyHint.textContent = isHost
       ? summary
-      : `${summary} Waiting for the host to return to the lobby.`
-    : !inLobby
-      ? `Room phase: ${snapshot.phase}.`
-      : isHost
-        ? "Pick teams, then start when hunters and runners are balanced (1v1 or 2v2)."
-        : "Pick a team. The host starts the match.";
+      : `${summary} Waiting for the host to return to the lobby.`;
+    showNotice("");
+  } else if (!inLobby) {
+    ui.lobbyHint.textContent = `Room phase: ${snapshot.phase}.`;
+    showNotice("");
+  } else if (unassigned > 0) {
+    ui.lobbyHint.textContent = counterText;
+    showNotice(`${unassigned} player${unassigned === 1 ? " hasn't" : "s haven't"} picked a team yet.`);
+  } else if (hunters < 1 || runners < 1) {
+    ui.lobbyHint.textContent = counterText;
+    showNotice("Need at least one hunter and one runner to start.");
+  } else if (hunters !== runners) {
+    ui.lobbyHint.textContent = counterText;
+    showNotice(`Lobby unbalanced: Hunters ${hunters} : Runners ${runners}. A team can win with fewer players; you can still start.`);
+  } else {
+    ui.lobbyHint.textContent = counterText;
+    showNotice("");
+  }
 }
 
 function pickTeam(team: Team): void {

@@ -182,7 +182,7 @@ test("pending action resolves on its correlated accept or reject only", () => {
       code: "TEAMS_UNBALANCED",
       message: "x",
     }),
-    { kind: "rejected", code: "TEAMS_UNBALANCED" },
+    { kind: "rejected", code: "TEAMS_UNBALANCED", message: "x" },
   );
   assert.equal(pending.busy, false);
 });

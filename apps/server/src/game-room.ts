@@ -10,7 +10,6 @@ import {
   INPUT_RATE_LIMIT_MAX_MESSAGES,
   INPUT_RATE_LIMIT_WINDOW_MS,
   MAX_CLIENT_MESSAGES_PER_SECOND,
-  MAX_TEAM_SIZE,
   PATCH_INTERVAL_MS,
   PROTOCOL_VERSION,
   SERVER_MESSAGES,
@@ -158,6 +157,11 @@ function joinError(code: ErrorCode): ServerError {
   return new ServerError(400, joinErrorText(code));
 }
 
+/** Start rejection when a side has no players (D054). */
+const NEEDS_ONE_PER_TEAM_MESSAGE = "Both teams need at least one player (a hunter and a runner) to start.";
+/** Start rejection when someone has not picked a team (D054). */
+const ALL_PLAYERS_MUST_PICK_MESSAGE = "Every player must pick a team before starting.";
+
 /**
  * Private T3 game room: lobby team selection, host start, and authoritative
  * 30 Hz movement. T5 adds countdown, hunter/runner contact elimination,
@@ -238,7 +242,9 @@ export class GameRoom extends Room<{ state: GameState }> {
     if (this.state.hostPlayerId === sessionId) {
       this.state.hostPlayerId = this.#joinOrder[0] ?? "";
     }
-    if (this.state.phase === "countdown" && !this.#teamsBalanced()) {
+    // D054 start-eligibility: joins are closed during countdown, so everyone is
+    // assigned; cancel only when a side has become empty.
+    if (this.state.phase === "countdown" && !this.#bothSidesOccupied()) {
       this.#resetToLobby();
     }
     this.#changed();
@@ -259,9 +265,9 @@ export class GameRoom extends Room<{ state: GameState }> {
     this.state.serverTime = this.now();
   }
 
-  #respond(client: Client, requestId: string, code: ErrorCode | null): void {
+  #respond(client: Client, requestId: string, code: ErrorCode | null, message?: string): void {
     const result: ActionResultMessage = code
-      ? { requestId, accepted: false, code, message: errorMessage(code) }
+      ? { requestId, accepted: false, code, message: message ?? errorMessage(code) }
       : { requestId, accepted: true };
     client.send(SERVER_MESSAGES.actionResult, result);
   }
@@ -293,10 +299,6 @@ export class GameRoom extends Room<{ state: GameState }> {
       return;
     }
     if (player.team !== request.team) {
-      if (this.#teamCount(request.team) >= MAX_TEAM_SIZE) {
-        this.#respond(client, request.requestId, "TEAM_FULL");
-        return;
-      }
       player.team = request.team;
       this.#changed();
     }
@@ -317,8 +319,15 @@ export class GameRoom extends Room<{ state: GameState }> {
       this.#respond(client, request.requestId, "INVALID_PHASE");
       return;
     }
-    if (!this.#teamsBalanced()) {
-      this.#respond(client, request.requestId, "TEAMS_UNBALANCED");
+    const hunters = this.#teamCount("hunter");
+    const runners = this.#teamCount("runner");
+    const unassigned = this.state.players.size - hunters - runners;
+    if (hunters < 1 || runners < 1) {
+      this.#respond(client, request.requestId, "INVALID_INPUT", NEEDS_ONE_PER_TEAM_MESSAGE);
+      return;
+    }
+    if (unassigned > 0) {
+      this.#respond(client, request.requestId, "INVALID_INPUT", ALL_PLAYERS_MUST_PICK_MESSAGE);
       return;
     }
 
@@ -332,7 +341,7 @@ export class GameRoom extends Room<{ state: GameState }> {
         continue;
       }
       const cell = spawns[player.team][nextSpawnIndex[player.team]++];
-      assert(cell, "balanced teams never exceed the available spawn cells");
+      assert(cell, "teams never exceed the available spawn cells");
       const position = this.placeSpawn(player.team, { x: cell.col + 0.5, y: cell.row + 0.5 }, maze);
       player.alive = true;
       player.x = position.x;
@@ -392,11 +401,9 @@ export class GameRoom extends Room<{ state: GameState }> {
     this.state.resultEndedAt = 0;
   }
 
-  /** Same rule as startMatch: equal non-empty teams and nobody unassigned. */
-  #teamsBalanced(): boolean {
-    const hunters = this.#teamCount("hunter");
-    const runners = this.#teamCount("runner");
-    return hunters >= 1 && hunters === runners && hunters + runners === this.state.players.size;
+  /** D054: a round needs at least one hunter and one runner; team sizes may differ. */
+  #bothSidesOccupied(): boolean {
+    return this.#teamCount("hunter") >= 1 && this.#teamCount("runner") >= 1;
   }
 
   #setDirection(client: Client, payload: unknown): void {

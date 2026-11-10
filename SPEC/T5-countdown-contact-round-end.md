@@ -56,6 +56,11 @@ Disconnect outcomes are defined. No pickups or vulnerability yet (T7).
 - **Test hooks:** `gameRoomWith({ seedSource, clock, spawnPlacer })` is reachable only from
   trusted server code (`createGameServer` options), never from client join options.
 - **Client:** eliminated players stop sending `setDirection`. No other UI changes.
+- **Countdown cancel:** cancels to `lobby` only when a leave makes a side empty
+  (D054); unbalanced rosters keep counting down.
+- **D054 re-interpretation (needs David/Chase confirmation):** this countdown-cancel
+  rule was re-interpreted after D054 (unbalanced lobbies) replaced "teams become
+  unbalanced" with "a side becomes empty", matching the D054 start-eligibility rule.
 - **Minimal results control (added at David's request, 2026-11-10):** without it, a room
   can't start a second round. In `results`, the lobby view:
   - shows a one-line server result (winner and reason, for example "Round over: Hunters
@@ -102,6 +107,14 @@ Owners pick these up in the named task. They aren't T5 acceptance criteria.
 - Rename the unit test "same-step elimination + last-hunter disconnect is a
   simultaneous wipe" to match its scenario (`apps/server/src/game-room.test.ts`).
 
+**Lobby client (from D054 on `main`, not introduced by T5):**
+- After an action that doesn't change the roster (e.g. re-picking your team or a
+  rejected start), `setLobbyBusy(false)` re-enables Start and the D054 notice stays
+  cleared until the roster changes (`apps/client/src/main.ts`). The server still
+  rejects the start. Fix: re-render in `finishAction`.
+- `DELIVERY-PLAN.md` still says the countdown cancels "on lost balance"; under D054
+  T5 cancels only when a side becomes empty. Align once David/Chase confirm it.
+
 **Devices:** no phone or touch validation of T5 yet. Cover it in T8.
 
 ## Out of scope
@@ -128,13 +141,15 @@ spectator / results UI, T4 lobby UI, reconnect, client prediction, cloud/CI chan
 
 State machine (contract §1): `lobby → countdown → playing → results → lobby`.
 
-- **`startMatch`** (host, lobby, balanced teams — unchanged checks): sets roundId, seed,
+- **`startMatch`** (host, lobby, every player assigned, ≥1 hunter and ≥1 runner per
+  D054 — unchanged checks): sets roundId, seed,
   spawns, `countdownEndsAt = now + countdownMs`, phase `countdown`.
 - **Countdown:** when `now ≥ countdownEndsAt` → phase `playing`, set
   `roundEndsAt = playingStart + roundDurationMs`. Movement runs only in `playing`.
-- **Balance loss in countdown** (a participant leaves so teams are unbalanced or a
-  side is empty) → cancel: phase `lobby`, round state cleared, participants and teams
-  kept.
+- **Side empty in countdown** (a participant leaves and a side becomes empty (D054):
+  0 hunters or 0 runners) → cancel: phase `lobby`, round state cleared, participants
+  and teams kept. An unbalanced but non-empty roster (e.g. 2v2 → 2v1) keeps counting
+  down.
 - **Playing tick:** move alive players; evaluate all hunter–runner contacts from one
   snapshot, eliminate every contacted runner together (`alive = false`); then
   evaluate the winner; then timeout. At the deadline process movement/contact only
@@ -165,9 +180,9 @@ State machine (contract §1): `lobby → countdown → playing → results → l
    `countdownEndsAt = now + 3 000`; players do not move; `setDirection` →
    `INVALID_PHASE`. At `countdownEndsAt` the phase becomes `playing` and
    `roundEndsAt = start + 180 000`.
-2. Leaving during countdown so teams become unbalanced returns to `lobby` with
-   teams/participants intact; a leave that keeps balance is not possible in 1v1/2v2
-   (any leave unbalances), so assert the cancel for both sizes.
+2. Leaving during countdown so a side becomes empty (D054) returns to `lobby` with
+   teams/participants intact (assert 1v1 and a 2v1 whose only runner leaves); a
+   leave that leaves both sides non-empty (2v2 → 2v1) keeps the countdown running.
 3. A hunter reaching a runner eliminates only that runner; same-team overlap does
    nothing; the eliminated player stays in the room, `alive = false`, and cannot
    change state.

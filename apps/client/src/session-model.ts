@@ -191,7 +191,7 @@ export class DirectionSender {
 /** How a pending lobby action ended. */
 export type ActionOutcome =
   | { kind: "accepted" }
-  | { kind: "rejected"; code: ErrorCode }
+  | { kind: "rejected"; code: ErrorCode; message?: string }
   | { kind: "timeout" };
 
 /**
@@ -221,7 +221,9 @@ export class PendingAction {
       return null;
     }
     this.#requestId = null;
-    return result.accepted ? { kind: "accepted" } : { kind: "rejected", code: result.code };
+    return result.accepted
+      ? { kind: "accepted" }
+      : { kind: "rejected", code: result.code, message: result.message };
   }
 
   /**
