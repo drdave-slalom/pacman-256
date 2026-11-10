@@ -4,15 +4,20 @@ import { matchMaker } from "@colyseus/core";
 import { Client, type Room } from "@colyseus/sdk";
 import {
   CLIENT_MESSAGES,
+  DEFAULT_MOVE_SPEED_TILES_PER_SECOND,
   GAME_ROOM,
+  GAME_RULES,
   INPUT_RATE_LIMIT_MAX_MESSAGES,
   MAZE_HEIGHT,
   MAX_CLIENT_MESSAGES_PER_SECOND,
   PROTOCOL_VERSION,
   SERVER_MESSAGES,
+  evaluateRoundOutcome,
+  findSpawnCells,
   generateMaze,
   isWalkableIn,
   joinErrorCode,
+  spawnDirection,
   parseActionResult,
   parseInputRejected,
   type ActionResultMessage,
@@ -22,16 +27,23 @@ import {
   type InputRejectedMessage,
   type PlayerSnapshot,
 } from "@maze/shared";
+import { SIMULATION_STEP_MS, planSimulationSteps, resolveContacts, type SpawnPlacer, type StepMove } from "./game-room.ts";
 import { createGameServer } from "./server.ts";
 
 const WAIT_MS = 3_000;
 const TEST_SEED = 424_242;
+/** Fake epoch start for the injectable server clock. */
+const T0 = 1_000_000;
 
 interface Harness {
   client: Client;
   /** Create or join, track the room for cleanup, and resolve once the initial state is decoded. */
   create(displayName: string): Promise<Player>;
   join(code: string, displayName: string): Promise<Player>;
+  /** Current fake server time (ms). */
+  now(): number;
+  /** Advance the fake server clock; phases react on the next tick. */
+  advance(ms: number): void;
 }
 
 interface Player {
@@ -41,7 +53,7 @@ interface Player {
   waitFor(predicate: (state: GameRoomSnapshot) => boolean, label: string): Promise<GameRoomSnapshot>;
   nextActionResult(): Promise<ActionResultMessage>;
   nextRejection(): Promise<InputRejectedMessage>;
-  request(type: "chooseTeam" | "startMatch", payload: Record<string, unknown>): Promise<ActionResultMessage>;
+  request(type: "chooseTeam" | "startMatch" | "returnToLobby", payload: Record<string, unknown>): Promise<ActionResultMessage>;
 }
 
 function joinOptions(displayName: string) {
@@ -135,8 +147,13 @@ function wrap(room: Room): Player {
   };
 }
 
-async function startServer(t: TestContext, seed = TEST_SEED): Promise<Harness> {
-  const { server, httpServer } = createGameServer({ mazeSeedSource: () => seed });
+async function startServer(t: TestContext, seed = TEST_SEED, spawnPlacer?: SpawnPlacer): Promise<Harness> {
+  let fakeNow = T0;
+  const { server, httpServer } = createGameServer({
+    mazeSeedSource: () => seed,
+    clock: () => fakeNow,
+    ...(spawnPlacer ? { spawnPlacer } : {}),
+  });
   const rooms: Room[] = [];
   t.after(async () => {
     await Promise.allSettled(rooms.map((room) => room.connection.isOpen ? room.leave() : undefined));
@@ -154,6 +171,8 @@ async function startServer(t: TestContext, seed = TEST_SEED): Promise<Harness> {
   };
   return {
     client,
+    now: () => fakeNow,
+    advance(ms) { fakeNow += ms; },
     async create(displayName) {
       return track(await client.create(GAME_ROOM, joinOptions(displayName)));
     },
@@ -185,13 +204,15 @@ function playerOf(state: GameRoomSnapshot, id: string): PlayerSnapshot {
   return player;
 }
 
-/** Start a balanced 1v1 (host hunter, guest runner) and wait until both see `playing`. */
+/** Start a balanced 1v1 (host hunter, guest runner), skip the countdown, and wait until both see `playing`. */
 async function startOneVsOne(harness: Harness) {
   const host = await harness.create("Host");
   const guest = await harness.join(host.room.roomId, "Guest");
   expectAccepted(await host.request("chooseTeam", { team: "hunter" }));
   expectAccepted(await guest.request("chooseTeam", { team: "runner" }));
   expectAccepted(await host.request("startMatch", {}));
+  await guest.waitFor((s) => s.phase === "countdown", "countdown phase");
+  harness.advance(GAME_RULES.countdownMs);
   const state = await guest.waitFor((s) => s.phase === "playing", "playing phase");
   await host.waitFor((s) => s.phase === "playing", "playing phase on host");
   return { host, guest, state };
@@ -277,6 +298,7 @@ test("AC3: chooseTeam enforces phase with correlated results; no team cap", { ti
   const lobby = await a.waitFor((s) => Object.values(s.players).filter((p) => p.team === "runner").length === 2, "teams");
   assert.equal(playerOf(lobby, c.id).team, "runner");
   expectAccepted(await a.request("startMatch", {}));
+  harness.advance(GAME_RULES.countdownMs);
   await d.waitFor((s) => s.phase === "playing", "playing");
   expectRejected(await d.request("chooseTeam", { team: "hunter" }), "INVALID_PHASE");
   expectRejected(await a.request("chooseTeam", { team: "runner" }), "INVALID_PHASE");
@@ -297,6 +319,7 @@ test("AC4: startMatch requires host and every player assigned; 2v1 starts", { ti
   expectRejected(await b.request("startMatch", {}), "HOST_REQUIRED");
   // 2v1 with all players assigned starts: no equal-count requirement.
   expectAccepted(await a.request("startMatch", {}));
+  harness.advance(GAME_RULES.countdownMs);
   const state = await c.waitFor((s) => s.phase === "playing", "playing");
   const hunters = Object.values(state.players).filter((p) => p.team === "hunter");
   const runners = Object.values(state.players).filter((p) => p.team === "runner");
@@ -327,6 +350,7 @@ test("AC4: start with an unassigned player present is rejected", { timeout: 15_0
   // Once D picks, the same all-assigned roster starts.
   expectAccepted(await d.request("chooseTeam", { team: "runner" }));
   expectAccepted(await a.request("startMatch", {}));
+  harness.advance(GAME_RULES.countdownMs);
   const state = await c.waitFor((s) => s.phase === "playing", "playing");
   const hunters = Object.values(state.players).filter((p) => p.team === "hunter");
   const runners = Object.values(state.players).filter((p) => p.team === "runner");
@@ -346,6 +370,7 @@ test("AC4: balanced 2v2 starts with distinct spawns", { timeout: 15_000 }, async
   expectAccepted(await d.request("chooseTeam", { team: "runner" }));
   expectRejected(await b.request("startMatch", {}), "HOST_REQUIRED");
   expectAccepted(await a.request("startMatch", {}));
+  harness.advance(GAME_RULES.countdownMs);
   const state = await c.waitFor((s) => s.phase === "playing", "playing");
   assert.ok(state.roundId.length > 0);
   assert.equal(state.mazeSeed, TEST_SEED);
@@ -369,6 +394,7 @@ test("AC4: balanced 1v1 starts; empty side is rejected", { timeout: 15_000 }, as
   expectRejected(await a.request("startMatch", {}), "INVALID_INPUT");
   expectAccepted(await b.request("chooseTeam", { team: "runner" }));
   expectAccepted(await a.request("startMatch", {}));
+  harness.advance(GAME_RULES.countdownMs);
   const state = await b.waitFor((s) => s.phase === "playing", "playing");
   assert.notEqual(`${playerOf(state, a.id).x},${playerOf(state, a.id).y}`, `${playerOf(state, b.id).x},${playerOf(state, b.id).y}`);
 });
@@ -384,6 +410,7 @@ test("AC4: 3v1 starts and assigns three hunter spawns", { timeout: 15_000 }, asy
   expectAccepted(await c.request("chooseTeam", { team: "hunter" }));
   expectAccepted(await d.request("chooseTeam", { team: "runner" }));
   expectAccepted(await a.request("startMatch", {}));
+  harness.advance(GAME_RULES.countdownMs);
   const state = await d.waitFor((s) => s.phase === "playing", "playing");
   const hunters = Object.values(state.players).filter((p) => p.team === "hunter");
   const runners = Object.values(state.players).filter((p) => p.team === "runner");
@@ -418,6 +445,9 @@ test("AC5: B observes A move after A's setDirection; positions stay walkable", {
   });
 
   host.room.send(CLIENT_MESSAGES.setDirection, { roundId: state.roundId, sequence: 1, direction });
+  await guest.waitFor((s) => playerOf(s, host.id).lastInputSequence === 1, "A's input accepted");
+  // Movement follows server simulation time: advance the fake clock past one tile (4 tiles/s).
+  harness.advance(500);
   const moved = await guest.waitFor((s) => {
     const a = playerOf(s, host.id);
     return Math.abs(a.x - spawn.x) + Math.abs(a.y - spawn.y) >= 1;
@@ -525,4 +555,414 @@ test("AC7: host transfers to the earliest remaining player; empty room is dispos
   }
   assert.equal(remaining, 0, "server disposed the empty room");
   await rejectsWithCode(harness.client.joinById(code, joinOptions("Late")), "ROOM_NOT_FOUND");
+});
+
+/** Lobby 1v1 (host hunter, guest runner) with startMatch accepted; both see `countdown`. */
+async function countdownOneVsOne(harness: Harness) {
+  const host = await harness.create("Host");
+  const guest = await harness.join(host.room.roomId, "Guest");
+  expectAccepted(await host.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await guest.request("chooseTeam", { team: "runner" }));
+  const startedAt = harness.now();
+  expectAccepted(await host.request("startMatch", {}));
+  const state = await guest.waitFor((s) => s.phase === "countdown", "countdown phase");
+  await host.waitFor((s) => s.phase === "countdown", "countdown phase on host");
+  return { host, guest, state, startedAt };
+}
+
+function expectNoRoundFields(state: GameRoomSnapshot): void {
+  assert.equal(state.roundId, "");
+  assert.equal(state.countdownEndsAt, 0);
+  assert.equal(state.roundEndsAt, 0);
+  assert.equal(state.resultWinner, "");
+  assert.equal(state.resultReason, "");
+  assert.equal(state.resultEndedAt, 0);
+}
+
+test("T5: startMatch enters countdown with no movement or input, then playing", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t);
+  const { host, state, startedAt } = await countdownOneVsOne(harness);
+  assert.equal(state.countdownEndsAt, startedAt + GAME_RULES.countdownMs);
+  assert.equal(state.roundEndsAt, 0);
+  assert.equal(state.resultWinner, "");
+  assert.ok(state.roundId.length > 0);
+  const maze = generateMaze(state.mazeSeed);
+  const spawn = playerOf(state, host.id);
+  host.room.send(CLIENT_MESSAGES.setDirection, { roundId: state.roundId, sequence: 1, direction: walkableDirection(maze, spawn) });
+  assert.equal((await host.nextRejection()).code, "INVALID_PHASE", "countdown input -> INVALID_PHASE");
+  const revision = host.snapshot().revision;
+  const later = await host.waitFor((s) => s.revision >= revision + 5, "ticks during countdown");
+  assert.equal(later.phase, "countdown");
+  assert.deepEqual(Object.values(later.players).map((p) => [p.x, p.y]), Object.values(state.players).map((p) => [p.x, p.y]));
+
+  harness.advance(GAME_RULES.countdownMs - 1);
+  const stillCounting = host.snapshot().revision;
+  assert.equal((await host.waitFor((s) => s.revision >= stillCounting + 2, "ticks")).phase, "countdown");
+  harness.advance(1);
+  const playing = await host.waitFor((s) => s.phase === "playing", "playing");
+  assert.equal(playing.countdownEndsAt, 0);
+  assert.equal(playing.roundEndsAt, state.countdownEndsAt + GAME_RULES.roundDurationMs);
+  assert.equal(playing.roundId, state.roundId);
+});
+
+test("T5: leaving a 1v1 countdown empties a side and cancels to lobby (D054)", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t);
+  const { host, guest } = await countdownOneVsOne(harness);
+  await guest.room.leave();
+  const lobby = await host.waitFor((s) => s.phase === "lobby" && !(guest.id in s.players), "cancelled to lobby");
+  expectNoRoundFields(lobby);
+  assert.equal(playerOf(lobby, host.id).team, "hunter", "teams are kept");
+});
+
+/** Lobby 2v2 (join order H1, R1, H2, R2) with startMatch accepted; R1 sees `countdown`. */
+async function countdownTwoVsTwo(harness: Harness) {
+  const h1 = await harness.create("H1");
+  const r1 = await harness.join(h1.room.roomId, "R1");
+  const h2 = await harness.join(h1.room.roomId, "H2");
+  const r2 = await harness.join(h1.room.roomId, "R2");
+  expectAccepted(await h1.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await r1.request("chooseTeam", { team: "runner" }));
+  expectAccepted(await h2.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await r2.request("chooseTeam", { team: "runner" }));
+  expectAccepted(await h1.request("startMatch", {}));
+  const countdown = await r1.waitFor((s) => s.phase === "countdown", "countdown");
+  return { h1, r1, h2, r2, countdown };
+}
+
+test("T5: host leaving a 2v2 countdown continues as 2v1 (D054); host transfers, round kept", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t);
+  const { h1, r1, h2, r2, countdown } = await countdownTwoVsTwo(harness);
+  assert.ok(countdown.roundId.length > 0);
+  await h1.room.leave();
+  const after = await r1.waitFor((s) => !(h1.id in s.players), "host removed");
+  assert.equal(after.phase, "countdown", "2v1 is still startable, so the countdown continues");
+  assert.equal(after.roundId, countdown.roundId);
+  assert.equal(after.mazeSeed, countdown.mazeSeed);
+  assert.equal(after.countdownEndsAt, countdown.countdownEndsAt);
+  assert.equal(after.hostPlayerId, r1.id, "host transfers to the earliest remaining player");
+  assert.equal(Object.keys(after.players).length, 3);
+  assert.equal(playerOf(after, r1.id).team, "runner");
+  assert.equal(playerOf(after, h2.id).team, "hunter");
+  assert.equal(playerOf(after, r2.id).team, "runner");
+  harness.advance(GAME_RULES.countdownMs);
+  const playing = await r1.waitFor((s) => s.phase === "playing", "2v1 round plays");
+  assert.equal(playing.roundId, countdown.roundId);
+});
+
+test("T5: the only runner leaving a 2v1 countdown empties a side and cancels to lobby (D054)", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t);
+  const h1 = await harness.create("H1");
+  const r1 = await harness.join(h1.room.roomId, "R1");
+  const h2 = await harness.join(h1.room.roomId, "H2");
+  expectAccepted(await h1.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await r1.request("chooseTeam", { team: "runner" }));
+  expectAccepted(await h2.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await h1.request("startMatch", {}));
+  await h2.waitFor((s) => s.phase === "countdown", "countdown");
+  await r1.room.leave();
+  const lobby = await h1.waitFor((s) => s.phase === "lobby" && !(r1.id in s.players), "cancelled to lobby");
+  expectNoRoundFields(lobby);
+  assert.equal(lobby.mazeSeed, 0);
+  assert.equal(lobby.hostPlayerId, h1.id);
+  assert.equal(playerOf(lobby, h1.id).team, "hunter", "teams are kept");
+  assert.equal(playerOf(lobby, h2.id).team, "hunter", "teams are kept");
+  for (const player of Object.values(lobby.players)) assert.equal(player.alive, true);
+});
+
+test("T5: deadline ends the round as runner/timeout; returnToLobby resets for a new round", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t);
+  const { host, guest, state } = await startOneVsOne(harness);
+  expectRejected(await host.request("returnToLobby", {}), "INVALID_PHASE");
+  harness.advance(GAME_RULES.roundDurationMs - 1);
+  const revision = host.snapshot().revision;
+  assert.equal((await host.waitFor((s) => s.revision >= revision + 2, "ticks")).phase, "playing");
+  harness.advance(1);
+  const results = await guest.waitFor((s) => s.phase === "results", "results");
+  assert.equal(results.resultWinner, "runner");
+  assert.equal(results.resultReason, "timeout");
+  assert.equal(results.resultEndedAt, state.roundEndsAt);
+  host.room.send(CLIENT_MESSAGES.setDirection, { roundId: state.roundId, sequence: 1, direction: "up" });
+  assert.equal((await host.nextRejection()).code, "INVALID_PHASE", "results input -> INVALID_PHASE");
+
+  expectRejected(await guest.request("returnToLobby", {}), "HOST_REQUIRED");
+  expectRejected(await host.request("returnToLobby", { extra: 1 }), "INVALID_INPUT");
+  expectAccepted(await host.request("returnToLobby", {}));
+  const lobby = await guest.waitFor((s) => s.phase === "lobby", "lobby");
+  expectNoRoundFields(lobby);
+  assert.equal(playerOf(lobby, host.id).team, "hunter");
+  assert.equal(playerOf(lobby, guest.id).team, "runner");
+  for (const player of Object.values(lobby.players)) {
+    assert.equal(player.alive, true);
+    assert.equal(player.queuedDirection, "");
+  }
+  expectRejected(await host.request("returnToLobby", {}), "INVALID_PHASE");
+
+  expectAccepted(await host.request("startMatch", {}));
+  const next = await guest.waitFor((s) => s.phase === "countdown", "second countdown");
+  assert.notEqual(next.roundId, state.roundId);
+  harness.advance(GAME_RULES.countdownMs);
+  await host.waitFor((s) => s.phase === "playing", "second round playing");
+  host.room.send(CLIENT_MESSAGES.setDirection, { roundId: state.roundId, sequence: 1, direction: "up" });
+  assert.equal((await host.nextRejection()).code, "STALE_ROUND");
+});
+
+function move(id: string, team: "hunter" | "runner", from: [number, number], to: [number, number] = from): StepMove {
+  return { id, team, from: { x: from[0], y: from[1] }, to: { x: to[0], y: to[1] } };
+}
+
+test("T5 unit: resolveContacts batches hunter x runner contacts order-independently", () => {
+  // Stationary overlap.
+  assert.deepEqual([...resolveContacts([move("h", "hunter", [1.5, 1.5]), move("r", "runner", [1.5, 1.5])])], ["r"]);
+  // Head-on swap within one step: endpoints are far apart, the swept path crosses.
+  assert.deepEqual(
+    [...resolveContacts([move("h", "hunter", [1.5, 1.5], [3.5, 1.5]), move("r", "runner", [3.5, 1.5], [1.5, 1.5])])],
+    ["r"],
+  );
+  // Same-team overlaps are ignored.
+  assert.equal(resolveContacts([move("h1", "hunter", [1.5, 1.5]), move("h2", "hunter", [1.5, 1.5])]).size, 0);
+  assert.equal(resolveContacts([move("r1", "runner", [1.5, 1.5]), move("r2", "runner", [1.5, 1.5])]).size, 0);
+  // Out of range.
+  assert.equal(resolveContacts([move("h", "hunter", [1.5, 1.5]), move("r", "runner", [3.5, 1.5])]).size, 0);
+  // Two runners hit in one batch, independent of input order.
+  const moves = [
+    move("r1", "runner", [1.5, 1.5]),
+    move("h1", "hunter", [1.5, 1.5]),
+    move("r2", "runner", [5.5, 5.5]),
+    move("h2", "hunter", [5.5, 5.5]),
+  ];
+  assert.deepEqual([...resolveContacts(moves)].sort(), ["r1", "r2"]);
+  assert.deepEqual([...resolveContacts([...moves].reverse())].sort(), ["r1", "r2"]);
+});
+
+test("T5 unit: same-step elimination + last-hunter disconnect is a simultaneous wipe", () => {
+  // 2v2 after earlier losses: H1 already left; H2 and R2 remain (R1 eliminated earlier).
+  // This step: the last runner (R2) is caught while the last hunter (H2) is eliminated in the same
+  // step (reachable with T7 vulnerability); the outcome is evaluated from step-start counts.
+  const eliminated = resolveContacts([move("h2", "hunter", [2.5, 2.5]), move("r2", "runner", [2.5, 2.5])]);
+  assert.deepEqual([...eliminated], ["r2"]);
+  assert.deepEqual(
+    evaluateRoundOutcome({ huntersAlive: 0, runnersAlive: 0, huntersAliveBefore: 1, runnersAliveBefore: 1, deadlineReached: false }),
+    { winner: "none", reason: "simultaneousWipe" },
+  );
+  // A contact on the deadline step resolves before the timeout.
+  assert.deepEqual(
+    evaluateRoundOutcome({ huntersAlive: 1, runnersAlive: 0, huntersAliveBefore: 1, runnersAliveBefore: 1, deadlineReached: true }),
+    { winner: "hunter", reason: "teamEliminated" },
+  );
+});
+
+/** Place the first runner on the first hunter spawn so they overlap at round start. */
+function firstRunnerOnHunterSpawn(): SpawnPlacer {
+  let runnersPlaced = 0;
+  return (team, position, maze) => {
+    if (team !== "runner" || runnersPlaced++ > 0) return position;
+    const cell = findSpawnCells(maze).hunter[0];
+    assert.ok(cell);
+    return { x: cell.col + 0.5, y: cell.row + 0.5 };
+  };
+}
+
+test("T5: hunter contact eliminates a runner in 2v2; eliminated runner stays, frozen, and input is INVALID_PHASE", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t, TEST_SEED, firstRunnerOnHunterSpawn());
+  const h1 = await harness.create("H1");
+  const r1 = await harness.join(h1.room.roomId, "R1");
+  const h2 = await harness.join(h1.room.roomId, "H2");
+  const r2 = await harness.join(h1.room.roomId, "R2");
+  expectAccepted(await h1.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await r1.request("chooseTeam", { team: "runner" }));
+  expectAccepted(await h2.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await r2.request("chooseTeam", { team: "runner" }));
+  expectAccepted(await h1.request("startMatch", {}));
+  const countdown = await r1.waitFor((s) => s.phase === "countdown", "countdown");
+  assert.equal(playerOf(countdown, r1.id).alive, true, "no contact during countdown");
+  harness.advance(GAME_RULES.countdownMs);
+  const hit = await r1.waitFor((s) => s.players[r1.id]?.alive === false, "R1 eliminated");
+  assert.equal(hit.phase, "playing", "one runner left: round continues");
+  assert.equal(playerOf(hit, r2.id).alive, true);
+  const frozen = playerOf(hit, r1.id);
+  r1.room.send(CLIENT_MESSAGES.setDirection, { roundId: hit.roundId, sequence: 1, direction: "up" });
+  assert.equal((await r1.nextRejection()).code, "INVALID_PHASE", "eliminated input -> INVALID_PHASE");
+  const revision = r1.snapshot().revision;
+  const later = await r1.waitFor((s) => s.revision >= revision + 3, "ticks");
+  assert.deepEqual([playerOf(later, r1.id).x, playerOf(later, r1.id).y], [frozen.x, frozen.y], "eliminated players don't move");
+
+  // The last runner disconnecting ends the round; the eliminated runner is still listed.
+  await r2.room.leave();
+  const results = await h1.waitFor((s) => s.phase === "results", "results");
+  assert.equal(results.resultWinner, "hunter");
+  assert.equal(results.resultReason, "teamEliminated");
+  assert.equal(results.resultEndedAt, harness.now());
+  assert.equal(playerOf(results, r1.id).alive, false);
+});
+
+test("T5: everyone alive leaving at once ends the round for a remaining spectator (none/abandoned when same tick)", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t, TEST_SEED, firstRunnerOnHunterSpawn());
+  const { h1, r1, h2, r2 } = await countdownTwoVsTwo(harness);
+  harness.advance(GAME_RULES.countdownMs);
+  const hit = await r1.waitFor((s) => s.players[r1.id]?.alive === false, "R1 eliminated");
+  assert.equal(hit.phase, "playing");
+  // Sent concurrently: the three closes usually land between two ticks (→ none/abandoned),
+  // but socket close timing can split them across ticks (~1 in 25 locally), in which case
+  // one team empties first (→ teamEliminated). Abandoned itself is pinned in round.test.ts.
+  await Promise.all([h1.room.leave(), h2.room.leave(), r2.room.leave()]);
+  const results = await r1.waitFor((s) => s.phase === "results", "results");
+  const outcome = `${results.resultWinner}/${results.resultReason}`;
+  assert.ok(
+    ["none/abandoned", "runner/teamEliminated", "hunter/teamEliminated"].includes(outcome),
+    `unexpected outcome ${outcome}`,
+  );
+  assert.deepEqual(Object.keys(results.players), [r1.id]);
+  assert.equal(results.hostPlayerId, r1.id);
+});
+
+test("T5: 1v1 contact at round start ends as hunter/teamEliminated", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t, TEST_SEED, firstRunnerOnHunterSpawn());
+  const { host, guest } = await countdownOneVsOne(harness);
+  harness.advance(GAME_RULES.countdownMs);
+  const results = await host.waitFor((s) => s.phase === "results", "results");
+  assert.equal(results.resultWinner, "hunter");
+  assert.equal(results.resultReason, "teamEliminated");
+  assert.equal(results.resultEndedAt, harness.now());
+  assert.equal(playerOf(results, guest.id).alive, false, "eliminated runner stays in players");
+});
+
+test("T5: last runner disconnecting during playing -> hunter/teamEliminated", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t);
+  const { host, guest } = await startOneVsOne(harness);
+  await guest.room.leave();
+  const results = await host.waitFor((s) => s.phase === "results", "results");
+  assert.equal(results.resultWinner, "hunter");
+  assert.equal(results.resultReason, "teamEliminated");
+  assert.equal(results.hostPlayerId, host.id);
+  assert.ok(!(guest.id in results.players));
+});
+
+test("T5: last hunter (host) disconnecting during playing -> runner/teamEliminated; host transfers", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t);
+  const { host, guest } = await startOneVsOne(harness);
+  await host.room.leave();
+  const results = await guest.waitFor((s) => s.phase === "results", "results");
+  assert.equal(results.resultWinner, "runner");
+  assert.equal(results.resultReason, "teamEliminated");
+  assert.equal(results.hostPlayerId, guest.id);
+  expectAccepted(await guest.request("returnToLobby", {}));
+});
+
+test("T5 unit: planSimulationSteps catches up in full steps, carries leftovers, and never passes the deadline", () => {
+  const step = SIMULATION_STEP_MS;
+  const deadline = GAME_RULES.roundDurationMs;
+  const durations = (cursor: number, ends: number[]) => ends.map((end, i) => end - (i === 0 ? cursor : ends[i - 1]!));
+  // On-time callback: exactly one step.
+  assert.equal(planSimulationSteps(0, step, deadline).length, 1);
+  // Early callback (less than a step): nothing due; the leftover carries over.
+  assert.deepEqual(planSimulationSteps(0, step - 1, deadline), []);
+  // Delayed callback before the deadline: 200 ms -> 6 full steps, no partial step.
+  const delayed = planSimulationSteps(0, 200, deadline);
+  assert.equal(delayed.length, 6);
+  for (const d of durations(0, delayed)) assert.ok(Math.abs(d - step) < 1e-6);
+  // Offset callback: 50 ms from cursor 10 -> one step; the 16.7 ms remainder carries to the next tick.
+  const offset = planSimulationSteps(10, 60, deadline);
+  assert.equal(offset.length, 1);
+  assert.deepEqual(planSimulationSteps(offset[0]!, 70, deadline), [], "16.7 ms + 10 ms is still below a step");
+  assert.equal(planSimulationSteps(offset[0]!, 77, deadline).length, 1, "carried remainder completes a step");
+  // Jump past the deadline from 100 ms before: exactly 3 full steps, no zero-length partial.
+  const exact = planSimulationSteps(deadline - 100, deadline + 5_000, deadline);
+  assert.equal(exact.length, 3);
+  assert.equal(exact.at(-1), deadline);
+  // Jump past the deadline from 110 ms before: 3 full steps + a 10 ms partial, totalling exactly 110 ms.
+  const cursor = deadline - 110;
+  const across = planSimulationSteps(cursor, deadline + 5_000, deadline);
+  const parts = durations(cursor, across);
+  assert.equal(across.length, 4);
+  assert.ok(Math.abs(parts.at(-1)! - 10) < 1e-6, `partial step ${parts.at(-1)}`);
+  assert.ok(Math.abs(parts.reduce((a, b) => a + b, 0) - 110) < 1e-6);
+  assert.equal(across.at(-1), deadline);
+  for (const end of across) assert.ok(end <= deadline, "no step goes beyond the deadline");
+  // A whole round from the start in one jump: 5400 steps ending exactly at the deadline, no drift.
+  const whole = planSimulationSteps(0, deadline + 1, deadline);
+  assert.equal(whole.length, deadline / step);
+  assert.equal(whole.at(-1), deadline);
+  // Cursor already at the deadline: nothing more to simulate.
+  assert.deepEqual(planSimulationSteps(deadline, deadline + 1_000, deadline), []);
+});
+
+test("T5: a delayed tick before the deadline simulates all elapsed time, not one capped step", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t);
+  const { host, state } = await startOneVsOne(harness);
+  const start = playerOf(state, host.id);
+  const maze = generateMaze(state.mazeSeed);
+  host.room.send(CLIENT_MESSAGES.setDirection, { roundId: state.roundId, sequence: 1, direction: walkableDirection(maze, start) });
+  await host.waitFor((s) => playerOf(s, host.id).lastInputSequence === 1, "input accepted");
+  // One delayed callback covering 200 ms (6 steps); 0.8 tiles never reaches a wall from a cell center.
+  harness.advance(200);
+  const moved = await host.waitFor((s) => {
+    const p = s.players[host.id];
+    return p !== undefined && (p.x !== start.x || p.y !== start.y);
+  }, "hunter moved");
+  const end = playerOf(moved, host.id);
+  const distance = Math.abs(end.x - start.x) + Math.abs(end.y - start.y);
+  const expected = DEFAULT_MOVE_SPEED_TILES_PER_SECOND * 0.2;
+  const oneStep = DEFAULT_MOVE_SPEED_TILES_PER_SECOND * SIMULATION_STEP_MS / 1000;
+  assert.ok(Math.abs(distance - expected) <= oneStep, `moved ${distance} tiles, expected ~${expected}`);
+});
+
+type Cell = { col: number; row: number };
+const DELTAS: Record<Direction, [number, number]> = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+
+/**
+ * Adjacent walkable cells A (hunter) and B (runner) where each player's spawn direction is
+ * immediately blocked, so both stay at their cell centers, exactly 1 tile apart, until steered.
+ */
+function adjacentPair(maze: readonly string[]): { a: Cell; b: Cell; toward: Direction; back: Direction } {
+  const spawns = findSpawnCells(maze);
+  const dirH = spawnDirection(maze, spawns.hunter[0]!);
+  const dirR = spawnDirection(maze, spawns.runner[0]!);
+  const blocked = (cell: Cell, dir: Direction) => !isWalkableIn(maze, cell.col + DELTAS[dir][0], cell.row + DELTAS[dir][1]);
+  const opposite: Record<Direction, Direction> = { up: "down", down: "up", left: "right", right: "left" };
+  for (let row = 1; row < maze.length - 1; row++) {
+    for (let col = 1; col < maze[row]!.length - 1; col++) {
+      const a = { col, row };
+      if (!isWalkableIn(maze, col, row) || !blocked(a, dirH)) continue;
+      for (const toward of ["up", "down", "left", "right"] as const) {
+        const b = { col: col + DELTAS[toward][0], row: row + DELTAS[toward][1] };
+        if (isWalkableIn(maze, b.col, b.row) && blocked(b, dirR)) {
+          return { a, b, toward, back: opposite[toward] };
+        }
+      }
+    }
+  }
+  assert.fail("no adjacent blocked pair in the test maze");
+}
+
+test("T5: a delayed tick across the deadline still resolves a catch in the final 100 ms before timing out", { timeout: 15_000 }, async (t) => {
+  let pair: ReturnType<typeof adjacentPair> | undefined;
+  const placer: SpawnPlacer = (team, _position, maze) => {
+    pair ??= adjacentPair(maze);
+    const cell = team === "hunter" ? pair.a : pair.b;
+    return { x: cell.col + 0.5, y: cell.row + 0.5 };
+  };
+  const harness = await startServer(t, TEST_SEED, placer);
+  const { host, guest, state } = await startOneVsOne(harness);
+  assert.ok(pair);
+  // Cursor lands exactly 100 ms before the deadline (5397 full steps); nobody has moved.
+  harness.advance(GAME_RULES.roundDurationMs - 100);
+  const revision = host.snapshot().revision;
+  const before = await host.waitFor((s) => s.revision >= revision + 2, "ticks");
+  assert.equal(before.phase, "playing", JSON.stringify(before));
+  assert.deepEqual([playerOf(before, host.id).x, playerOf(before, host.id).y], [pair.a.col + 0.5, pair.a.row + 0.5]);
+  assert.deepEqual([playerOf(before, guest.id).x, playerOf(before, guest.id).y], [pair.b.col + 0.5, pair.b.row + 0.5]);
+  // Steer them together: 1.0 tile apart closing at 8 tiles/s reaches contact (0.6) after 50 ms —
+  // more than one capped 33 ms step, well within the remaining 100 ms.
+  host.room.send(CLIENT_MESSAGES.setDirection, { roundId: state.roundId, sequence: 1, direction: pair.toward });
+  guest.room.send(CLIENT_MESSAGES.setDirection, { roundId: state.roundId, sequence: 1, direction: pair.back });
+  await host.waitFor(
+    (s) => s.players[host.id]?.queuedDirection === pair!.toward && s.players[guest.id]?.queuedDirection === pair!.back,
+    "both turns queued",
+  );
+  harness.advance(1_000);
+  const results = await host.waitFor((s) => s.phase === "results", "results");
+  assert.equal(`${results.resultWinner}/${results.resultReason}`, "hunter/teamEliminated");
+  assert.ok(results.resultEndedAt < results.roundEndsAt, "decided before the deadline");
+  assert.ok(results.resultEndedAt > results.roundEndsAt - 100);
+  assert.equal(playerOf(results, guest.id).alive, false);
 });

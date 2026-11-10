@@ -13,27 +13,33 @@ import {
   PATCH_INTERVAL_MS,
   PROTOCOL_VERSION,
   SERVER_MESSAGES,
-  SIMULATION_DT_SECONDS,
   SIMULATION_HZ,
   errorMessage,
+  evaluateRoundOutcome,
   findSpawnCells,
   generateMaze,
   isProtocolCompatible,
   joinErrorText,
   parseChooseTeam,
   parseJoinOptions,
+  parseReturnToLobby,
   parseSetDirection,
   parseStartMatch,
   readRequestId,
   spawnDirection,
   stepPlayerMove,
+  sweptContact,
   type ActionResultMessage,
   type Direction,
   type ErrorCode,
   type InputRejectedMessage,
   type PlayerTeam,
   type QueuedDirection,
+  type ResultReason,
+  type ResultWinner,
   type RoomPhase,
+  type Team,
+  type Vec2,
 } from "@maze/shared";
 
 const PlayerState = schema({
@@ -58,6 +64,11 @@ const GameState = schema({
   serverTime: t.number().default(0),
   roundId: t.string().default(""),
   mazeSeed: t.uint32().default(0),
+  countdownEndsAt: t.number().default(0),
+  roundEndsAt: t.number().default(0),
+  resultWinner: t.string<ResultWinner | "">().default(""),
+  resultReason: t.string<ResultReason | "">().default(""),
+  resultEndedAt: t.number().default(0),
   players: t.map(PlayerState),
 });
 type GameState = InstanceType<typeof GameState>;
@@ -66,6 +77,77 @@ type GameState = InstanceType<typeof GameState>;
 export type MazeSeedSource = () => number;
 
 const UINT32_RANGE = 0x1_0000_0000;
+
+/** Wall-clock source in epoch milliseconds; injectable for tests. */
+export type Clock = () => number;
+
+/**
+ * Trusted test hook: choose a player's spawn position given the default one.
+ * Production rooms always use the default.
+ */
+export type SpawnPlacer = (team: Team, defaultPosition: Vec2, maze: readonly string[]) => Vec2;
+
+/** One alive player's movement over a single simulation step. */
+export interface StepMove {
+  id: string;
+  team: Team;
+  from: Vec2;
+  to: Vec2;
+}
+
+/**
+ * Pure contact batch for one step: every hunter × runner pair is checked with
+ * `sweptContact` against the same snapshot, so the result does not depend on
+ * iteration order. Same-team pairs are never checked. Returns the IDs of the
+ * runners to eliminate (each at most once).
+ */
+export function resolveContacts(moves: readonly StepMove[]): Set<string> {
+  const hunters = moves.filter((move) => move.team === "hunter");
+  const eliminated = new Set<string>();
+  for (const runner of moves) {
+    if (runner.team !== "runner") {
+      continue;
+    }
+    if (hunters.some((hunter) => sweptContact(hunter.from, hunter.to, runner.from, runner.to))) {
+      eliminated.add(runner.id);
+    }
+  }
+  return eliminated;
+}
+
+/** One full simulation step in ms (1000 / SIMULATION_HZ). */
+export const SIMULATION_STEP_MS = 1000 / SIMULATION_HZ;
+/** Tolerance for float drift when comparing step boundaries (ms; inputs are round-relative). */
+const STEP_EPSILON_MS = 1e-6;
+
+/**
+ * Plan the simulation steps that catch the cursor up to `min(targetMs, deadlineMs)`.
+ * Returns each step's end time (same time base as the inputs; use round-relative ms so
+ * the epsilon dominates rounding). Full steps run while they fit; leftover time below a
+ * full step carries over, except at the deadline, which gets one final partial step so
+ * movement and contact are processed up to the deadline and never beyond it.
+ */
+export function planSimulationSteps(
+  cursorMs: number,
+  targetMs: number,
+  deadlineMs: number,
+  stepMs: number = SIMULATION_STEP_MS,
+): number[] {
+  const limit = Math.min(targetMs, deadlineMs);
+  const ends: number[] = [];
+  let at = cursorMs;
+  while (at + stepMs <= limit + STEP_EPSILON_MS) {
+    at += stepMs;
+    if (at >= deadlineMs - STEP_EPSILON_MS) {
+      at = deadlineMs;
+    }
+    ends.push(at);
+  }
+  if (targetMs >= deadlineMs && at < deadlineMs) {
+    ends.push(deadlineMs);
+  }
+  return ends;
+}
 
 export function randomMazeSeed(): number {
   return randomInt(0, UINT32_RANGE);
@@ -82,32 +164,42 @@ const ALL_PLAYERS_MUST_PICK_MESSAGE = "Every player must pick a team before star
 
 /**
  * Private T3 game room: lobby team selection, host start, and authoritative
- * 30 Hz movement. Countdown, contact, pickups, and round end belong to T5/T6.
+ * 30 Hz movement. T5 adds countdown, hunter/runner contact elimination,
+ * round outcomes (elimination, disconnect, timeout), and return-to-lobby.
  */
 export class GameRoom extends Room<{ state: GameState }> {
   maxClients = GAME_RULES.maxPlayers;
 
   /** Overridden only by trusted server code (tests); never by client options. */
   protected nextMazeSeed: MazeSeedSource = randomMazeSeed;
+  /** Overridden only by trusted server code (tests) to control phase deadlines. */
+  protected now: Clock = Date.now;
+  /** Overridden only by trusted server code (tests) to place spawns deterministically. */
+  protected placeSpawn: SpawnPlacer = (_team, position) => position;
 
   #maze: readonly string[] | null = null;
   readonly #joinOrder: string[] = [];
   readonly #recentInputs = new Map<string, number[]>();
   /** Last time each client was told RATE_LIMITED (one notice per window). */
   readonly #rateLimitNoticeAt = new Map<string, number>();
+  /** Epoch ms at which `playing` began (the countdown deadline). */
+  #roundStartedAt = 0;
+  /** Simulation cursor: round-relative ms already simulated; never passes the round deadline. */
+  #simulatedMs = 0;
 
   async onCreate(options: unknown): Promise<void> {
     const code = this.#joinOptionsError(options);
     if (code) {
       throw joinError(code);
     }
-    this.setState(new GameState({ roomCode: this.roomId, serverTime: Date.now() }));
+    this.setState(new GameState({ roomCode: this.roomId, serverTime: this.now() }));
     this.patchRate = PATCH_INTERVAL_MS;
     this.maxMessagesPerSecond = MAX_CLIENT_MESSAGES_PER_SECOND;
     await this.setPrivate(true);
 
     this.onMessage(CLIENT_MESSAGES.chooseTeam, (client, payload: unknown) => this.#chooseTeam(client, payload));
     this.onMessage(CLIENT_MESSAGES.startMatch, (client, payload: unknown) => this.#startMatch(client, payload));
+    this.onMessage(CLIENT_MESSAGES.returnToLobby, (client, payload: unknown) => this.#returnToLobby(client, payload));
     this.onMessage(CLIENT_MESSAGES.setDirection, (client, payload: unknown) => this.#setDirection(client, payload));
     this.onMessage("*", (client) => this.#rejectInput(client, "INVALID_INPUT"));
     this.setFixedTimestep(() => this.#tick(), SIMULATION_HZ);
@@ -150,6 +242,11 @@ export class GameRoom extends Room<{ state: GameState }> {
     if (this.state.hostPlayerId === sessionId) {
       this.state.hostPlayerId = this.#joinOrder[0] ?? "";
     }
+    // D054 start-eligibility: joins are closed during countdown, so everyone is
+    // assigned; cancel only when a side has become empty.
+    if (this.state.phase === "countdown" && !this.#bothSidesOccupied()) {
+      this.#resetToLobby();
+    }
     this.#changed();
   }
 
@@ -165,7 +262,7 @@ export class GameRoom extends Room<{ state: GameState }> {
 
   #changed(): void {
     this.state.revision += 1;
-    this.state.serverTime = Date.now();
+    this.state.serverTime = this.now();
   }
 
   #respond(client: Client, requestId: string, code: ErrorCode | null, message?: string): void {
@@ -245,9 +342,10 @@ export class GameRoom extends Room<{ state: GameState }> {
       }
       const cell = spawns[player.team][nextSpawnIndex[player.team]++];
       assert(cell, "teams never exceed the available spawn cells");
+      const position = this.placeSpawn(player.team, { x: cell.col + 0.5, y: cell.row + 0.5 }, maze);
       player.alive = true;
-      player.x = cell.col + 0.5;
-      player.y = cell.row + 0.5;
+      player.x = position.x;
+      player.y = position.y;
       player.direction = spawnDirection(maze, cell);
       player.queuedDirection = "";
       player.lastInputSequence = -1;
@@ -257,9 +355,55 @@ export class GameRoom extends Room<{ state: GameState }> {
     this.#rateLimitNoticeAt.clear();
     this.state.mazeSeed = seed;
     this.state.roundId = randomUUID();
-    this.state.phase = "playing";
+    this.state.phase = "countdown";
+    this.state.countdownEndsAt = this.now() + GAME_RULES.countdownMs;
+    this.state.roundEndsAt = 0;
+    this.state.resultWinner = "";
+    this.state.resultReason = "";
+    this.state.resultEndedAt = 0;
     this.#changed();
     this.#respond(client, request.requestId, null);
+  }
+
+  #returnToLobby(client: Client, payload: unknown): void {
+    const request = parseReturnToLobby(payload);
+    if (!request) {
+      this.#rejectMalformedRequest(client, payload);
+      return;
+    }
+    if (client.sessionId !== this.state.hostPlayerId) {
+      this.#respond(client, request.requestId, "HOST_REQUIRED");
+      return;
+    }
+    if (this.state.phase !== "results") {
+      this.#respond(client, request.requestId, "INVALID_PHASE");
+      return;
+    }
+    this.#resetToLobby();
+    this.#changed();
+    this.#respond(client, request.requestId, null);
+  }
+
+  /** Back to lobby with teams kept; clears every round and result field. */
+  #resetToLobby(): void {
+    this.state.players.forEach((player: PlayerState) => {
+      player.alive = true;
+      player.queuedDirection = "";
+    });
+    this.#maze = null;
+    this.state.phase = "lobby";
+    this.state.roundId = "";
+    this.state.mazeSeed = 0;
+    this.state.countdownEndsAt = 0;
+    this.state.roundEndsAt = 0;
+    this.state.resultWinner = "";
+    this.state.resultReason = "";
+    this.state.resultEndedAt = 0;
+  }
+
+  /** D054: a round needs at least one hunter and one runner; team sizes may differ. */
+  #bothSidesOccupied(): boolean {
+    return this.#teamCount("hunter") >= 1 && this.#teamCount("runner") >= 1;
   }
 
   #setDirection(client: Client, payload: unknown): void {
@@ -323,36 +467,121 @@ export class GameRoom extends Room<{ state: GameState }> {
     return count;
   }
 
+  #aliveCounts(): { hunter: number; runner: number } {
+    const counts = { hunter: 0, runner: 0 };
+    this.state.players.forEach((player: PlayerState) => {
+      if (player.alive && player.team !== "unassigned") {
+        counts[player.team] += 1;
+      }
+    });
+    return counts;
+  }
+
   #tick(): void {
+    const now = this.now();
+    if (this.state.phase === "countdown" && now >= this.state.countdownEndsAt) {
+      this.state.phase = "playing";
+      this.state.roundEndsAt = this.state.countdownEndsAt + GAME_RULES.roundDurationMs;
+      this.#roundStartedAt = this.state.countdownEndsAt;
+      this.#simulatedMs = 0;
+      this.state.countdownEndsAt = 0;
+    }
     const maze = this.#maze;
     if (this.state.phase === "playing" && maze) {
-      this.state.players.forEach((player: PlayerState) => {
-        if (!player.alive) {
-          return;
-        }
+      this.#catchUp(now, maze);
+    }
+    this.#changed();
+  }
+
+  /**
+   * Advance the simulation cursor toward `min(now, roundEndsAt)` in fixed steps (plus a final
+   * partial step at the deadline), stopping as soon as the round ends. With nothing due, one
+   * zero-length step still runs so disconnects since the last tick are evaluated promptly.
+   */
+  #catchUp(now: number, maze: readonly string[]): void {
+    const deadlineMs = this.state.roundEndsAt - this.#roundStartedAt;
+    const ends = planSimulationSteps(this.#simulatedMs, now - this.#roundStartedAt, deadlineMs);
+    if (ends.length === 0) {
+      ends.push(this.#simulatedMs);
+    }
+    for (const end of ends) {
+      const dt = Math.max(0, (end - this.#simulatedMs) / 1000);
+      this.#simulatedMs = end;
+      this.#playingStep(dt, end >= deadlineMs, this.#roundStartedAt + end, maze);
+      if (this.state.phase !== "playing") {
+        return;
+      }
+    }
+  }
+
+  /** One D041 step: move → contacts on one snapshot → eliminate together → outcome. */
+  #playingStep(dt: number, deadlineReached: boolean, stepEndsAt: number, maze: readonly string[]): void {
+    // Alive counts at step start (the first step of a tick sees any disconnects since the last tick).
+    const before = this.#aliveCounts();
+    const moves: StepMove[] = [];
+    this.state.players.forEach((player: PlayerState) => {
+      if (!player.alive || player.team === "unassigned") {
+        return;
+      }
+      const from = { x: player.x, y: player.y };
+      if (dt > 0) {
         const next = stepPlayerMove(
           {
-            position: { x: player.x, y: player.y },
+            position: from,
             direction: player.direction,
             queuedDirection: player.queuedDirection === "" ? null : player.queuedDirection,
           },
           DEFAULT_MOVE_SPEED_TILES_PER_SECOND,
-          SIMULATION_DT_SECONDS,
+          dt,
           maze,
         );
         player.x = next.position.x;
         player.y = next.position.y;
         player.direction = next.direction;
         player.queuedDirection = next.queuedDirection ?? "";
-      });
+      }
+      moves.push({ id: player.id, team: player.team, from, to: { x: player.x, y: player.y } });
+    });
+    for (const id of resolveContacts(moves)) {
+      const player = this.state.players.get(id);
+      if (player) {
+        player.alive = false;
+        player.queuedDirection = "";
+      }
     }
-    this.#changed();
+    const after = this.#aliveCounts();
+    const outcome = evaluateRoundOutcome({
+      huntersAlive: after.hunter,
+      runnersAlive: after.runner,
+      huntersAliveBefore: before.hunter,
+      runnersAliveBefore: before.runner,
+      deadlineReached,
+    });
+    if (outcome) {
+      this.state.phase = "results";
+      this.state.resultWinner = outcome.winner;
+      this.state.resultReason = outcome.reason;
+      this.state.resultEndedAt = Math.min(stepEndsAt, this.state.roundEndsAt);
+    }
   }
+}
+
+export interface GameRoomOverrides {
+  seedSource?: MazeSeedSource | undefined;
+  clock?: Clock | undefined;
+  spawnPlacer?: SpawnPlacer | undefined;
+}
+
+/** A GameRoom with trusted server-side seed and/or clock sources (tests). */
+export function gameRoomWith({ seedSource, clock, spawnPlacer }: GameRoomOverrides): typeof GameRoom {
+  return class extends GameRoom {
+    protected nextMazeSeed: MazeSeedSource = seedSource ?? randomMazeSeed;
+    protected now: Clock = clock ?? Date.now;
+    protected placeSpawn: SpawnPlacer = spawnPlacer ?? ((_team, position) => position);
+  };
 }
 
 /** A GameRoom whose maze seeds come from a trusted server-side source (tests). */
 export function gameRoomWithSeedSource(source: MazeSeedSource): typeof GameRoom {
-  return class extends GameRoom {
-    protected nextMazeSeed: MazeSeedSource = source;
-  };
+  return gameRoomWith({ seedSource: source });
 }

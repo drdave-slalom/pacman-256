@@ -24,6 +24,7 @@ import type {
   ErrorCode,
   GameRoomSnapshot,
   JoinOptions,
+  ReturnToLobbyMessage,
   StartMatchMessage,
   Team,
 } from "@maze/shared";
@@ -36,6 +37,7 @@ import {
   isRoundActive,
   leaveMessage,
   playerViews,
+  resultSummary,
 } from "./session-model.ts";
 import type { ActionOutcome } from "./session-model.ts";
 import { parseAppRoute, serializeAppRoute } from "@maze/shared";
@@ -93,6 +95,7 @@ const ui = {
   hunterButton: element<HTMLButtonElement>("#pick-hunter"),
   runnerButton: element<HTMLButtonElement>("#pick-runner"),
   startButton: element<HTMLButtonElement>("#start-match"),
+  returnLobbyButton: element<HTMLButtonElement>("#return-lobby"),
   lobbyHint: element<HTMLElement>("#lobby-hint"),
   lobbyNotice: element<HTMLElement>("#lobby-notice"),
   gamePanel: element<HTMLElement>("#game-panel"),
@@ -188,11 +191,11 @@ function stopRenderer(): void {
 
 /**
  * The single direction-request path for the HTML D-pad, swipe, and keyboard.
- * Input outside an active round is dropped; the sender dedupes, sequences, and
+ * Input outside an active round or from a non-alive (spectating) player is dropped; the sender dedupes, sequences, and
  * budgets it.
  */
 function sendDirection(direction: Direction): void {
-  if (!room || !snapshot || !isRoundActive(snapshot)) {
+  if (!room || !snapshot || !isRoundActive(snapshot) || !snapshot.players[room.sessionId]?.alive) {
     return;
   }
   const message = directionSender.next(snapshot.roundId, direction, performance.now());
@@ -209,7 +212,7 @@ function scheduleHeldDirection(): void {
   }
   heldDirectionTimer = window.setTimeout(() => {
     heldDirectionTimer = undefined;
-    if (!room || !snapshot || !isRoundActive(snapshot)) {
+    if (!room || !snapshot || !isRoundActive(snapshot) || !snapshot.players[room.sessionId]?.alive) {
       return;
     }
     const message = directionSender.flush(snapshot.roundId, performance.now());
@@ -380,8 +383,8 @@ function resetSession(): void {
 }
 
 function sendAction(
-  type: "chooseTeam" | "startMatch",
-  payload: (requestId: string) => ChooseTeamMessage | StartMatchMessage,
+  type: "chooseTeam" | "startMatch" | "returnToLobby",
+  payload: (requestId: string) => ChooseTeamMessage | StartMatchMessage | ReturnToLobbyMessage,
 ): void {
   if (!room) {
     return;
@@ -425,6 +428,7 @@ function setLobbyBusy(busy: boolean): void {
   ui.hunterButton.disabled = busy;
   ui.runnerButton.disabled = busy;
   ui.startButton.disabled = busy;
+  ui.returnLobbyButton.disabled = busy;
 }
 
 const TEAM_LABELS = { hunter: "Hunters", runner: "Runners", unassigned: "no team yet" } as const;
@@ -449,7 +453,7 @@ function render(): void {
   showView("lobby");
   const isHost = snapshot.hostPlayerId === localId;
   // Patches arrive ~20 Hz even in the lobby; only touch the DOM when the roster changes.
-  const lobbyKey = JSON.stringify([snapshot.roomCode, snapshot.phase, isHost, players.map((p) => [p.id, p.displayName, p.team, p.isHost])]);
+  const lobbyKey = JSON.stringify([snapshot.roomCode, snapshot.phase, snapshot.resultWinner, snapshot.resultReason, isHost, players.map((p) => [p.id, p.displayName, p.team, p.isHost])]);
   if (lobbyKey === renderedLobbyKey) {
     return;
   }
@@ -464,7 +468,13 @@ function render(): void {
       return item;
     }),
   );
-  ui.startButton.hidden = !isHost;
+  const inLobby = snapshot.phase === "lobby";
+  const summary = resultSummary(snapshot);
+  // Teams are locked outside the lobby phase (countdown, results).
+  ui.hunterButton.hidden = !inLobby;
+  ui.runnerButton.hidden = !inLobby;
+  ui.startButton.hidden = !isHost || !inLobby;
+  ui.returnLobbyButton.hidden = !isHost || summary === null;
   const hunters = players.filter((player) => player.team === "hunter").length;
   const runners = players.filter((player) => player.team === "runner").length;
   const unassigned = players.length - hunters - runners;
@@ -472,7 +482,13 @@ function render(): void {
   // Start requires every connected player to have picked and at least one per team.
   const canStart = unassigned === 0 && hunters >= 1 && runners >= 1;
   ui.startButton.disabled = pending.busy || !canStart;
-  if (snapshot.phase !== "lobby") {
+  if (summary !== null) {
+    // Results phase: the result line owns the hint; no D054 roster warning.
+    ui.lobbyHint.textContent = isHost
+      ? summary
+      : `${summary} Waiting for the host to return to the lobby.`;
+    showNotice("");
+  } else if (!inLobby) {
     ui.lobbyHint.textContent = `Room phase: ${snapshot.phase}.`;
     showNotice("");
   } else if (unassigned > 0) {
@@ -505,6 +521,9 @@ ui.hunterButton.addEventListener("click", () => pickTeam("hunter"));
 ui.runnerButton.addEventListener("click", () => pickTeam("runner"));
 ui.startButton.addEventListener("click", () => {
   sendAction(CLIENT_MESSAGES.startMatch, (requestId) => ({ requestId }));
+});
+ui.returnLobbyButton.addEventListener("click", () => {
+  sendAction(CLIENT_MESSAGES.returnToLobby, (requestId) => ({ requestId }));
 });
 ui.copyCodeButton.addEventListener("click", async () => {
   const code = snapshot?.roomCode ?? "";

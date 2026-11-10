@@ -1,4 +1,5 @@
 import type { Direction, RoomPhase, Team } from "./index.ts";
+import type { ResultReason, ResultWinner } from "./round.ts";
 
 /**
  * T3 wire protocol for the private game room (see
@@ -132,6 +133,7 @@ export const CLIENT_MESSAGES = {
   chooseTeam: "chooseTeam",
   startMatch: "startMatch",
   setDirection: "setDirection",
+  returnToLobby: "returnToLobby",
 } as const;
 
 /** Server → client message types. */
@@ -152,6 +154,10 @@ export interface ChooseTeamMessage {
 }
 
 export interface StartMatchMessage {
+  requestId: string;
+}
+
+export interface ReturnToLobbyMessage {
   requestId: string;
 }
 
@@ -201,8 +207,18 @@ export interface GameRoomSnapshot {
   serverTime: number;
   /** Unique per round; `""` in the lobby before the first start. */
   roundId: string;
-  /** uint32 seed for `generateMaze`; `0` before the first start. */
+  /** uint32 seed for `generateMaze`; `0` in the lobby. */
   mazeSeed: number;
+  /** Epoch ms when the countdown ends; `0` when not counting down. */
+  countdownEndsAt: number;
+  /** Epoch ms deadline of the playing round; `0` when not applicable. */
+  roundEndsAt: number;
+  /** Round winner; `""` until results. */
+  resultWinner: ResultWinner | "";
+  /** Why the round ended; `""` until results. */
+  resultReason: ResultReason | "";
+  /** Epoch ms when the round ended; `0` until results. */
+  resultEndedAt: number;
   players: Record<string, PlayerSnapshot>;
 }
 
@@ -282,6 +298,17 @@ export function parseChooseTeam(value: unknown): ChooseTeamMessage | null {
 }
 
 export function parseStartMatch(value: unknown): StartMatchMessage | null {
+  if (!isPlainObject(value) || !hasExactKeys(value, ["requestId"])) {
+    return null;
+  }
+  const { requestId } = value;
+  if (!isBoundedId(requestId, MAX_REQUEST_ID_LENGTH)) {
+    return null;
+  }
+  return { requestId };
+}
+
+export function parseReturnToLobby(value: unknown): ReturnToLobbyMessage | null {
   if (!isPlainObject(value) || !hasExactKeys(value, ["requestId"])) {
     return null;
   }

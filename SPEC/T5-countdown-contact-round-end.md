@@ -1,0 +1,220 @@
+# T5 spec: countdown, baseline contact elimination, and team round end
+
+**Status:** Implemented on Lead assumptions; pending David's approval at PR review
+(he was unavailable when work started) · **Lane:** B (server/shared)
+**Sources:** [delivery plan T5](../DELIVERY-PLAN.md), [game contract](../docs/GAME-CONTRACT.md)
+§1, §3, §4, §5, §7, §8, [decision log](../docs/DECISIONS.md) (D040-D044, D047, D049),
+[T3 spec](./T3-private-rooms-and-synchronized-movement.md).
+
+## Goal
+
+The authoritative server runs a complete round: host start → 3 s countdown →
+playing → contact eliminations → a decided result (team win, draw, timeout, or
+abandon) → host returns the room to the lobby. Eliminated players cannot act.
+Disconnect outcomes are defined. No pickups or vulnerability yet (T7).
+
+## Assumptions (state, do not treat as new rules)
+
+- **Baseline contact (T5 only):** any contact between an alive hunter and an alive
+  runner eliminates the runner (contract §5, row 1 with no vulnerability and no
+  shields). Same-team contact never blocks or eliminates. Opponent *blocking* only
+  exists in the shielded-runner case, so it arrives with T7.
+- **Contact test:** a hunter and runner are in contact when the distance between
+  their positions is ≤ `CONTACT_DISTANCE_TILES` (tunable constant in shared config,
+  starting value 0.6). Detection is **swept**: test each pair over the segment each
+  moved this tick (closest approach of the two relative paths), so a fast crossing
+  or head-on swap between ticks cannot evade contact (contract §4).
+- **Deadlines use server simulation time**, not wall-clock arithmetic scattered in
+  handlers. The room uses an injectable clock (tests control it); effects/phases
+  are active while `now < end`, expired at equality (contract §3).
+- **Countdown** starts on an accepted `startMatch`. The roundId, maze seed, and
+  spawns are assigned at countdown start so clients can render the maze. Players
+  are frozen at spawn; `setDirection` during countdown → `INVALID_PHASE`
+  (contract §2: play only).
+- Joins during countdown/results stay `JOIN_CLOSED` (existing T3 behavior; no
+  `lock()`, see T3 deviations).
+- Client work is **out of scope** beyond keeping the T3/T4 client from crashing on
+  the new phases/fields. The HUD, spectating view, and results screen are T6.
+- Per-tick event order follows D041: expire effects (none yet) → move → pickups
+  (none yet) → contacts from one snapshot → apply eliminations together → team
+  victory → timeout.
+
+## Implementation notes and deviations (after review, 2026-11-10)
+
+- `PROTOCOL_VERSION` stays 1: the new snapshot fields are additive and the T3/T4
+  client ignores them.
+- **Deadline handling (fixed after Copilot PR review):** the server keeps a
+  simulation cursor (`#roundStartedAt` + `#simulatedMs`). Each tick catches up with
+  fixed 1/30 s steps to `min(now, roundEndsAt)` (`planSimulationSteps`) and adds a
+  final partial step that ends exactly at the deadline. Every step runs the full D041
+  sequence. A late tick therefore never skips movement or contact, and nothing is
+  simulated past `roundEndsAt`. `resultEndedAt` is the simulation time at which the
+  outcome was decided.
+- **Round outcome:** "alive before" counts are taken at the start of each playing step,
+  after disconnects are applied. Both sides empty at step start → `abandoned`; both
+  emptied during the step → `simultaneousWipe`.
+- **Test hooks:** `gameRoomWith({ seedSource, clock, spawnPlacer })` is reachable only from
+  trusted server code (`createGameServer` options), never from client join options.
+- **Client:** eliminated players stop sending `setDirection`. No other UI changes.
+- **Countdown cancel:** cancels to `lobby` only when a leave makes a side empty
+  (D054); unbalanced rosters keep counting down.
+- **D054 re-interpretation (needs David/Chase confirmation):** this countdown-cancel
+  rule was re-interpreted after D054 (unbalanced lobbies) replaced "teams become
+  unbalanced" with "a side becomes empty", matching the D054 start-eligibility rule.
+- **Minimal results control (added at David's request, 2026-11-10):** without it, a room
+  can't start a second round. In `results`, the lobby view:
+  - shows a one-line server result (winner and reason, for example "Round over: Hunters
+    win — all runners eliminated.");
+  - hides Start and the team buttons;
+  - shows the host a **Back to lobby** button that sends `returnToLobby` through the
+    existing pending-action flow (a correlated `actionResult` with visible errors);
+  - tells non-hosts that they are waiting for the host.
+
+  The full HUD, spectating view, and results screen remain T6.
+- **Unit-level only:**
+  - The deadline-step contact, `simultaneousWipe`, and `abandoned` are covered only by
+    unit tests.
+  - Under baseline T5 rules a contact wipe can't happen inside a room; it becomes
+    reachable with T7 vulnerability.
+  - The room-level all-leave test accepts any decided outcome, because three leaves
+    don't reliably land in one tick.
+
+## Follow-ups (open after T5 review and QA)
+
+Owners pick these up in the named task. They aren't T5 acceptance criteria.
+
+**T6 (results UI):**
+- Capitalise "no winner: all players left." in `resultSummary`
+  (`apps/client/src/session-model.ts`) and update its test.
+- Announce the result line to screen readers: it goes to `#lobby-hint`, which isn't
+  a live region.
+- When the last runners *disconnect*, the result still reads "all runners
+  eliminated" (`teamEliminated`), which is misleading when nobody was caught.
+  Decide on wording, or whether a distinct server reason is needed (that would be a
+  contract change; see D043).
+- Check the draw (`none`) and `timeout` result lines in a browser. QA reached
+  results only by runners disconnecting.
+
+**T7 (vulnerability):**
+- Add a room-level simultaneous-wipe test once runners can eliminate vulnerable
+  hunters; today it is unit-tested only.
+
+**Test infrastructure (unassigned):**
+- A deterministic room-level `abandoned` test needs a hook to step the simulation
+  manually. The current all-leave test accepts any decided outcome.
+- An older 2v2 test asserts `resultEndedAt === harness.now()`. It holds only while the
+  fake clock is frozen; assert against simulation time or `<= now` instead.
+- Rename the unit test "same-step elimination + last-hunter disconnect is a
+  simultaneous wipe" to match its scenario (`apps/server/src/game-room.test.ts`).
+
+**Lobby client (from D054 on `main`, not introduced by T5):**
+- After an action that doesn't change the roster (e.g. re-picking your team or a
+  rejected start), `setLobbyBusy(false)` re-enables Start and the D054 notice stays
+  cleared until the roster changes (`apps/client/src/main.ts`). The server still
+  rejects the start. Fix: re-render in `finishAction`.
+- `DELIVERY-PLAN.md` still says the countdown cancels "on lost balance"; under D054
+  T5 cancels only when a side becomes empty. Align once David/Chase confirm it.
+
+**Devices:** no phone or touch validation of T5 yet. Cover it in T8.
+
+## Out of scope
+
+Pickups and effects, shield/vulnerability contact rows, opponent blocking, T6 HUD /
+spectator / results UI, T4 lobby UI, reconnect, client prediction, cloud/CI changes.
+
+## Shared (`packages/shared`)
+
+- Constants: `CONTACT_DISTANCE_TILES`; reuse `GAME_RULES.countdownMs` (3 000) and
+  `GAME_RULES.roundDurationMs` (180 000).
+- `ReturnToLobbyMessage {requestId}` + `CLIENT_MESSAGES.returnToLobby` with a runtime
+  validator (same exact-key rules as the other requests).
+- Result types: `ResultReason = "teamEliminated" | "timeout" | "simultaneousWipe" |
+  "abandoned"`; `winningTeam: Team | "none"`.
+- Snapshot additions (`GameRoomSnapshot`): `countdownEndsAt`, `roundEndsAt` (server
+  epoch ms, `0` when not applicable), `resultWinner`, `resultReason`, `resultEndedAt`.
+  Bump `PROTOCOL_VERSION` only if the existing client would break; otherwise keep
+  it and record why.
+- A pure, unit-tested function for swept pair contact (and, if useful, round-outcome
+  evaluation from alive counts) so the rules are testable without Colyseus.
+
+## Server (`apps/server`)
+
+State machine (contract §1): `lobby → countdown → playing → results → lobby`.
+
+- **`startMatch`** (host, lobby, every player assigned, ≥1 hunter and ≥1 runner per
+  D054 — unchanged checks): sets roundId, seed,
+  spawns, `countdownEndsAt = now + countdownMs`, phase `countdown`.
+- **Countdown:** when `now ≥ countdownEndsAt` → phase `playing`, set
+  `roundEndsAt = playingStart + roundDurationMs`. Movement runs only in `playing`.
+- **Side empty in countdown** (a participant leaves and a side becomes empty (D054):
+  0 hunters or 0 runners) → cancel: phase `lobby`, round state cleared, participants
+  and teams kept. An unbalanced but non-empty roster (e.g. 2v2 → 2v1) keeps counting
+  down.
+- **Playing tick:** move alive players; evaluate all hunter–runner contacts from one
+  snapshot, eliminate every contacted runner together (`alive = false`); then
+  evaluate the winner; then timeout. At the deadline process movement/contact only
+  through `roundEndsAt` (no extra portion of the step).
+- **Round end → `results`:** hunters win when all runners are gone; runners win when
+  all hunters are gone (not reachable in T5 baseline, but the evaluator must support
+  it for T7); both teams wiped in the same step → draw (`winningTeam: "none"`,
+  `simultaneousWipe`); both teams alive at deadline → runners win (`timeout`).
+  Results freeze: no movement, `setDirection` → `INVALID_PHASE`; final players and
+  result remain in state until `returnToLobby`.
+- **Eliminated players** stay connected spectators occupying their slot;
+  `setDirection` from them → `INVALID_PHASE`.
+- **`returnToLobby`** (host only → `HOST_REQUIRED`; results only → `INVALID_PHASE`;
+  correlated `actionResult`): phase `lobby`, all players `alive = true`, round and
+  result fields cleared, teams and participants retained. A late `setDirection` for
+  the old round cannot affect the new one (`STALE_ROUND`; new roundId each round).
+- **Leave/disconnect:** unchanged removal + host transfer (all phases). In `playing`,
+  evaluate disconnect removals together with the tick's contact/victory batch: an
+  empty side loses; same-step wipes draw; both sides empty → `abandoned` (room
+  disposes when empty). Elimination vs. disconnect of the last player on each side in
+  one step draws.
+- Rooms never get stuck: any state reachable from a disconnect must lead to a
+  decided result, the lobby, or disposal.
+
+## Acceptance criteria
+
+1. `startMatch` accepted → `countdown` with `roundId`, `mazeSeed`, spawns,
+   `countdownEndsAt = now + 3 000`; players do not move; `setDirection` →
+   `INVALID_PHASE`. At `countdownEndsAt` the phase becomes `playing` and
+   `roundEndsAt = start + 180 000`.
+2. Leaving during countdown so a side becomes empty (D054) returns to `lobby` with
+   teams/participants intact (assert 1v1 and a 2v1 whose only runner leaves); a
+   leave that leaves both sides non-empty (2v2 → 2v1) keeps the countdown running.
+3. A hunter reaching a runner eliminates only that runner; same-team overlap does
+   nothing; the eliminated player stays in the room, `alive = false`, and cannot
+   change state.
+4. Swept contact: two players that cross or swap within a single step still collide;
+   tests exercise head-on crossing at the maximum step.
+5. Several contacts in one tick eliminate all contacted runners together regardless
+   of iteration order.
+6. All runners eliminated → `results`, winner `hunter`, reason `teamEliminated`.
+7. 2v2 where both teams are wiped in one step (including one eliminated + one
+   disconnected) → winner `none`, reason `simultaneousWipe`.
+8. Both teams alive at 180 s → winner `runner`, reason `timeout`; a contact on the
+   deadline step resolves before the timeout.
+9. Disconnect of a side's last player during `playing` → the other team wins; both
+   sides in the same step → draw/`abandoned` per above; host transfers; no stuck room.
+10. Results freeze movement; `returnToLobby`: non-host → `HOST_REQUIRED`, wrong phase →
+    `INVALID_PHASE`, accepted → lobby with all alive, teams kept, round/result
+    cleared; a new `startMatch` works and old-round inputs get `STALE_ROUND`.
+11. Existing T3 tests and the T3/T4 client still pass; the client does not crash on
+    countdown/results phases. In `results` the host can return everyone to the lobby
+    from the client, and every player sees the server-reported result.
+12. `npm run check` (typecheck, tests, build) passes.
+
+## Validation
+
+`npm ci && npm run check` in the worktree. Server tests use an injectable clock and
+seed source and drive the room deterministically (no sleeps for the 3 s / 180 s
+deadlines). Add shared unit tests for the swept-contact and outcome functions.
+Browser/phone verification is not claimed for T5 (no HUD until T6).
+
+## Handoff
+
+Builder reports: files changed, new constants and wire fields, any deviation from
+this spec (with reason), commands run with results, test gaps, and the three-way
+reconciliation (spec ↔ change ↔ tests). Escalate before changing the approved
+contract, bumping `PROTOCOL_VERSION`, or touching T4 client files beyond a crash fix.

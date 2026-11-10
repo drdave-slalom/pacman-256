@@ -18,10 +18,17 @@ import {
   parseDisplayName,
   parseInputRejected,
   parseJoinOptions,
+  parseReturnToLobby,
   parseSetDirection,
   parseStartMatch,
   readRequestId,
 } from "./protocol.ts";
+
+test("returnToLobby requires exactly a bounded requestId", () => {
+  assert.deepEqual(parseReturnToLobby({ requestId: "r1" }), { requestId: "r1" });
+  assert.equal(parseReturnToLobby({}), null);
+  assert.equal(parseReturnToLobby({ requestId: "r1", phase: "lobby" }), null);
+});
 
 test("tunables are named and consistent", () => {
   assert.equal(SIMULATION_DT_SECONDS, 1 / SIMULATION_HZ);
