@@ -7,8 +7,8 @@ the start of every game (seeded, deterministic), continuous movement with
 buffered turns and wall collisions, and D-pad / swipe / keyboard steering.
 T3 adds a private `GameRoom` on the server (see below): join validation, team
 selection, host-started matches, and authoritative 30 Hz movement. The client
-does not use it yet; client integration, countdown, contact combat, pickups, and
-round end remain later tasks.
+has a tested, DOM-free session model (`apps/client/src/session-model.ts`) for
+this room; countdown, contact combat, pickups, and round end remain later tasks.
 
 ## Requirements and quick start
 
@@ -36,8 +36,7 @@ is occupied rather than silently selecting a different URL.
 ## Server game room (T3)
 
 The server defines a private game room (`GAME_ROOM`) alongside the diagnostic
-room. It is exercised by integration tests with real Colyseus SDK clients; the
-browser client does not use it yet.
+room. It is exercised by integration tests with real Colyseus SDK clients.
 
 - **Join:** protocol version and display name are validated on create and join;
   unknown options are rejected. Rooms are private (join by room code, not
@@ -55,6 +54,22 @@ browser client does not use it yet.
   cap disconnects only the offending client.
 - **Leave:** host transfers to the earliest remaining player; empty rooms are
   disposed.
+
+## Client session model (T3)
+
+`apps/client/src/session-model.ts` holds pure helpers (no DOM/Phaser) for the
+client side of the game room:
+
+- Round detection and maze identity (`isRoundActive`, `mazeKey`) and
+  snapshot-to-view mapping (`playerViews`).
+- `DirectionSender`: sends `setDirection` only on direction changes, sequences
+  from 0 per round, and keeps a client-side budget below the server rate limit.
+  Changes made over budget are held (latest wins) and flushed when budget frees,
+  including a re-hold after a `RATE_LIMITED` rejection.
+- `PendingAction`: tracks one in-flight `chooseTeam`/`startMatch` request until
+  its correlated accept/reject, an uncorrelated `INVALID_INPUT`, or a timeout.
+- `isPlausibleRoomCode`, `Interpolator` (glides between patches, snaps on large
+  jumps), and `leaveMessage` (player-facing text for unexpected disconnects).
 
 ## Commit-time documentation updates
 
@@ -117,8 +132,10 @@ placement across many maze seeds, health, state synchronization, and
 incompatible-version rejection. Game-room integration tests (`game-room.test.ts`)
 cover private-room join/failure codes, team selection, host-only balanced start,
 synchronized movement, input rejection and rate limiting, flood disconnect, and
-host transfer/room disposal. `npm test` also runs the
-tests for the staged-documentation update script
+host transfer/room disposal. Client unit tests (`apps/client/src/*.test.ts`)
+cover the session model: input dedupe/sequencing/rate budgeting, pending-action
+resolution, room-code validation, interpolation, and leave messages. `npm test`
+also runs the tests for the staged-documentation update script
 (`scripts/update-staged-docs.test.mjs`) and the software-factory smoke tests
 (`scripts/factory-smoke.test.mjs`). No cloud account is required.
 `npm run build` emits shared/server JavaScript and client static assets.
@@ -163,7 +180,7 @@ in GitHub branch protection/rulesets; the workflow alone does not enforce that.
 
 | Location | Responsibility |
 |---|---|
-| [apps/client](./apps/client/) | Phaser/Vite browser client and local proxy |
+| [apps/client](./apps/client/) | Phaser/Vite browser client, session model, and local proxy |
 | [apps/server](./apps/server/) | Colyseus server, diagnostic room, private game room, and integration tests |
 | [packages/shared](./packages/shared/) | Browser/server protocol (room messages, validators, error codes), types, maze/spawn logic, and approved tuning |
 | [Game contract](./docs/GAME-CONTRACT.md) | Approved behavior and interface baseline |
