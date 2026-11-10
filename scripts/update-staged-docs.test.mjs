@@ -10,6 +10,7 @@ import {
     readTaskStatuses,
     renderBriefTaskStatus,
     replaceManagedStatusBlock,
+    resolveDocumentationUpdates,
     validateCopilotResponse,
 } from "./update-staged-docs.mjs";
 
@@ -166,4 +167,36 @@ test("Copilot prompt is sent on stdin, never in argv", () => {
     assert.equal(invocation.options.env.PATH, "/usr/bin");
     assert.equal(invocation.options.env.NO_COLOR, "1");
     assert.ok(!("SECRET_VALUE" in invocation.options.env));
+});
+
+test("validated response is applied after the retry loop (task statuses, docs, brief)", () => {
+    const brief = "# Brief\n\n<!-- auto-doc-status:start -->\n- stale.\n<!-- auto-doc-status:end -->\n";
+    const replies = [
+        "Here is the update.",
+        JSON.stringify({
+            requiresHumanReview: false,
+            updates: [{ path: "README.md", content: "# Readme\n\nUpdated.\n" }],
+            taskStatuses: [{ id: "T2", status: "In progress" }],
+        }),
+    ];
+    const prompts = [];
+    const { backend, changedUpdates } = resolveDocumentationUpdates({
+        prompt: "PROMPT",
+        plan: { sourcePaths: ["apps/client/src/main.ts"], docPaths: ["README.md"], syncBrief: true, updateTaskStatuses: true },
+        currentDocs: { "README.md": "# Readme\n" },
+        currentDeliveryPlan: taskPlan,
+        currentBrief: brief,
+        generate: (prompt) => {
+            prompts.push(prompt);
+            return { backend: "copilot", stdout: replies[prompts.length - 1] };
+        },
+    });
+    assert.equal(backend, "copilot");
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1], /previous reply failed validation/);
+    const byPath = Object.fromEntries(changedUpdates.map(({ path, content }) => [path, content]));
+    assert.deepEqual(Object.keys(byPath).sort(), ["DELIVERY-PLAN.md", "PROJECT-BRIEF.md", "README.md"]);
+    assert.equal(byPath["README.md"], "# Readme\n\nUpdated.\n");
+    assert.equal(readTaskStatuses(byPath["DELIVERY-PLAN.md"]).statuses.get("T2").status, "In progress");
+    assert.match(byPath["PROJECT-BRIEF.md"], /- T2: In progress\./);
 });

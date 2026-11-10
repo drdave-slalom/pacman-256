@@ -375,6 +375,54 @@ function generateDocsResponse(prompt) {
     return { backend, stdout };
 }
 
+export function resolveDocumentationUpdates({
+    prompt,
+    plan,
+    currentDocs,
+    currentDeliveryPlan,
+    currentBrief,
+    generate = generateDocsResponse,
+}) {
+    // Ask for the docs response; if the agent misses the JSON schema, re-ask
+    // once with the validator's feedback before giving up.
+    let attemptPrompt = prompt;
+    let response = null;
+    let updates = null;
+    let backend = "copilot";
+    let stdout = "";
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+        ({ backend, stdout } = generate(attemptPrompt));
+        try {
+            response = parseCopilotResponse(stdout);
+            updates = validateCopilotResponse(response, plan.docPaths, currentDocs);
+            break;
+        } catch (error) {
+            if (attempt === 2) {
+                const dumpPath = path.join(repositoryRoot, ".cache", "docs-agent-response.txt");
+                writeFileSync(dumpPath, stdout, "utf8");
+                const snippet = stdout.replace(/\s+/g, " ").slice(0, 600);
+                throw new Error(`${error.message} Raw ${backend} response saved to ${dumpPath}; preview: ${snippet}`);
+            }
+            attemptPrompt =
+                `${prompt}\n\nYour previous reply failed validation: ${error.message}\nNow reply ONLY with the exact JSON object described above; nothing else.`;
+        }
+    }
+    const updatedDeliveryPlan = plan.updateTaskStatuses
+        ? applyTaskStatusUpdates(currentDeliveryPlan, response.taskStatuses)
+        : currentDeliveryPlan;
+    const updatedBrief = plan.syncBrief
+        ? replaceManagedStatusBlock(currentBrief, renderBriefTaskStatus(updatedDeliveryPlan))
+        : currentBrief;
+    const changedUpdates = updates.filter(({ path: filePath, content }) => content !== currentDocs[filePath]);
+    if (updatedDeliveryPlan !== currentDeliveryPlan) {
+        changedUpdates.push({ path: "DELIVERY-PLAN.md", content: updatedDeliveryPlan });
+    }
+    if (updatedBrief !== currentBrief) {
+        changedUpdates.push({ path: "PROJECT-BRIEF.md", content: updatedBrief });
+    }
+    return { backend, changedUpdates };
+}
+
 function main() {
     const stagedPaths = runGit(["diff", "--cached", "--name-only", "--diff-filter=ACMRD", "-z"], {
         preserveWhitespace: true,
@@ -421,43 +469,14 @@ function main() {
         plan.docPaths.map((filePath) => [filePath, readFileSync(path.join(repositoryRoot, filePath), "utf8")]),
     );
     const prompt = createPrompt({ sourcePaths: plan.sourcePaths, diff, currentDocs, currentDeliveryPlan });
-    // Ask for the docs response; if the agent misses the JSON schema, re-ask
-    // once with the validator's feedback before giving up.
-    let attemptPrompt = prompt;
-    let updates = null;
-    let backend = "copilot";
-    let stdout = "";
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-        ({ backend, stdout } = generateDocsResponse(attemptPrompt));
-        try {
-            const response = parseCopilotResponse(stdout);
-            updates = validateCopilotResponse(response, plan.docPaths, currentDocs);
-            break;
-        } catch (error) {
-            if (attempt === 2) {
-                const dumpPath = path.join(repositoryRoot, ".cache", "docs-agent-response.txt");
-                writeFileSync(dumpPath, stdout, "utf8");
-                const snippet = stdout.replace(/\s+/g, " ").slice(0, 600);
-                throw new Error(`${error.message} Raw ${backend} response saved to ${dumpPath}; preview: ${snippet}`);
-            }
-            attemptPrompt =
-                `${prompt}\n\nYour previous reply failed validation: ${error.message}\nNow reply ONLY with the exact JSON object described above; nothing else.`;
-        }
-    }
+    const { backend, changedUpdates } = resolveDocumentationUpdates({
+        prompt,
+        plan,
+        currentDocs,
+        currentDeliveryPlan,
+        currentBrief,
+    });
     const docsLabel = backend === "pi" ? "Pi agent" : "Copilot";
-    const updatedDeliveryPlan = plan.updateTaskStatuses
-        ? applyTaskStatusUpdates(currentDeliveryPlan, response.taskStatuses)
-        : currentDeliveryPlan;
-    const updatedBrief = plan.syncBrief
-        ? replaceManagedStatusBlock(currentBrief, renderBriefTaskStatus(updatedDeliveryPlan))
-        : currentBrief;
-    const changedUpdates = updates.filter(({ path: filePath, content }) => content !== currentDocs[filePath]);
-    if (updatedDeliveryPlan !== currentDeliveryPlan) {
-        changedUpdates.push({ path: "DELIVERY-PLAN.md", content: updatedDeliveryPlan });
-    }
-    if (updatedBrief !== currentBrief) {
-        changedUpdates.push({ path: "PROJECT-BRIEF.md", content: updatedBrief });
-    }
     if (changedUpdates.length === 0) {
         console.log(`${docsLabel} found no documentation changes to stage.`);
         return;
