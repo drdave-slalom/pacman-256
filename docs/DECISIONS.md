@@ -254,6 +254,10 @@ T1 subsequently received go-ahead in D045; later tasks remain separate.
   matchmaking error copy, local-play race guard, focus handling, single-sourced
   name limit, extended error-mapping tests, pause/resume of the hidden maze
   scene.
+- Bugfix (2026-11-10): the Phaser game is booted lazily on first entry
+  into the game area (inside requestAnimationFrame), instead of at page load
+  while the section is hidden; booting while hidden left the canvas at 0×0,
+  so "Enter prototype maze" showed the D-pad UI but no map.
 - Pre-commit docs-hook note: the hook's LLM backends were unavailable in the
   delivery environment (Copilot CLI quota exhausted; headless `pi` docs agent
   timed out). The plan/brief status sync and this entry were recorded manually;

@@ -303,38 +303,53 @@ class MazeScene extends Phaser.Scene {
   }
 }
 
-const game = new Phaser.Game({
-  type: Phaser.AUTO,
-  parent: "game",
-  width: MAZE_WIDTH * TILE_SIZE,
-  height: MAZE_HEIGHT * TILE_SIZE,
-  backgroundColor: "#05060a",
-  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
-  scene: MazeScene,
-});
+let game: Phaser.Game | null = null;
+
+function createGame(): Phaser.Game {
+  return new Phaser.Game({
+    type: Phaser.AUTO,
+    parent: "game",
+    width: MAZE_WIDTH * TILE_SIZE,
+    height: MAZE_HEIGHT * TILE_SIZE,
+    backgroundColor: "#05060a",
+    scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+    scene: MazeScene,
+  });
+}
 
 // The maze prototype is hosted inside the game area, which starts hidden behind
-// the lobby. Entering it regenerates a fresh maze and starts the scene.
+// the lobby. The Phaser game is booted lazily on the first entry, after the
+// container has been laid out, so the Scale Manager measures a non-zero parent
+// and the canvas renders at full size. Booting it at page load (while the
+// section is still hidden) left the canvas at 0×0, making the maze invisible.
 function enterGameArea(): void {
   gameAreaActive = true;
   lobbyEl.hidden = true;
   gameEl.hidden = false;
-  const scene = game.scene.getScene("maze-scene") as MazeScene;
-  scene.scene.resume();
-  scene.scene.restart();
-  game.scale.refresh();
-  const firstDpadButton = document.querySelector<HTMLButtonElement>(
-    "#dpad button[data-direction]",
-  );
-  firstDpadButton?.focus();
+  requestAnimationFrame(() => {
+    if (game === null) {
+      game = createGame();
+    } else {
+      const scene = game.scene.getScene("maze-scene") as MazeScene;
+      scene.scene.resume();
+      scene.scene.restart();
+      game.scale.refresh();
+    }
+    const firstDpadButton = document.querySelector<HTMLButtonElement>(
+      "#dpad button[data-direction]",
+    );
+    firstDpadButton?.focus();
+  });
 }
 
 function leaveGameArea(): void {
   gameAreaActive = false;
   gameEl.hidden = true;
   lobbyEl.hidden = false;
-  const scene = game.scene.getScene("maze-scene") as MazeScene;
-  scene.scene.pause();
+  if (game !== null) {
+    const scene = game.scene.getScene("maze-scene") as MazeScene;
+    scene.scene.pause();
+  }
   displayNameEl.focus();
 }
 
