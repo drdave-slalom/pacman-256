@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     applyTaskStatusUpdates,
+    buildCopilotInvocation,
     containsLikelySecret,
     detectDocsBackend,
     getDocumentationPlan,
@@ -150,4 +151,19 @@ test("docs backend selection honors Pi session environment and DOCS_LLM override
             }
         }
     }
+});
+
+test("Copilot prompt is sent on stdin, never in argv", () => {
+    const prompt = `Update docs.\n${"x".repeat(120_000)}\nPROMPT_SENTINEL`;
+    const invocation = buildCopilotInvocation(prompt, { PATH: "/usr/bin", HOME: "/home/test", SECRET_VALUE: "nope" });
+    assert.equal(invocation.command, "copilot");
+    assert.deepEqual(invocation.args, ["-s", "--no-ask-user"]);
+    assert.ok(!invocation.args.includes("-p"));
+    assert.ok(invocation.args.every((argument) => !argument.includes("PROMPT_SENTINEL") && !argument.includes("Update docs.")));
+    assert.equal(invocation.options.input, prompt);
+    assert.equal(invocation.options.encoding, "utf8");
+    assert.equal(invocation.options.timeout, 180_000);
+    assert.equal(invocation.options.env.PATH, "/usr/bin");
+    assert.equal(invocation.options.env.NO_COLOR, "1");
+    assert.ok(!("SECRET_VALUE" in invocation.options.env));
 });
