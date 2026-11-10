@@ -96,6 +96,33 @@ In the VS Code Agent Customizations editor, verify the workspace agents appear
 and try a small, read-only task before relying on delegation. The check script
 validates repository files, not VS Code's active harness or agent runtime.
 
+#### Copilot smoke tests
+
+`npm test` (and therefore CI) runs `scripts/factory-smoke.test.mjs`, which
+checks the repository side deterministically:
+
+- each `.github/agents/*.agent.md` name matches its file, has a description,
+  and has a matching `.github/skills/<role>/SKILL.md`;
+- `ROLE_DEFS` in `scripts/factory-setup.sh` matches the role profiles;
+- `pr-reviewer` declares only `read` and `search` tools;
+- `scripts/factory-setup.sh --copilot` passes without Pi or Herdr on `PATH`,
+  and fails when a profile is missing or misnamed;
+- `scripts/factory-worktree.sh` creates an isolated sibling worktree on
+  `factory/<unit>`, leaves the primary checkout clean, and removes it cleanly.
+
+Agent discovery and delegation depend on the live VS Code harness and model,
+so verify them manually after changing agent profiles or orchestrator guidance,
+and record the result on the PR:
+
+| # | Step | Pass when |
+|---|------|-----------|
+| 1 | Open the agent picker / Agent Customizations editor. | All seven factory profiles appear, each once. |
+| 2 | Create a unit with `scripts/factory-worktree.sh create smoke`, then ask `factory-orchestrator` to delegate a one-line docs edit there with `WORKTREE=<path>`. | The debug log or chat shows a `builder` subagent call; the orchestrator does not edit the file itself. |
+| 3 | Read the builder handoff. | It reports `git rev-parse --show-toplevel` inside the worktree and follows the handoff contract below. |
+| 4 | Run `git status` in the primary checkout. | Clean; the edit exists only in the worktree. |
+| 5 | Ask `pr-reviewer` to fix a typo in the worktree. | It reports findings but changes no files. |
+| 6 | Discard the edit and run `scripts/factory-worktree.sh remove smoke`. | Worktree and `factory/smoke` branch are gone. |
+
 ### Herdr / Pi
 
 Use the `.pi/agents/` definitions with Herdr's `delegate_agent` interface.
@@ -242,6 +269,8 @@ change lands or a decision is recorded.
 
 - [ ] `scripts/factory-setup.sh --copilot` passes and the VS Code Agent
       Customizations editor lists the Copilot factory agents.
+- [ ] `npm test` passes `scripts/factory-smoke.test.mjs`, and the manual
+      Copilot smoke checklist above passes in the Local harness.
 - [ ] Herdr `list_agents` shows the six role definitions (builder, pr-reviewer,
       qa-tester, gameplay-designer, artist, docs-writer).
 - [ ] `scripts/factory-worktree.sh create <unit>` produces a sibling worktree
