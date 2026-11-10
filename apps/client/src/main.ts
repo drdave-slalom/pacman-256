@@ -174,14 +174,22 @@ class MazeScene extends Phaser.Scene {
   }
 
   private setupSwipeSteering(): void {
-    const isTouch = (pointer: Phaser.Input.Pointer): boolean => {
-      const event = pointer.event as Partial<PointerEvent>;
-      return event.pointerType === "touch" || event.type?.startsWith("touch") === true;
+    const isTouchPointer = (pointer: Phaser.Input.Pointer): boolean => {
+      const event = pointer.event as Partial<PointerEvent> | undefined;
+      if (event?.pointerType) {
+        return event.pointerType === "touch";
+      }
+      if (event?.type) {
+        return event.type.startsWith("touch");
+      }
+      // Pointer Events spec: the mouse pointer id is always 0; touch ids are
+      // browser-assigned and non-zero.
+      return pointer.pointerId !== 0;
     };
 
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       // Swipe steering is touch-only; the mouse never steers the player.
-      if (!isTouch(pointer)) {
+      if (!isTouchPointer(pointer)) {
         return;
       }
       const overPad = this.input
@@ -197,6 +205,9 @@ class MazeScene extends Phaser.Scene {
 
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
       if (pointer.pointerId !== this.dragPointerId) {
+        return;
+      }
+      if (!isTouchPointer(pointer)) {
         return;
       }
       // Phaser's pointer.movementX/Y are only populated while the mouse is
