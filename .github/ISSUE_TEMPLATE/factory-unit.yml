@@ -1,0 +1,77 @@
+name: Factory unit
+description: One factory work unit (T<n>) from DELIVERY-PLAN.md, dispatched to role agents.
+title: "T<n>: "
+labels: ["type:feature", "status:spec"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use one issue per factory unit. Title it `T<n>: <short goal>`. The spec in `SPEC/` stays the source of truth; this issue tracks the unit and links its PR(s) via `Closes #<this issue>`.
+  - type: input
+    id: unit-id
+    attributes:
+      label: Unit ID
+      description: Factory unit ID from DELIVERY-PLAN.md.
+      placeholder: T6
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What this unit delivers, in one or two sentences.
+    validations:
+      required: true
+  - type: input
+    id: spec
+    attributes:
+      label: Spec link
+      description: Path or URL of the spec (SPEC/<task-id>-<slug>.md). Leave blank until the spec exists.
+      placeholder: SPEC/T6-<slug>.md
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Observable outcomes that mark the unit done.
+      placeholder: |
+        - [ ] ...
+    validations:
+      required: true
+  - type: input
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Units or issues this depends on.
+      placeholder: "T5, #12"
+    validations:
+      required: false
+  - type: dropdown
+    id: lane
+    attributes:
+      label: Lane
+      description: Work lane (not a fixed owner). Also apply the matching lane:* label.
+      multiple: true
+      options:
+        - A — rendering, input, mobile UX
+        - B — multiplayer, authoritative rules, room lifecycle
+        - C — networking, lobby/results UI, integration
+    validations:
+      required: true
+  - type: input
+    id: owner
+    attributes:
+      label: Owner
+      description: Person driving this unit, if assigned.
+    validations:
+      required: false
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation
+      description: Commands and manual checks that prove the acceptance criteria.
+      value: |
+        - `npm run check`
+    validations:
+      required: true
