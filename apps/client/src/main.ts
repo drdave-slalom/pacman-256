@@ -97,35 +97,58 @@ class MazeScene extends Phaser.Scene {
 
   private renderMaze(): void {
     const tiles = this.add.graphics();
-    // Near-black background; corridors stay dark so the neon walls glow.
+    // Near-black background; corridors stay darker than the wall zones.
     tiles.fillStyle(0x05060a, 1);
     tiles.fillRect(0, 0, MAZE_WIDTH * TILE_SIZE, MAZE_HEIGHT * TILE_SIZE);
-    // Layered fake-bloom: larger, faint cyan halos behind each wall tile,
-    // then the bright neon-blue wall core.
-    for (const [expand, alpha] of [
-      [6, 0.08],
-      [3, 0.16],
-    ] as const) {
-      tiles.fillStyle(0x4fc3ff, alpha);
-      for (let row = 0; row < MAZE_HEIGHT; row++) {
-        for (let col = 0; col < MAZE_WIDTH; col++) {
-          if (!isWalkable(col, row)) {
-            tiles.fillRect(
-              col * TILE_SIZE - expand,
-              row * TILE_SIZE - expand,
-              TILE_SIZE + expand * 2,
-              TILE_SIZE + expand * 2,
-            );
-          }
-        }
-      }
-    }
-    tiles.fillStyle(0x59d7ff, 1);
+    // Subtle dark-blue tint behind wall cells so wall masses read distinctly
+    // from the black corridors.
+    tiles.fillStyle(0x0b1224, 1);
     for (let row = 0; row < MAZE_HEIGHT; row++) {
       for (let col = 0; col < MAZE_WIDTH; col++) {
         if (!isWalkable(col, row)) {
           tiles.fillRect(col * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
         }
+      }
+    }
+
+    // Neon line art, like the reference maze: a glowing stroke runs along
+    // every floor/wall boundary (soft outer halos then a hot bright core).
+    const segments: Array<[number, number, number, number]> = [];
+    for (let row = 0; row < MAZE_HEIGHT; row++) {
+      for (let col = 0; col < MAZE_WIDTH; col++) {
+        if (!isWalkable(col, row)) {
+          continue;
+        }
+        const x = col * TILE_SIZE;
+        const y = row * TILE_SIZE;
+        const boundary = (
+          dx: number,
+          dy: number,
+          x1: number,
+          y1: number,
+          x2: number,
+          y2: number,
+        ) => {
+          if (!isWalkable(col + dx, row + dy)) {
+            segments.push([x1, y1, x2, y2]);
+          }
+        };
+        boundary(-1, 0, x, y, x, y + TILE_SIZE);
+        boundary(1, 0, x + TILE_SIZE, y, x + TILE_SIZE, y + TILE_SIZE);
+        boundary(0, -1, x, y, x + TILE_SIZE, y);
+        boundary(0, 1, x, y + TILE_SIZE, x + TILE_SIZE, y + TILE_SIZE);
+      }
+    }
+    const passes: Array<[number, number, number]> = [
+      [7, 0.09, 0x4fc3ff],
+      [4.5, 0.16, 0x4fc3ff],
+      [2.5, 0.95, 0x8ae4ff],
+      [1, 1, 0xe2f7ff],
+    ];
+    for (const [width, alpha, color] of passes) {
+      tiles.lineStyle(width, color, alpha);
+      for (const [x1, y1, x2, y2] of segments) {
+        tiles.lineBetween(x1, y1, x2, y2);
       }
     }
   }
