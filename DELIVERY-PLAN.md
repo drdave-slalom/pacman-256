@@ -169,11 +169,12 @@ Keep evidence concise: link tasks/specs to PRs, report real test results, and sh
 
 T0 is complete; the [game contract](./docs/GAME-CONTRACT.md) is approved (D044).
 T1 is implemented (D045). T2 (one maze + touch movement, keyboard input, and
-seeded dynamic maze generation) is implemented and open for teammate review in
-PR #10; its physical-phone feel pass (swipe threshold, D-pad reachability,
-scroll/page-fit) is still pending. T3 (server-synchronized movement) and T4
-(mobile lobby / local-network phone access) are the next parallel units. Have a
-teammate review PR #10 and run the [README quick start](./README.md) on a second
-checkout before starting T3/T4. David coordinates contract changes; Chase reviews.
+seeded dynamic maze generation) merged in PR #10; its physical-phone feel pass
+(swipe threshold, D-pad reachability, scroll/page-fit) is still pending. T3
+(private rooms and server-synchronized movement, D049) is implemented and its PR
+is pending teammate review; the two-phone LAN check happens with T4 (mobile
+lobby / local-network phone access), the next unit. Run the
+[README two-browser walkthrough](./README.md#two-browser-walkthrough) to review T3.
+David coordinates contract changes; Chase reviews.
 Local-server validation precedes cloud work. Confirm actual test devices and
 performance targets before acceptance.

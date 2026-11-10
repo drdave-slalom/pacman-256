@@ -78,6 +78,7 @@ decisions below instead of the delivery plan's initial gameplay proposals.
 | D046 | T2 (one maze + touch movement) implemented and validated for team review on 2026-11-10. Decisions: dual touch controls (on-screen D-pad and swipe/drag steering); one fixed 15×11 compact rectilinear maze (original layout); shared map plus a pure continuous-movement/buffered-turn module in `packages/shared` for reuse by the authoritative server; the client drives a locally authoritative prototype only (server movement is T3). | Validation: `npm run check` green; 26 top-level tests (5 map + 17 movement new; 3 shared index; 1 server with 3 subtests); dev-server smoke served the prototype page and /health protocol v1; no server files changed. Independent internal review found no blockers. Follow-ups: physical-phone feel pass (swipe threshold, D-pad reachability, snap-on-wall-turn hop, scroll/page-fit), browser rendering visual pass, accessibility backlogs. |
 | D047 | Dynamic seeded maze generation adopted for the T2 prototype on 2026-11-10. Decisions: a pure, deterministic generator in `packages/shared/src/maze-gen.ts` (mulberry32 PRNG) produces reference-style dense, loop-rich, symmetric 21×19 mazes; fixed canvas with randomized interior; a random seed is chosen per game and displayed in the UI for reproducibility; the same API will let the authoritative server regenerate identical maps from a shared seed when T3 lands. Supersedes the fixed-single-maze part of D019 for the MVP; static `MAZE_MAP` remains the default/fallback and movement accepts an explicit maze. | Validation: `npm run check` green, 38 tests, including generator determinism, invariant (border/width/connectivity/no-2×2/loops) and spawn suites across many seeds. |
 | D048 | Standing factory workflow gates, requested and confirmed by David (contract coordinator, D043) on 2026-11-10: (1) spec in `SPEC/` first, then delegate to the matching role agent; (2) `qa-tester` and `pr-reviewer` before any integration; (3) watch CI after a PR or user-approved merge and report final status. Details: [FACTORY.md](./FACTORY.md#standing-workflow-gates). | Working agreement so agents enforce the workflow without the user restating it each request. Refines D030; worktree isolation and human approval before integration are unchanged. Spec: `SPEC/factory-workflow-gates.md`. |
+| D049 | T3 start flow and client scope, chosen by David on 2026-11-10: `chooseTeam` plus a host `startMatch` with balanced 1v1/2v2 teams goes directly to `playing`; T5 adds the 3-second countdown, contact, and round end. T3 ships a minimal working client UI; T4 polishes the mobile lobby and LAN docs. | Follows the approved contract's lobby flow without pulling T5 scope into T3. Spec: `SPEC/T3-private-rooms-and-synchronized-movement.md`. |
 
 ### Current combat summary
 
@@ -196,6 +197,52 @@ T1 subsequently received go-ahead in D045; later tasks remain separate.
   connectors make layouts loopier (turn options instead of dead ends), and a
   validated decoration pass adds tetromino-style L/J/T silhouettes to wall
   bars while preserving maze invariants.
+
+## T3 implementation context (not new gameplay decisions)
+
+Only D049 is a decision. The items below record implementation choices and
+review-accepted deviations from the
+[T3 spec](../SPEC/T3-private-rooms-and-synchronized-movement.md#implementation-deviations-accepted-after-review-2026-11-10);
+tunables remain starting values for review.
+
+- **Room code:** the opaque Colyseus `roomId` (contract §2 allows this
+  initially). Game rooms are private (not listed for matchmaking).
+- **Maze:** the server picks a uint32 maze seed per round and syncs it with the
+  round ID; clients regenerate the maze with `generateMaze(seed)` (D047) and
+  never choose the seed.
+- **Start flow:** balanced `chooseTeam` plus host `startMatch` goes directly to
+  `playing` (D049). Players pass through each other, and a round runs until
+  players leave; contact, countdown, and round end are T5.
+- **Join closure without `lock()`:** Colyseus reports a locked room and a full
+  room with the same error, so the room does not call `lock()`. It rejects
+  non-lobby joins in `onAuth`/`onJoin` with `JOIN_CLOSED`; a started
+  four-player room still reports `ROOM_FULL`. Do not add `lock()` later without keeping these codes distinguishable.
+- **Malformed lobby requests:** `chooseTeam`/`startMatch` reply with a correlated
+  `actionResult` (`INVALID_INPUT`) when a valid `requestId` is readable;
+  otherwise with an uncorrelated `inputRejected`. Clients handle both and never
+  leave a request pending.
+- **Tunables** (`packages/shared/src/protocol.ts`): 30 Hz fixed-step simulation;
+  ~20 Hz patches (50 ms; lobbies patch too); `setDirection` limit of 20 accepted
+  inputs per second per client, with a client-side budget of 16 per second
+  (`CLIENT_INPUT_BUDGET` in `apps/client/src/session-model.ts`);
+  a hard cap of 60 messages per second per connection disconnects the offender;
+  display names trimmed to 1-16 characters, rejecting control/format
+  (`\p{Cc}\p{Cf}`) characters.
+- **Spawns:** `findSpawnCells` places hunters near the top corners and runners
+  near the bottom corners, preferring wall-adjacent cells so each player faces a
+  wall and starts still until its first input.
+- **No reconnect:** the client disables Colyseus SDK auto-reconnection; an
+  unexpected disconnect shows a message and returns to the join screen.
+- **Docs hook:** the pre-commit hook now sends its Copilot prompt on stdin
+  instead of `-p` because Copilot CLI crashed on large argument prompts
+  ([spec](../SPEC/docs-hook-stdin-prompt.md)). A follow-up fixed a variable
+  scoping bug in the hook's response retry loop that broke Delivery Plan status
+  updates.
+- **Validation evidence:** shared validator/spawn tests, real-SDK server
+  integration tests, and client session-model unit tests pass in `npm test`.
+  A browser E2E run passed 28/28 checks, including 2v2, a server SIGKILL
+  disconnect, and input spam. Not yet validated on physical phones (T4 exit
+  gate); teammate review is pending.
 
 ## Local software factory and worktree isolation: 2026-11-09
 

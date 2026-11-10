@@ -2,13 +2,12 @@
 
 Original mobile-web maze-chase workshop project. T1 shipped a runnable skeleton
 (Phaser rendering, a Colyseus connection check, shared protocol/rule constants).
-T2 added the first gameplay slice: a neon-styled seeded maze, continuous movement
-with buffered turns and wall collisions, and D-pad / swipe / keyboard steering.
-T3 adds a private `GameRoom` on the server (see below): join validation, team
-selection, host-started matches, and authoritative 30 Hz movement. The client now
-connects to this room: a join screen, a lobby with team selection and host start,
-and a server-driven maze view. Countdown, contact combat, pickups, and round end
-remain later tasks.
+T2 added a neon-styled seeded maze, continuous movement with buffered turns and
+wall collisions, and D-pad / swipe / keyboard steering. T3 adds private rooms and
+server-authoritative synchronized movement: create or join a room by code, pick
+teams, and the host starts a round in which every client sees every player move.
+Countdown, contact combat, pickups, and round end are later tasks (T5+); a T3
+round simply continues until players leave.
 
 ## Requirements and quick start
 
@@ -22,65 +21,88 @@ npm ci
 npm run dev
 ```
 
-Open **http://localhost:5173**. You should see a join screen: enter a display
-name, then **create a room** or **join** with a room code. In the lobby, pick a
-team (hunters/runners), copy the room code to share it, and the host starts the
-match once teams are balanced (1v1 or 2v2). During a round the client renders the
-server's maze and every player (team-colored; your own player has a pulsing white
-ring), and steers by HTML D-pad, swipe, or arrow keys/WASD. Movement is
-server-authoritative: the client only sends direction intent. Leave buttons return
-to the join screen. A **Check server connection** button remains in the
-diagnostics section: clicking it must report `Connected: shared protocol v1,
-authoritative lobby state received.` The check creates a disposable diagnostic
-room and leaves it.
-
 One command starts shared-package compilation in watch mode, the server, and Vite.
 Press Ctrl+C to stop all three. The client port is strict: startup fails if 5173
 is occupied rather than silently selecting a different URL.
 
+### Two-browser walkthrough
+
+1. Open **http://localhost:5173** in two browser windows (or two browsers).
+2. **Window A:** enter a display name (1-16 characters) and choose **Create room**.
+   The lobby shows the room code; **Copy** puts it on the clipboard (if the
+   browser blocks clipboard access, the code is shown to share manually).
+3. **Window B:** enter a name, paste the code, and choose **Join**.
+4. Each player picks **Hunters** or **Runners** (at most two per team).
+5. The host (the room creator, marked in the player list) sees **Start match**
+   and presses it once every player has a team and the teams are balanced (1v1
+   or 2v2). The round starts immediately (no countdown yet).
+6. Steer with the D-pad, a touch swipe on the play area, or arrow keys/WASD
+   (mouse drags do not steer). Both
+   windows show every player as a team-colored circle; your own player has a
+   pulsing white ring. The client only sends direction intent; the server moves
+   players and the client interpolates between updates.
+7. **Leave** returns to the join screen. When the host leaves, the
+   earliest-joined remaining player becomes host.
+
+Errors are shown on the page, and the UI returns to a usable state:
+
+- Join: empty or invalid name, missing code, unknown or malformed code
+  (`ROOM_NOT_FOUND`), room already has four players (`ROOM_FULL`), match already
+  started (`JOIN_CLOSED`), outdated client (`PROTOCOL_MISMATCH`).
+- Lobby: team already has two players (`TEAM_FULL`), unbalanced or unassigned
+  teams (`TEAMS_UNBALANCED`), or no server reply in time. (The server also
+  enforces `HOST_REQUIRED`; non-hosts do not see the Start button.)
+- Disconnects: a dropped connection or server restart shows a message and returns
+  to the join screen. There is no automatic reconnect.
+
+The **Server connection check** section (below the panels) keeps the T1
+diagnostic: **Check server connection** must report `Connected: shared protocol v1, authoritative lobby state received.` and
+uses a disposable diagnostic room.
+
 ## Server game room (T3)
 
-The server defines a private game room (`GAME_ROOM`) alongside the diagnostic
-room. It is exercised by integration tests with real Colyseus SDK clients.
+The server registers a private game room (`GAME_ROOM`, `"game"`) next to the
+diagnostic room. Integration tests exercise it with real Colyseus SDK clients.
 
-- **Join:** protocol version and display name are validated on create and join;
-  unknown options are rejected. Rooms are private (join by room code, not
-  matchmaking), hold up to four players, and admit joins in the lobby only.
-  Failures map to shared error codes (`ROOM_NOT_FOUND`, `ROOM_FULL`,
-  `JOIN_CLOSED`, `PROTOCOL_MISMATCH`, `INVALID_INPUT`).
-- **Lobby:** `chooseTeam` enforces team capacity; `startMatch` requires the host
-  and balanced teams (1v1 or 2v2, no unassigned players). Results are returned
-  as `actionResult` messages correlated by `requestId`.
-- **Play:** the server picks a per-round maze seed, places players on distinct
-  spawn cells, and runs a fixed 30 Hz simulation using the shared movement
-  module. `setDirection` input is validated (round ID, increasing sequence,
-  direction); malformed, stale, out-of-phase, and rate-limited input is rejected
-  with `inputRejected`, and duplicates are dropped. Exceeding the hard message
-  cap disconnects only the offending client.
-- **Leave:** host transfers to the earliest remaining player; empty rooms are
-  disposed.
+- **Join:** the room code is the opaque Colyseus room ID. Create and join validate
+  the protocol version and display name (trimmed, 1-16 characters, no control or
+  invisible format characters) and reject unknown options. Rooms are private
+  (not listed for matchmaking), hold up to four players, and admit joins only in
+  the lobby phase. A started room that already has four players reports
+  `ROOM_FULL`; otherwise a started room reports `JOIN_CLOSED`.
+- **Lobby:** `chooseTeam` allows at most two per team; `startMatch` requires the
+  host and balanced teams with no unassigned players. Replies are `actionResult`
+  messages correlated by `requestId`. A malformed request whose `requestId`
+  cannot be read gets an uncorrelated `inputRejected` instead.
+- **Play:** on start the server picks a new maze seed and round ID, syncs them to
+  clients (which regenerate the maze from the seed), and places players on
+  distinct spawn cells (hunters top corners, runners bottom corners; wall-adjacent
+  cells are preferred so players start still). It runs a fixed 30 Hz simulation
+  with the shared movement module and patches state about every 50 ms. Players
+  pass through each other in T3.
+- **Input:** `setDirection` is checked for payload, phase, round ID, and sequence.
+  Malformed, out-of-phase, and stale-round input is rejected with
+  `inputRejected`; repeated or older sequences are silently dropped. Input over
+  20 per second is dropped, with at most one `RATE_LIMITED` notice per second. A client sending more than 60 messages per second is
+  disconnected; other players are unaffected.
+- **Leave:** host transfers to the earliest-joined remaining player; Colyseus
+  disposes empty rooms.
 
 ## Client (T3)
 
 - `apps/client/src/main.ts` owns the DOM flow (join, lobby, game panels), the
-  Colyseus room connection, and the single direction-request path shared by D-pad,
-  swipe, and keyboard. Input outside an active round is dropped. The Phaser game is
-  created only while a round is active and destroyed otherwise, so key capture
-  never blocks typing in forms. There is no reconnect: a dropped connection ends
-  the session with a visible message and returns to the join screen.
+  Colyseus connection, and the single direction-request path shared by D-pad,
+  swipe, and keyboard. Input outside an active round is dropped. The Phaser game
+  exists only during a round, so key capture never blocks typing in forms.
 - `apps/client/src/maze-scene.ts` renders the server-seeded maze and interpolated
   players; it never moves players itself.
-- `apps/client/src/session-model.ts` holds pure helpers (no DOM/Phaser):
-  - Round detection and maze identity (`isRoundActive`, `mazeKey`) and
-    snapshot-to-view mapping (`playerViews`).
-  - `DirectionSender`: sends `setDirection` only on direction changes, sequences
-    from 0 per round, and keeps a client-side budget below the server rate limit.
-    Changes made over budget are held (latest wins) and flushed when budget frees,
-    including a re-hold after a `RATE_LIMITED` rejection.
-  - `PendingAction`: tracks one in-flight `chooseTeam`/`startMatch` request until
-    its correlated accept/reject, an uncorrelated `INVALID_INPUT`, or a timeout.
-  - `isPlausibleRoomCode`, `Interpolator` (glides between patches, snaps on large
-    jumps), and `leaveMessage` (player-facing text for unexpected disconnects).
+- `apps/client/src/session-model.ts` holds pure, unit-tested helpers (no
+  DOM/Phaser): round detection and snapshot mapping; `DirectionSender` (sends
+  only direction changes, sequences from 0 per round, and stays within a
+  16-per-second budget below the server limit, holding the latest change while
+  over budget); `PendingAction` (one in-flight `chooseTeam`/`startMatch` until
+  its reply, an uncorrelated `INVALID_INPUT`, or a timeout); room-code checks;
+  interpolation; and player-facing disconnect messages.
 
 ## Commit-time documentation updates
 
@@ -113,8 +135,11 @@ stopped. Review generated documentation before completing the commit.
 3. Open `http://<machine-LAN-IP>:5173` on the phone and create or join a room (or
    run the connection check). Do **not** use `localhost` on a phone; that
    addresses the phone itself.
-4. Repeat on each target browser. The client has not yet been verified on
-   physical iOS/Android devices.
+4. Repeat on each target browser.
+
+Two-phone play over the LAN has **not yet been validated** on physical iOS/Android
+devices; that check, and a polished mobile lobby, belong to T4. Clipboard copy
+may be unavailable over plain HTTP on a phone; share the displayed code instead.
 
 Vite listens on `0.0.0.0`. It proxies `/multiplayer` HTTP and WebSocket traffic to
 the server on loopback port 2567, so phones need only reach port 5173. The same
