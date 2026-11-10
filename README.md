@@ -46,6 +46,10 @@ is occupied rather than silently selecting a different URL.
 7. **Leave** returns to the join screen. When the host leaves, the
    earliest-joined remaining player becomes host.
 
+The current view is mirrored in the URL hash, so a refresh restores it:
+`#room=<code>` reopens the room and attempts to rejoin with the display name
+remembered from the previous session. The join screen is the default (no hash).
+
 Errors are shown on the page, and the UI returns to a usable state:
 
 - Join: empty or invalid name, missing code, unknown or malformed code

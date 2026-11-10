@@ -1,6 +1,43 @@
 export const PROTOCOL_VERSION = 1;
 export const CONNECTION_ROOM = "connection-check";
 
+export const ROOM_CODE_MAX_LENGTH = 24;
+
+/**
+ * Client-visible app view, mirrored in the URL hash so a refresh restores the
+ * current screen. `lobby` is the default (empty hash); `room` is a joined
+ * private room (`#room=<code>`).
+ */
+export type AppRoute =
+  | { view: "lobby" }
+  | { view: "room"; code: string };
+
+export function parseAppRoute(hash: string): AppRoute {
+  const cleaned = hash.trim().replace(/^#/, "");
+  const roomMatch = /^room=(.+)$/.exec(cleaned);
+  const rawCode = roomMatch?.[1];
+  if (rawCode !== undefined && rawCode.length > 0) {
+    try {
+      const code = decodeURIComponent(rawCode);
+      if (code.length > 0 && code.length <= ROOM_CODE_MAX_LENGTH) {
+        return { view: "room", code };
+      }
+    } catch {
+      // Malformed percent-encoding falls through to the lobby.
+    }
+  }
+  return { view: "lobby" };
+}
+
+export function serializeAppRoute(route: AppRoute): string {
+  switch (route.view) {
+    case "room":
+      return `#room=${encodeURIComponent(route.code)}`;
+    default:
+      return "";
+  }
+}
+
 export type Team = "hunter" | "runner";
 export type Direction = "up" | "down" | "left" | "right";
 export type RoomPhase = "lobby" | "countdown" | "playing" | "results";
