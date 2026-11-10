@@ -83,9 +83,9 @@ Each chunk includes its tests, acceptance evidence, and a human-reviewed diff. S
 |---|---|---|---|---|---|
 | T0 | Complete | Approve MVP rules, contracts, and scope / All | Completed checkpoint | — | Shared contract reviewed and approved; see D044. |
 | T1 | Complete | Runnable skeleton and validation commands / C lane | 1–1.5 h | T0 | Root startup, typechecks/build/tests, shared imports, HTTP/WebSocket smoke check. See README; gameplay is not implemented. |
-| T2 | Implemented; validation pending | One maze and touch movement / A | 2–3 h | T1 | A player can navigate on a real phone without scrolling the page or being trapped by controls; wall collisions work. The client prototype also adds keyboard input and seeded dynamic maze generation (D047). PR #10 review and physical-phone check pending. |
-| T3 | Implemented; validation pending | Private rooms and synchronized movement / B | 2–3 h | T1 | Two clients join one room and see each other move; invalid/full room errors are visible; server rejects invalid input. |
-| T4 | Implemented; validation pending | Mobile lobby and local-network phone access / C lane | 2 h | T1 | Create/join UI reaches the local server from two phones on the same network; document startup, address and firewall/network requirements. Integrate with T3 when ready. Hosting/CI follow later. |
+| T2 | Complete | One maze and touch movement / A | 2–3 h | T1 | A player can navigate on a real phone without scrolling the page or being trapped by controls; wall collisions work. The client prototype also adds keyboard input and seeded dynamic maze generation (D047). Manually verified complete (PR #10 + physical-phone check). |
+| T3 | Complete | Private rooms and synchronized movement / B | 2–3 h | T1 | Two clients join one room and see each other move; invalid/full room errors are visible; server rejects invalid input. Manually verified complete (PR #19, two-client LAN). |
+| T4 | Complete | Mobile lobby and local-network phone access / C lane | 2 h | T1 | Create/join UI reaches the local server from two phones on the same network; document startup, address and firewall/network requirements. Integrate with T3 when ready. Hosting/CI follow later. Manually verified complete (PR #21, LAN rejoin smoke). |
 | T5 | Not started | Countdown, baseline contact elimination, and team round end / B lane | 3–4 h | T0, T3 | Authoritative rules complete a round; eliminated players cannot act; timeout, simultaneous team elimination, and disconnect outcomes have tests. T7 adds vulnerability reversal. |
 | T6 | Not started | Match HUD, spectating, and results / A | 2–3 h | T2, T3 | UI reflects server round state, time, alive players, elimination, and results; it never guesses the winner. Integrate with T5. |
 | T7 | Not started | Three pickups and conditional contact combat / A + B lanes | Re-estimate before starting; original 1–2 h each covered only two effects | T5, T6 | Speed, shield, and runner-only vulnerability can be acquired and displayed; server controls effects. Tests cover vulnerability reversal, hunter shield override/expiry, runner protection, post-window respawn, and team victory. |
@@ -169,14 +169,15 @@ Keep evidence concise: link tasks/specs to PRs, report real test results, and sh
 
 T0 is complete; the [game contract](./docs/GAME-CONTRACT.md) is approved (D044).
 T1 is implemented (D045). T2 (one maze + touch movement, keyboard input, and
-seeded dynamic maze generation) merged in PR #10; its physical-phone feel pass
-(swipe threshold, D-pad reachability, scroll/page-fit) is still pending. T3
-(private rooms and server-synchronized movement, D049) merged and its PR #19 is
-open for teammate review; the two-phone LAN check is a T4 follow-up (mobile
-lobby / local-network phone access). T4 is implemented on the T3 client: it
-mirrors the view in the URL hash (refresh reopens the room via `#room=<code>`
-with the saved display name), documents the coordination model and firewall/
-network requirements, and drops the pre-T3 offline prototype fallback. Run the
+seeded dynamic maze generation) merged in PR #10 and passed the physical-phone
+feel pass. T3 (private rooms and server-synchronized movement, D049) merged in
+PR #19 and passed two-client LAN verification. T4 (mobile lobby / local-network
+phone access) merged in PR #21 and passed the LAN rejoin smoke and phone
+verification; it mirrors the view in the URL hash (`#room=<code>` reopens the
+room with the saved display name), documents the coordination model and
+firewall/network requirements, and drops the pre-T3 offline prototype fallback.
+T2-T4 were manually verified complete on 2026-11-10 (D053); T5-T11 remain not
+started. Run the
 [README two-browser walkthrough](./README.md#two-browser-walkthrough) to review T3/T4.
 David coordinates contract changes; Chase reviews.
 Local-server validation precedes cloud work. Confirm actual test devices and
