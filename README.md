@@ -26,6 +26,28 @@ One command starts shared-package compilation in watch mode, the server, and Vit
 Press Ctrl+C to stop all three. The client port is strict: startup fails if 5173
 is occupied rather than silently selecting a different URL.
 
+## Commit-time documentation updates
+
+The installed pre-commit hook uses the GitHub Copilot CLI to update docs when
+staged application, shared-package, build, deployment, or delivery-plan
+task-status changes require it. Copilot may update and stage `README.md` and, for
+deployment changes, `deploy/README.md`. It can propose monotonic task-status
+advances in the Delivery Plan, but cannot mark a task `Complete`; a human records
+that after acceptance criteria are verified. The hook then updates only the
+marked Implementation Status block in `PROJECT-BRIEF.md` from the plan's status
+column. It never rewrites acceptance criteria or plan prose, or edits
+`docs/DECISIONS.md` and `docs/GAME-CONTRACT.md`; changes that may require updates
+to those approved sources stop for human review. Documentation-only commits skip
+Copilot; a staged Delivery Plan status edit only syncs the brief status block.
+
+The hook sends a size-limited staged diff and relevant docs to Copilot. It blocks
+common credential patterns, but that check is not exhaustive; never stage
+secrets. Install and authenticate GitHub Copilot CLI (`copilot` on `PATH`) before
+committing implementation changes. `npm ci` installs the hook in a local clone;
+existing clones can run `npm run hooks:install`. If Copilot fails or returns an
+invalid update, the commit is stopped. Review generated documentation before
+completing the commit.
+
 ## Phone access over the local network
 
 1. Connect the development machine and phones to the same trusted Wi-Fi.

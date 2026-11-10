@@ -79,20 +79,20 @@ Work in 60–120 minute increments. At each checkpoint, merge reviewed work, run
 
 Each chunk includes its tests, acceptance evidence, and a human-reviewed diff. Split any chunk that cannot produce a reviewable result within half a day.
 
-| ID | Chunk / owner | Estimate | Depends on | Acceptance checkpoint |
-|---|---|---|---|---|
-| T0 | COMPLETE: Approve MVP rules, contracts, and scope / All | Completed checkpoint | — | Shared contract reviewed and approved; see D044. |
-| T1 | Runnable skeleton and validation commands / C lane | Implemented; teammate review and physical-phone check pending | T0 | Root startup, typechecks/build/tests, shared imports, HTTP/WebSocket smoke check. See README; gameplay is not implemented. |
-| T2 | One maze and touch movement / A | 2–3 h | T1 | A player can navigate on a real phone without scrolling the page or being trapped by controls; wall collisions work. |
-| T3 | Private rooms and synchronized movement / B | 2–3 h | T1 | Two clients join one room and see each other move; invalid/full room errors are visible; server rejects invalid input. |
-| T4 | Mobile lobby and local-network phone access / C lane | 2 h | T1 | Create/join UI reaches the local server from two phones on the same network; document startup, address and firewall/network requirements. Integrate with T3 when ready. Hosting/CI follow later. |
-| T5 | Countdown, baseline contact elimination, and team round end / B lane | 3–4 h | T0, T3 | Authoritative rules complete a round; eliminated players cannot act; timeout, simultaneous team elimination, and disconnect outcomes have tests. T7 adds vulnerability reversal. |
-| T6 | Match HUD, spectating, and results / A | 2–3 h | T2, T3 | UI reflects server round state, time, alive players, elimination, and results; it never guesses the winner. Integrate with T5. |
-| T7 | Three pickups and conditional contact combat / A + B lanes | Re-estimate before starting; original 1–2 h each covered only two effects | T5, T6 | Speed, shield, and runner-only vulnerability can be acquired and displayed; server controls effects. Tests cover vulnerability reversal, hunter shield override/expiry, runner protection, post-window respawn, and team victory. |
-| T8 | Four-player integration and failure checks / C, all playtest | 2–3 h | T4, T5, T6, T7 | Four devices finish repeated rounds; invalid joins, room cleanup, disconnects, and orientation changes have recorded outcomes. |
-| T9 | Mobile feel and restrained visual polish / A | 2 h | T8 | Agreed phone/browser matrix passes; controls stay usable; original visuals remain readable; optional depth effects do not hurt play. |
-| T10 | Reliability fixes and release candidate / B + C lanes | 2 h each | T8 | Blocking defects closed; locally served build matches reviewed commit; three consecutive four-player matches complete. |
-| T11 | Demo rehearsal and AI-workflow story / All | 1 h together | T9, T10 | Rehearsed local-network game demo plus one traceable feature journey: spec → plan → AI-assisted change → tests → review. Cloud hosting is optional after the local slice. |
+| ID | Status | Chunk / owner | Estimate | Depends on | Acceptance checkpoint |
+|---|---|---|---|---|---|
+| T0 | Complete | Approve MVP rules, contracts, and scope / All | Completed checkpoint | — | Shared contract reviewed and approved; see D044. |
+| T1 | Complete | Runnable skeleton and validation commands / C lane | 1–1.5 h | T0 | Root startup, typechecks/build/tests, shared imports, HTTP/WebSocket smoke check. See README; gameplay is not implemented. |
+| T2 | Not started | One maze and touch movement / A | 2–3 h | T1 | A player can navigate on a real phone without scrolling the page or being trapped by controls; wall collisions work. |
+| T3 | Not started | Private rooms and synchronized movement / B | 2–3 h | T1 | Two clients join one room and see each other move; invalid/full room errors are visible; server rejects invalid input. |
+| T4 | Not started | Mobile lobby and local-network phone access / C lane | 2 h | T1 | Create/join UI reaches the local server from two phones on the same network; document startup, address and firewall/network requirements. Integrate with T3 when ready. Hosting/CI follow later. |
+| T5 | Not started | Countdown, baseline contact elimination, and team round end / B lane | 3–4 h | T0, T3 | Authoritative rules complete a round; eliminated players cannot act; timeout, simultaneous team elimination, and disconnect outcomes have tests. T7 adds vulnerability reversal. |
+| T6 | Not started | Match HUD, spectating, and results / A | 2–3 h | T2, T3 | UI reflects server round state, time, alive players, elimination, and results; it never guesses the winner. Integrate with T5. |
+| T7 | Not started | Three pickups and conditional contact combat / A + B lanes | Re-estimate before starting; original 1–2 h each covered only two effects | T5, T6 | Speed, shield, and runner-only vulnerability can be acquired and displayed; server controls effects. Tests cover vulnerability reversal, hunter shield override/expiry, runner protection, post-window respawn, and team victory. |
+| T8 | Not started | Four-player integration and failure checks / C, all playtest | 2–3 h | T4, T5, T6, T7 | Four devices finish repeated rounds; invalid joins, room cleanup, disconnects, and orientation changes have recorded outcomes. |
+| T9 | Not started | Mobile feel and restrained visual polish / A | 2 h | T8 | Agreed phone/browser matrix passes; controls stay usable; original visuals remain readable; optional depth effects do not hurt play. |
+| T10 | Not started | Reliability fixes and release candidate / B + C lanes | 2 h each | T8 | Blocking defects closed; locally served build matches reviewed commit; three consecutive four-player matches complete. |
+| T11 | Not started | Demo rehearsal and AI-workflow story / All | 1 h together | T9, T10 | Rehearsed local-network game demo plus one traceable feature journey: spec → plan → AI-assisted change → tests → review. Cloud hosting is optional after the local slice. |
 
 T2, T3, and T4 run in parallel after T1. T5 and T6 can proceed in parallel against the approved contract. C starts test preparation while A and B implement gameplay. Do not wait for final polish to playtest.
 
