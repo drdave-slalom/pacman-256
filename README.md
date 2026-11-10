@@ -43,10 +43,11 @@ Copilot; a staged Delivery Plan status edit only syncs the brief status block.
 The hook sends a size-limited staged diff and relevant docs to Copilot. It blocks
 common credential patterns, but that check is not exhaustive; never stage
 secrets. Install and authenticate GitHub Copilot CLI (`copilot` on `PATH`) before
-committing implementation changes. `npm ci` installs the hook in a local clone;
-existing clones can run `npm run hooks:install`. If Copilot fails or returns an
-invalid update, the commit is stopped. Review generated documentation before
-completing the commit.
+committing implementation changes. `npm ci` installs the hook in a local clone
+(via the root `prepare` script); existing clones can run `npm run hooks:install`.
+`npm run docs:update-staged` runs the documentation update step on the currently
+staged changes. If Copilot fails or returns an invalid update, the commit is
+stopped. Review generated documentation before completing the commit.
 
 ## Phone access over the local network
 
@@ -81,7 +82,9 @@ npm run check
 
 Tests use Node's built-in runner and real HTTP/WebSocket connections on an
 ephemeral local port. They verify shared tuning, protocol guards, health, state
-synchronization, and incompatible-version rejection. No cloud account is required.
+synchronization, and incompatible-version rejection. `npm test` also runs the
+tests for the staged-documentation update script
+(`scripts/update-staged-docs.test.mjs`). No cloud account is required.
 `npm run build` emits shared/server JavaScript and client static assets.
 
 After building, `npm start` runs the compiled server. The built client is in

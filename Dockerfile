@@ -13,6 +13,7 @@ COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/package.json
 COPY apps/server/package.json apps/server/package.json
 COPY apps/client/package.json apps/client/package.json
+COPY scripts/install-git-hooks.mjs scripts/install-git-hooks.mjs
 RUN npm ci
 
 # Copy sources and build all workspaces.
@@ -31,6 +32,7 @@ COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/package.json
 COPY apps/server/package.json apps/server/package.json
 COPY apps/client/package.json apps/client/package.json
+COPY scripts/install-git-hooks.mjs scripts/install-git-hooks.mjs
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=build /app/packages/shared/dist packages/shared/dist
