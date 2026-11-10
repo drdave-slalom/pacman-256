@@ -11,6 +11,8 @@ import {
   isJoinErrorCode,
   isProtocolCompatible,
   isValidDisplayName,
+  parseAppRoute,
+  serializeAppRoute,
 } from "./index.ts";
 
 test("protocol compatibility requires an exact numeric version", () => {
@@ -113,6 +115,34 @@ test("describeJoinError maps contract codes and matchmaking numbers", () => {
 
   assert.match(describeJoinError("WAT"), /could not join/i);
   assert.equal(describeJoinError(), "Could not join the room. Try again.");
+});
+
+test("app route hash parsing covers lobby, prototype, and room views", () => {
+  assert.deepEqual(parseAppRoute(""), { view: "lobby" });
+  assert.deepEqual(parseAppRoute("#"), { view: "lobby" });
+  assert.deepEqual(parseAppRoute("#play"), { view: "prototype" });
+  assert.deepEqual(parseAppRoute(" #play "), { view: "prototype" });
+  assert.deepEqual(parseAppRoute("#room=ABC123"), {
+    view: "room",
+    code: "ABC123",
+  });
+  assert.deepEqual(parseAppRoute("#room=A%20B"), {
+    view: "room",
+    code: "A B",
+  });
+  assert.deepEqual(parseAppRoute("#room="), { view: "lobby" });
+  assert.deepEqual(parseAppRoute("#garbage"), { view: "lobby" });
+});
+
+test("app route serialization round-trips with the parsing", () => {
+  assert.equal(serializeAppRoute({ view: "lobby" }), "");
+  assert.equal(serializeAppRoute({ view: "prototype" }), "#play");
+  assert.equal(serializeAppRoute({ view: "room", code: "ABC123" }), "#room=ABC123");
+  assert.equal(serializeAppRoute({ view: "room", code: "A B" }), "#room=A%20B");
+  assert.deepEqual(
+    parseAppRoute(serializeAppRoute({ view: "room", code: "Q*W" })),
+    { view: "room", code: "Q*W" },
+  );
 });
 
 test("shared tuning matches the approved initial timing", () => {

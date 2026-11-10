@@ -5,7 +5,35 @@ import {
   PROTOCOL_VERSION,
   describeJoinError,
   isValidDisplayName,
+  parseAppRoute,
+  serializeAppRoute,
 } from "@maze/shared";
+import type { AppRoute } from "@maze/shared";
+
+const DISPLAY_NAME_STORAGE_KEY = "maze-workshop.display-name";
+
+function rememberDisplayName(name: string): void {
+  try {
+    window.localStorage.setItem(DISPLAY_NAME_STORAGE_KEY, name);
+  } catch {
+    // Storage may be unavailable; the URL still restores the view.
+  }
+}
+
+function savedDisplayName(): string | null {
+  try {
+    return window.localStorage.getItem(DISPLAY_NAME_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Mirror the current view in the URL hash without reloading the page. */
+function setRouteHash(route: AppRoute): void {
+  const hash = serializeAppRoute(route);
+  const path = `${window.location.pathname}${window.location.search}`;
+  window.history.replaceState(null, "", hash ? `${path}${hash}` : path);
+}
 
 interface LobbyOptions {
   client: Client;
@@ -113,6 +141,7 @@ export function initLobby(options: LobbyOptions): void {
       }
     });
     setStatus(`Joined room ${room.roomId} (${verb}). Game rendering lands with T3.`);
+    setRouteHash({ view: "room", code: room.roomId });
     onEnterGame();
   };
 
@@ -121,6 +150,7 @@ export function initLobby(options: LobbyOptions): void {
     action: () => Promise<Room>,
     verb: string,
   ): Promise<void> => {
+    rememberDisplayName(name);
     setJoining(true);
     try {
       const room = await action();
@@ -131,6 +161,19 @@ export function initLobby(options: LobbyOptions): void {
     } finally {
       setJoining(false);
     }
+  };
+
+  const enterPrototype = (): void => {
+    // Local prototype: no server room involved. Drop any stale room so the
+    // fallback never claims a server match.
+    resetActiveRoom();
+    const name = nameInput.value.trim();
+    if (isValidDisplayName(name)) {
+      rememberDisplayName(name);
+    }
+    setStatus("Prototype maze (local, offline). Create/join use the server once T3 lands.");
+    setRouteHash({ view: "prototype" });
+    onEnterGame();
   };
 
   createButton.addEventListener("click", () => {
@@ -171,16 +214,42 @@ export function initLobby(options: LobbyOptions): void {
     );
   });
 
-  localPlayButton.addEventListener("click", () => {
-    // Local prototype: no server room involved. Drop any stale room so the
-    // fallback never claims a server match.
-    resetActiveRoom();
-    setStatus("Prototype maze (local, offline). Create/join use the server once T3 lands.");
-    onEnterGame();
-  });
+  localPlayButton.addEventListener("click", enterPrototype);
 
   leaveButton.addEventListener("click", () => {
     resetActiveRoom();
+    setRouteHash({ view: "lobby" });
     onLeaveGame();
   });
+
+  // Restore any saved display name so a refresh can rejoin a room.
+  const savedName = savedDisplayName();
+  if (savedName && isValidDisplayName(savedName)) {
+    nameInput.value = savedName;
+  }
+
+  // Restore the view from the URL hash: prototype maze or a joined room.
+  const initialRoute = parseAppRoute(window.location.hash);
+  if (initialRoute.view === "prototype") {
+    enterPrototype();
+  } else if (initialRoute.view === "room") {
+    roomCodeInput.value = initialRoute.code;
+    const name =
+      savedName && isValidDisplayName(savedName) ? savedName.trim() : null;
+    if (name !== null) {
+      setStatus(`Attempting to rejoin room ${initialRoute.code}…`);
+      void runJoin(
+        name,
+        () =>
+          client.joinById(initialRoute.code, {
+            protocolVersion: PROTOCOL_VERSION,
+            displayName: name,
+          }),
+        "rejoined",
+      );
+    } else {
+      setStatus("Enter your display name to rejoin your room.");
+      nameInput.focus();
+    }
+  }
 }

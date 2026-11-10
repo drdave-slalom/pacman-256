@@ -31,6 +31,11 @@ must report `Connected: shared protocol v1, authoritative lobby state received.`
 The check creates a disposable diagnostic room and leaves it; it does not create
 a playable private match.
 
+The current view is mirrored in the URL hash, so a refresh restores it:
+`#play` reopens the local prototype maze, and `#room=<code>` attempts to rejoin
+that room (with the display name remembered from the previous session). The
+lobby is the default (no hash).
+
 One command starts shared-package compilation in watch mode, the server, and Vite.
 Press Ctrl+C to stop all three. The client port is strict: startup fails if 5173
 is occupied rather than silently selecting a different URL.

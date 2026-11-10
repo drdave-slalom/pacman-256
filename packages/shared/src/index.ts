@@ -1,6 +1,8 @@
 export const PROTOCOL_VERSION = 1;
 export const CONNECTION_ROOM = "connection-check";
 
+export const ROOM_CODE_MAX_LENGTH = 24;
+
 /** Shared private-game room name; T3's server room must register this name. */
 export const GAME_ROOM = "game-room";
 
@@ -58,6 +60,47 @@ export function isValidDisplayName(value: unknown): value is string {
     }
   }
   return true;
+}
+
+/**
+ * Client-visible app view, mirrored in the URL hash so a refresh restores the
+ * current screen. `lobby` is the default (empty hash); `prototype` is the
+ * local maze demo (`#play`); `room` is a joined private room (`#room=<code>`).
+ */
+export type AppRoute =
+  | { view: "lobby" }
+  | { view: "prototype" }
+  | { view: "room"; code: string };
+
+export function parseAppRoute(hash: string): AppRoute {
+  const cleaned = hash.trim().replace(/^#/, "");
+  if (cleaned === "play") {
+    return { view: "prototype" };
+  }
+  const roomMatch = /^room=(.+)$/.exec(cleaned);
+  const rawCode = roomMatch?.[1];
+  if (rawCode !== undefined && rawCode.length > 0) {
+    try {
+      const code = decodeURIComponent(rawCode);
+      if (code.length > 0 && code.length <= ROOM_CODE_MAX_LENGTH) {
+        return { view: "room", code };
+      }
+    } catch {
+      // Malformed percent-encoding falls through to the lobby.
+    }
+  }
+  return { view: "lobby" };
+}
+
+export function serializeAppRoute(route: AppRoute): string {
+  switch (route.view) {
+    case "prototype":
+      return "#play";
+    case "room":
+      return `#room=${encodeURIComponent(route.code)}`;
+    default:
+      return "";
+  }
 }
 
 export type Team = "hunter" | "runner";
