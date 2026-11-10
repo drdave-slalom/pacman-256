@@ -39,7 +39,7 @@ export function getDocumentationPlan(filePaths) {
         /^tsconfig(?:\.tests)?\.json$/.test(filePath) ||
         /^apps\/(?:client|server)\/(?:src\/|package\.json$|vite\.config\.ts$)/.test(filePath) ||
         /^packages\/shared\/(?:src\/|package\.json$)/.test(filePath) ||
-        filePath.startsWith("deploy/") ||
+        (filePath.startsWith("deploy/") && !/\.md$/i.test(filePath)) ||
         filePath.startsWith(".github/workflows/")
     )))];
     if (sourcePaths.length === 0) {
