@@ -27,7 +27,7 @@ decision history. The confirmed game rules live in `docs/GAME-CONTRACT.md`.
 ## Pipeline
 
 ```text
-Ticket / spec / ask
+GitHub issue / spec / ask
   → 0. Dispatch gate (implementation → spec + role agent; Lead does not implement)
   → 1. Clarify + spec (find or, with user confirmation, create the unit's
           GitHub issue; SPEC/<task-id>-<slug>.md links it and has acceptance criteria)
