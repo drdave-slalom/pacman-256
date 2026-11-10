@@ -23,8 +23,6 @@ export const PATCH_INTERVAL_MS = 50;
 export const MAX_DISPLAY_NAME_LENGTH = 16;
 export const MAX_REQUEST_ID_LENGTH = 64;
 export const MAX_ROUND_ID_LENGTH = 64;
-/** Team capacity in the lobby (contract §1). */
-export const MAX_TEAM_SIZE = 2;
 
 /**
  * Per-connection `setDirection` rate limit: at most this many accepted inputs
@@ -47,6 +45,9 @@ export const ERROR_CODES = [
   "ROOM_FULL",
   "JOIN_CLOSED",
   "TEAM_FULL",
+  // Client-warning-only since D054: retained as a contract-visible code, but
+  // the server never emits it as a rejection; the client derives live
+  // hunter/runner counts and warns locally instead.
   "TEAMS_UNBALANCED",
   "HOST_REQUIRED",
   "INVALID_PHASE",
@@ -66,8 +67,10 @@ export const ERROR_MESSAGES: Readonly<Record<ErrorCode, string>> = {
   ROOM_NOT_FOUND: "That room code was not found. Check the code or create a new room.",
   ROOM_FULL: "That room is full (4 players). Ask the host for another room.",
   JOIN_CLOSED: "That match has already started. Wait for the next lobby or create a room.",
-  TEAM_FULL: "That team already has 2 players. Pick the other team.",
-  TEAMS_UNBALANCED: "Teams must be balanced (1v1 or 2v2) and everyone must pick a team.",
+  // D054: the per-team cap was removed, so the server never emits TEAM_FULL;
+  // retained here for contract continuity (informative copy only).
+  TEAM_FULL: "That team is full. Pick the other team.",
+  TEAMS_UNBALANCED: "Teams are unbalanced (one side has fewer players). Warning only; the host can still start.",
   HOST_REQUIRED: "Only the host can do that.",
   INVALID_PHASE: "That action is not available right now.",
   INVALID_INPUT: "The request was invalid. Check your input and try again.",

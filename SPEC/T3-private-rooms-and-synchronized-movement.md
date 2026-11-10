@@ -6,11 +6,16 @@
 
 ## Goal
 
-Two to four clients create or join one private room by code, pick balanced teams,
-and the host starts. Every client then sees every player move. Movement is
+Two to four clients create or join one private room by code, pick teams, and the
+host starts. Every client then sees every player move. Movement is
 server-authoritative, in a maze generated from a server-chosen seed. Invalid, full,
 or closed room joins and rejected actions are shown to the player. The server
 rejects malformed or out-of-phase input.
+
+> **Superseded portions:** this spec's balanced 1v1/2v2 start and max-two-per-team
+> rules are superseded by [SPEC/unbalanced-lobbies.md](./unbalanced-lobbies.md) / D054
+> (no per-team cap; start requires every player assigned and ≥1 per team; unbalanced
+> rosters warn only).
 
 ## Owner choices (2026-11-10)
 
