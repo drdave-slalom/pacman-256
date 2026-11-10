@@ -1,5 +1,12 @@
 import type { Direction } from "./index.ts";
-import { PLAYER_SPAWN, isInside, isWalkable } from "./map.ts";
+import {
+  MAZE_HEIGHT,
+  MAZE_MAP,
+  MAZE_WIDTH,
+  PLAYER_SPAWN,
+  isInsideIn,
+  isWalkableIn,
+} from "./map.ts";
 
 /**
  * T2 movement module: continuous movement with buffered turns.
@@ -79,6 +86,7 @@ export function stepPlayerMove(
   state: PlayerMoveState,
   speedTilesPerSecond: number,
   dtSeconds: number,
+  maze: readonly string[] = MAZE_MAP,
 ): PlayerMoveState {
   const position: Vec2 = { x: state.position.x, y: state.position.y };
   let direction: Direction = state.direction;
@@ -124,7 +132,7 @@ export function stepPlayerMove(
       ) {
         const col = cellX;
         const dy = queuedDirection === "up" ? -1 : 1;
-        if (isWalkable(col, row + dy)) {
+        if (isWalkableIn(maze, col, row + dy)) {
           position.x = col + 0.5;
           direction = queuedDirection;
           queuedDirection = null;
@@ -134,7 +142,8 @@ export function stepPlayerMove(
 
       const nextCol = cellX + sign;
       const nextBlocked =
-        !isInside(nextCol, row) || !isWalkable(nextCol, row);
+        !isInsideIn(MAZE_WIDTH, MAZE_HEIGHT, nextCol, row) ||
+        !isWalkableIn(maze, nextCol, row);
       // Destination center: the next center ahead when the path is open, or
       // the current cell center when blocked (never a wall boundary).
       const nextCenterX = atCenter
@@ -169,7 +178,7 @@ export function stepPlayerMove(
       ) {
         const row = cellY;
         const dx = queuedDirection === "right" ? 1 : -1;
-        if (isWalkable(col + dx, row)) {
+        if (isWalkableIn(maze, col + dx, row)) {
           position.y = row + 0.5;
           direction = queuedDirection;
           queuedDirection = null;
@@ -179,7 +188,8 @@ export function stepPlayerMove(
 
       const nextRow = cellY + sign;
       const nextBlocked =
-        !isInside(col, nextRow) || !isWalkable(col, nextRow);
+        !isInsideIn(MAZE_WIDTH, MAZE_HEIGHT, col, nextRow) ||
+        !isWalkableIn(maze, col, nextRow);
       const nextCenterY = atCenter
         ? cellY + 0.5 + sign
         : sign > 0

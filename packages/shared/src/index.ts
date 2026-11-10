@@ -43,7 +43,9 @@ export {
   MAZE_MAP,
   PLAYER_SPAWN,
   isInside,
+  isInsideIn,
   isWalkable,
+  isWalkableIn,
 } from "./map.ts";
 
 export {
@@ -52,3 +54,5 @@ export {
   stepPlayerMove,
 } from "./movement.ts";
 export type { PlayerMoveState, Vec2 } from "./movement.ts";
+
+export { findSpawnCell, generateMaze } from "./maze-gen.ts";

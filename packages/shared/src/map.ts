@@ -40,19 +40,38 @@ export const PLAYER_SPAWN: Readonly<{ col: number; row: number }> = {
 };
 
 export function isInside(col: number, row: number): boolean {
+  return isInsideIn(MAZE_WIDTH, MAZE_HEIGHT, col, row);
+}
+
+export function isWalkable(col: number, row: number): boolean {
+  return isWalkableIn(MAZE_MAP, col, row);
+}
+
+/** Grid-bounds check against explicit dimensions (works for generated mazes). */
+export function isInsideIn(
+  width: number,
+  height: number,
+  col: number,
+  row: number,
+): boolean {
   return (
     Number.isInteger(col) &&
     Number.isInteger(row) &&
     col >= 0 &&
-    col < MAZE_WIDTH &&
+    col < width &&
     row >= 0 &&
-    row < MAZE_HEIGHT
+    row < height
   );
 }
 
-export function isWalkable(col: number, row: number): boolean {
-  if (!isInside(col, row)) {
+/** Walkable check against an explicit maze grid (works for generated mazes). */
+export function isWalkableIn(
+  maze: readonly string[],
+  col: number,
+  row: number,
+): boolean {
+  if (!isInsideIn(MAZE_WIDTH, MAZE_HEIGHT, col, row)) {
     return false;
   }
-  return MAZE_MAP[row]?.charAt(col) !== "#";
+  return maze[row]?.charAt(col) !== "#";
 }

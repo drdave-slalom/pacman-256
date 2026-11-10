@@ -4,12 +4,14 @@ import {
   CONNECTION_ROOM,
   DEFAULT_MOVE_SPEED_TILES_PER_SECOND,
   MAZE_HEIGHT,
+  MAZE_MAP,
   MAZE_WIDTH,
-  PLAYER_SPAWN,
   PROTOCOL_VERSION,
   createPlayerMoveState,
+  findSpawnCell,
+  generateMaze,
   isConnectionState,
-  isWalkable,
+  isWalkableIn,
   stepPlayerMove,
 } from "@maze/shared";
 import type { Direction } from "@maze/shared";
@@ -21,6 +23,7 @@ const SWIPE_THRESHOLD = 14;
 const gameContainer = document.querySelector<HTMLElement>("#game");
 const button = document.querySelector<HTMLButtonElement>("#connect");
 const status = document.querySelector<HTMLParagraphElement>("#status");
+const seedText = document.querySelector<HTMLParagraphElement>("#seed");
 if (!gameContainer || !button || !status) {
   throw new Error("The game mount, connect button and status element are required.");
 }
@@ -70,16 +73,24 @@ const KEY_TO_DIRECTION: Array<{ key: keyof KeyboardSteerKeys; direction: Directi
 
 class MazeScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Arc;
+  private maze: readonly string[] = MAZE_MAP;
   private playerState = createPlayerMoveState();
   private dragPointerId: number | null = null;
   private dragAccum = { x: 0, y: 0 };
 
   create(): void {
+    const seed = (Math.random() * 0x100000000) >>> 0;
+    this.maze = generateMaze(seed);
+    const spawn = findSpawnCell(this.maze);
+    this.playerState = createPlayerMoveState(spawn);
     this.renderMaze();
-    this.createPlayer();
+    this.createPlayer(spawn);
     this.setupSwipeSteering();
     this.setupDpad();
     this.setupKeyboardSteering();
+    if (seedText) {
+      seedText.textContent = `Maze seed ${seed}`;
+    }
   }
 
   update(_time: number, delta: number): void {
@@ -88,6 +99,7 @@ class MazeScene extends Phaser.Scene {
       this.playerState,
       DEFAULT_MOVE_SPEED_TILES_PER_SECOND,
       dt,
+      this.maze,
     );
     this.player.setPosition(
       this.playerState.position.x * TILE_SIZE,
@@ -105,7 +117,7 @@ class MazeScene extends Phaser.Scene {
     tiles.fillStyle(0x0b1224, 1);
     for (let row = 0; row < MAZE_HEIGHT; row++) {
       for (let col = 0; col < MAZE_WIDTH; col++) {
-        if (!isWalkable(col, row)) {
+        if (!isWalkableIn(this.maze, col, row)) {
           tiles.fillRect(col * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
         }
       }
@@ -116,7 +128,7 @@ class MazeScene extends Phaser.Scene {
     const segments: Array<[number, number, number, number]> = [];
     for (let row = 0; row < MAZE_HEIGHT; row++) {
       for (let col = 0; col < MAZE_WIDTH; col++) {
-        if (!isWalkable(col, row)) {
+        if (!isWalkableIn(this.maze, col, row)) {
           continue;
         }
         const x = col * TILE_SIZE;
@@ -129,10 +141,10 @@ class MazeScene extends Phaser.Scene {
           x2: number,
           y2: number,
         ) => {
-          if (!isWalkable(col + dx, row + dy)) {
+          if (!isWalkableIn(this.maze, col + dx, row + dy)) {
             segments.push([x1, y1, x2, y2]);
           }
-        };
+        }
         boundary(-1, 0, x, y, x, y + TILE_SIZE);
         boundary(1, 0, x + TILE_SIZE, y, x + TILE_SIZE, y + TILE_SIZE);
         boundary(0, -1, x, y, x + TILE_SIZE, y);
@@ -153,9 +165,9 @@ class MazeScene extends Phaser.Scene {
     }
   }
 
-  private createPlayer(): void {
-    const px = (PLAYER_SPAWN.col + 0.5) * TILE_SIZE;
-    const py = (PLAYER_SPAWN.row + 0.5) * TILE_SIZE;
+  private createPlayer(spawn: { col: number; row: number }): void {
+    const px = (spawn.col + 0.5) * TILE_SIZE;
+    const py = (spawn.row + 0.5) * TILE_SIZE;
     this.player = this.add.circle(px, py, TILE_SIZE * 0.35, 0xff9de2);
     this.player.setDepth(10);
   }

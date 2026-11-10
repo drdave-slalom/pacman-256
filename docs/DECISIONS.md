@@ -76,6 +76,7 @@ decisions below instead of the delivery plan's initial gameplay proposals.
 | D044 | Team reported draft reviewed and approved the [game contract](./GAME-CONTRACT.md) as the shared baseline on 2026-11-09. T0 is complete. | Includes lobby-only admission, all-phase host transfer, explicit leave/disconnect equivalence, interface/state/error proposals, and tunable simulation starting points. Unspecified geometry/limits, task assignments, device matrix, and performance measurement remain follow-ups. Approval of the document is not a separate go-ahead to build the app. |
 | D045 | Team explicitly authorized T1, the runnable skeleton, on 2026-11-09. | Scope: client/server/shared workspace, local startup, build/typecheck/tests, and local phone-access instructions. Does not authorize matchmaking/gameplay tasks or cloud deployment. |
 | D046 | T2 (one maze + touch movement) implemented and validated for team review on 2026-11-10. Decisions: dual touch controls (on-screen D-pad and swipe/drag steering); one fixed 15×11 compact rectilinear maze (original layout); shared map plus a pure continuous-movement/buffered-turn module in `packages/shared` for reuse by the authoritative server; the client drives a locally authoritative prototype only (server movement is T3). | Validation: `npm run check` green; 26 top-level tests (5 map + 17 movement new; 3 shared index; 1 server with 3 subtests); dev-server smoke served the prototype page and /health protocol v1; no server files changed. Independent internal review found no blockers. Follow-ups: physical-phone feel pass (swipe threshold, D-pad reachability, snap-on-wall-turn hop, scroll/page-fit), browser rendering visual pass, accessibility backlogs. |
+| D047 | Dynamic seeded maze generation adopted for the T2 prototype on 2026-11-10. Decisions: a pure, deterministic generator in `packages/shared/src/maze-gen.ts` (mulberry32 PRNG) produces reference-style dense, loop-rich, symmetric 21×19 mazes; fixed canvas with randomized interior; a random seed is chosen per game and displayed in the UI for reproducibility; the same API will let the authoritative server regenerate identical maps from a shared seed when T3 lands. Supersedes the fixed-single-maze part of D019 for the MVP; static `MAZE_MAP` remains the default/fallback and movement accepts an explicit maze. | Validation: `npm run check` green, 38 tests, including generator determinism, invariant (border/width/connectivity/no-2×2/loops) and spawn suites across many seeds. |
 
 ### Current combat summary
 
@@ -175,6 +176,19 @@ T1 subsequently received go-ahead in D045; later tasks remain separate.
   the contract lists buffered-reversal-between-junctions as still-open, so
   confirm it during T3. Snap-on-wall-turn shifts the actor half a tile when
   turning from a blocked wall boundary (intended; needs a device feel-check).
+
+## T2 dynamic maze generation context (not new gameplay decisions)
+
+- `packages/shared/src/maze-gen.ts` exports `generateMaze(seed)` (deterministic)
+  and `findSpawnCell(maze)`. It builds horizontal runs on every odd row and
+  mirrored vertical connectors on even columns, so every generated layout is
+  connected, one-tile-wide, border-walled, loop-rich, and symmetric about the
+  center column/row. Failed validation falls back to `MAZE_MAP`.
+- The client generates a maze per game (`Math.random()`-derived uint seed) and
+  shows `Maze seed <n>` in the UI; movement runs against that generated maze.
+- The static `MAZE_MAP` (21×19) remains the default used by movement unit
+  tests and by the generator fallback; `isInsideIn`/`isWalkableIn` operate on
+  an explicit grid.
 
 ## Maintaining this memory
 
