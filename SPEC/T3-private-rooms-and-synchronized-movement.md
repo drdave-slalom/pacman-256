@@ -29,6 +29,19 @@ rejects malformed or out-of-phase input.
 - 30 Hz fixed-step simulation (dt = 1/30 s), ~20 Hz patches (contract §3 tuning).
 - The input rate limit is a tunable starting value that still needs review (contract §2).
 
+## Implementation deviations (accepted after review, 2026-11-10)
+
+- **No `lock()` on start.** Colyseus reports a locked room and a full room with the
+  same "is locked" error, so the client could not tell `JOIN_CLOSED` from `ROOM_FULL`.
+  The room instead rejects non-lobby joins in `onAuth`/`onJoin` with `JOIN_CLOSED`.
+  A started four-player room still reports `ROOM_FULL`. Do not add `lock()` later
+  without keeping these codes distinguishable.
+- **Malformed `chooseTeam`/`startMatch`.** When a valid `requestId` can be read, the
+  reply is a correlated `actionResult` with `INVALID_INPUT`. Otherwise the reply is
+  `inputRejected`. Clients must handle both and never leave a request pending.
+- **No idle patch suppression.** `revision`/`serverTime` advance on every tick in all
+  phases, so lobbies also patch at ~20 Hz.
+
 ## Out of scope
 
 Countdown, contact/elimination, pickups, timers/deadlines, results, `returnToLobby`,
