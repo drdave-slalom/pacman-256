@@ -273,3 +273,7 @@ tunables remain starting values for review.
 - Before implementation, agree the shared game-state/message contract and acceptance checks.
 - These files are local until committed and pushed through the team's normal review process.
   Do not assume other teammates have received an uncommitted update.
+
+## T2-T4 completion verification
+
+- D053 | Team manually verified T2, T3, and T4 complete on 2026-11-10. T2 (maze + touch movement, PR #10) passed the physical-phone check; T3 (private rooms + synchronized movement, PR #19) passed two-client LAN verification; T4 (mobile lobby / local-network phone access, PR #21) passed the LAN rejoin smoke and phone verification. Delivery-plan statuses for T2-T4 updated from "implemented; validation pending" to "Complete"; brief status block synced. | Recorded by the team after manual verification; remaining T5-T11 stay "not started".
