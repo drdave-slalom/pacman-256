@@ -12,7 +12,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      models: read
     concurrency:
       group: pr-description-${{ github.event.pull_request.number }}
       cancel-in-progress: true
@@ -68,7 +67,7 @@ jobs:
 
       - name: Generate description from diff
         id: inference
-        uses: actions/ai-inference@v1
+        uses: actions/ai-inference@v3
         with:
           prompt-file: ./.github/prompts/pr-description.prompt.yml
           file_input: |
