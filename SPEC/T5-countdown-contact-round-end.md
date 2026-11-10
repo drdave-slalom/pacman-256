@@ -69,6 +69,35 @@ Disconnect outcomes are defined. No pickups or vulnerability yet (T7).
   - The room-level all-leave test accepts any decided outcome, because three leaves
     don't reliably land in one tick.
 
+## Follow-ups (open after T5 review and QA)
+
+Owners pick these up in the named task. They aren't T5 acceptance criteria.
+
+**T6 (results UI):**
+- Capitalise "no winner: all players left." in `resultSummary`
+  (`apps/client/src/session-model.ts`) and update its test.
+- Announce the result line to screen readers: it goes to `#lobby-hint`, which isn't
+  a live region.
+- When the last runners *disconnect*, the result still reads "all runners
+  eliminated" (`teamEliminated`), which is misleading when nobody was caught.
+  Decide on wording, or whether a distinct server reason is needed (that would be a
+  contract change; see D043).
+- Check the draw (`none`) and `timeout` result lines in a browser. QA reached
+  results only by runners disconnecting.
+
+**T7 (vulnerability):**
+- Add a room-level simultaneous-wipe test once runners can eliminate vulnerable
+  hunters; today it is unit-tested only.
+
+**Test infrastructure (unassigned):**
+- A deterministic room-level `abandoned` test needs a hook to step the simulation
+  manually. The current all-leave test accepts any decided outcome.
+- Contact on the deadline step is unit-tested only.
+- Rename the unit test "same-step elimination + last-hunter disconnect is a
+  simultaneous wipe" to match its scenario (`apps/server/src/game-room.test.ts`).
+
+**Devices:** no phone or touch validation of T5 yet. Cover it in T8.
+
 ## Out of scope
 
 Pickups and effects, shield/vulnerability contact rows, opponent blocking, T6 HUD /
