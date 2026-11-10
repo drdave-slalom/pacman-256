@@ -28,7 +28,7 @@ const TEST_SEED = 424_242;
 
 interface Harness {
   client: Client;
-  /** Create or join and track the room for cleanup. */
+  /** Create or join, track the room for cleanup, and resolve once the initial state is decoded. */
   create(displayName: string): Promise<Player>;
   join(code: string, displayName: string): Promise<Player>;
 }
@@ -87,10 +87,23 @@ function inbox<T>(room: Room, type: string, parse: (value: unknown) => T | null)
 
 let requestCounter = 0;
 
+/**
+ * The SDK resolves create/join before the first full state is decoded, so an
+ * early `room.state.toJSON()` can lack `players`. Such snapshots are "not yet".
+ */
+function hasInitialState(state: Partial<GameRoomSnapshot> | undefined): state is GameRoomSnapshot {
+  return typeof state?.players === "object" && state.players !== null;
+}
+
 function wrap(room: Room): Player {
   const nextActionResult = inbox(room, SERVER_MESSAGES.actionResult, parseActionResult);
   const nextRejection = inbox(room, SERVER_MESSAGES.inputRejected, parseInputRejected);
-  const snapshot = () => room.state.toJSON() as GameRoomSnapshot;
+  const decoded = () => room.state?.toJSON() as Partial<GameRoomSnapshot> | undefined;
+  const snapshot = (): GameRoomSnapshot => {
+    const state = decoded();
+    assert.ok(hasInitialState(state), "snapshot() requires the initial state; await waitFor first");
+    return state;
+  };
   return {
     room,
     id: room.sessionId,
@@ -98,12 +111,12 @@ function wrap(room: Room): Player {
     nextActionResult,
     nextRejection,
     waitFor(predicate, label) {
-      const current = snapshot();
-      if (predicate(current)) return Promise.resolve(current);
+      const current = decoded();
+      if (hasInitialState(current) && predicate(current)) return Promise.resolve(current);
       return withTimeout(new Promise<GameRoomSnapshot>((resolve) => {
         const listener = () => {
-          const state = snapshot();
-          if (predicate(state)) {
+          const state = decoded();
+          if (hasInitialState(state) && predicate(state)) {
             room.onStateChange.remove(listener);
             resolve(state);
           }
@@ -132,17 +145,19 @@ async function startServer(t: TestContext, seed = TEST_SEED): Promise<Harness> {
   const address = httpServer.address();
   assert.ok(address && typeof address !== "string");
   const client = new Client(`ws://127.0.0.1:${address.port}`);
+  const track = async (room: Room): Promise<Player> => {
+    rooms.push(room);
+    const player = wrap(room);
+    await player.waitFor(() => true, "initial state");
+    return player;
+  };
   return {
     client,
     async create(displayName) {
-      const room = await client.create(GAME_ROOM, joinOptions(displayName));
-      rooms.push(room);
-      return wrap(room);
+      return track(await client.create(GAME_ROOM, joinOptions(displayName)));
     },
     async join(code, displayName) {
-      const room = await client.joinById(code, joinOptions(displayName));
-      rooms.push(room);
-      return wrap(room);
+      return track(await client.joinById(code, joinOptions(displayName)));
     },
   };
 }
