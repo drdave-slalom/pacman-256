@@ -48,11 +48,11 @@ Lead session; the six project role profiles above have Copilot equivalents.
 GitHub issue / spec / ask
       │  (Lead)
       ▼
-0. Gate      → implementation work? find or (with user confirmation) create the unit's
-               GitHub issue; write spec(s) + delegate; Lead does not implement
+0. Gate      → implementation work? write spec(s) + delegate; Lead does not implement
       │
       ▼
-1. Clarify → acceptance criteria in SPEC/<task-id>-<slug>.md (links the issue)
+1. Clarify → find or (with user confirmation) create the unit's GitHub issue;
+             acceptance criteria in SPEC/<task-id>-<slug>.md (links the issue)
       │
       ▼
 2. Break down → bounded units; one executor per unit; no overlapping writers
@@ -288,8 +288,8 @@ Rules:
 - **Prefer the focused definition.** Use `builder` for resolved implementation,
   `scout` for recon, `qa-tester` for verification, `pr-reviewer` for review.
 - **Keep it local-first.** Validate with documented commands (`npm run check`,
-  local-network smoke test). Cloud deployment and CI pipeline changes are
-  separate and deferred.
+  local-network smoke test). Cloud deployment changes are separate and
+  deferred.
 
 ## Dispatch example
 
