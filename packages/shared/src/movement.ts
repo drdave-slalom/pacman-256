@@ -8,12 +8,12 @@ import { PLAYER_SPAWN, isInside, isWalkable } from "./map.ts";
  * - Movement is continuous; positions are fractional tile coordinates.
  * - A direction request queues a turn at the next legal turn point.
  * - Releasing a control does not stop movement.
- * - Walls block: a move that would enter a wall cell stops at the wall edge,
- *   and the actor can never exit the maze bounds.
+ * - Walls block: a move that would enter a wall cell (or leave the maze)
+ *   stops centered in the current walkable corridor cell, so the actor never
+ *   rests on a tile boundary (integer coordinate) and never enters a wall.
  * - A queued perpendicular direction is applied at a junction/turn point when
  *   it becomes legal (centered on a cell whose perpendicular neighbor is
- *   walkable, or when stopped flush against a wall that has a walkable
- *   perpendicular neighbor). No frame-perfect timing is required.
+ *   walkable). No frame-perfect timing is required.
  * - Pressing the opposite direction reverses immediately; pressing the same
  *   direction is a no-op.
  * - When blocked ahead, the actor stops and resumes when a direction becomes
@@ -109,8 +109,9 @@ export function stepPlayerMove(
     if (horizontal) {
       const row = Math.round(position.y - 0.5);
 
-      // Try a queued perpendicular turn at a cell center (junction) or at a
-      // blocked wall boundary where the perpendicular neighbor is walkable.
+      // Try a queued perpendicular turn at a cell center (junction) where the
+      // perpendicular neighbor is walkable (the boundary branch below is
+      // retained defensively for legacy boundary positions).
       if (queuedDirection !== null && isPerpendicular(queuedDirection, direction)) {
         const dy = queuedDirection === "up" ? -1 : 1;
         const groundedX = Math.round(position.x);
@@ -136,21 +137,12 @@ export function stepPlayerMove(
         }
       }
 
-      const atBoundary = isNear(position.x, Math.round(position.x));
-      const nextCellCol = atBoundary
-        ? Math.round(position.x) + (sign > 0 ? 0 : -1)
-        : Math.floor(position.x) + sign;
+      const nextCellCol = Math.floor(position.x) + sign;
       const nextBlocked = !isInside(nextCellCol, row) || !isWalkable(nextCellCol, row);
-      const nextCenterX =
-        sign > 0
-          ? Math.floor(position.x + 0.5) + 0.5
-          : Math.ceil(position.x - 0.5) - 0.5;
-      const wallBoundaryX = atBoundary
-        ? position.x
-        : sign > 0
-          ? Math.floor(position.x) + 1
-          : Math.floor(position.x);
-      const moveLimitX = nextBlocked ? wallBoundaryX : nextCenterX;
+      const nextCenterX = Math.floor(position.x) + 0.5 + sign;
+      const blockedCenterX =
+        (sign > 0 ? Math.floor(position.x - MOVE_EPSILON) : Math.floor(position.x)) + 0.5;
+      const moveLimitX = nextBlocked ? blockedCenterX : nextCenterX;
       const distanceToDecision = Math.abs(moveLimitX - position.x);
       if (distanceToDecision < MOVE_EPSILON) {
         break;
@@ -189,21 +181,12 @@ export function stepPlayerMove(
         }
       }
 
-      const atBoundary = isNear(position.y, Math.round(position.y));
-      const nextCellRow = atBoundary
-        ? Math.round(position.y) + sign
-        : Math.floor(position.y) + sign;
+      const nextCellRow = Math.floor(position.y) + sign;
       const nextBlocked = !isInside(col, nextCellRow) || !isWalkable(col, nextCellRow);
-      const nextCenterY =
-        sign > 0
-          ? Math.floor(position.y + 0.5) + 0.5
-          : Math.ceil(position.y - 0.5) - 0.5;
-      const wallBoundaryY = atBoundary
-        ? position.y
-        : sign > 0
-          ? Math.floor(position.y) + 1
-          : Math.floor(position.y);
-      const moveLimitY = nextBlocked ? wallBoundaryY : nextCenterY;
+      const nextCenterY = Math.floor(position.y) + 0.5 + sign;
+      const blockedCenterY =
+        (sign > 0 ? Math.floor(position.y - MOVE_EPSILON) : Math.floor(position.y)) + 0.5;
+      const moveLimitY = nextBlocked ? blockedCenterY : nextCenterY;
       const distanceToDecision = Math.abs(moveLimitY - position.y);
       if (distanceToDecision < MOVE_EPSILON) {
         break;
