@@ -5,8 +5,13 @@ for pacman-256. It defines how we break work into bounded units and distribute
 it across role-specific subagents running locally in **Herdr** (Pi Herdsman),
 with a human Lead owning acceptance and integration.
 
-**Lead sessions should load the `factory-orchestrator` skill** (`.agents/skills/factory-orchestrator/SKILL.md`)
-to run this workflow; it is the executable form of this guide.
+**Lead sessions should load the `factory-orchestrator` skill** to run this
+workflow; it is the executable form of this guide. The skill is dual-located:
+
+- Canonical instructions: `.github/skills/factory-orchestrator/SKILL.md`
+  (loaded by GitHub Copilot; the single source of truth).
+- Pi mirror: `.agents/skills/factory-orchestrator/SKILL.md` (loads the
+  canonical file, so the two never drift).
 
 The factory is a *process*, not a machine: agents are proposals that produce
 evidence and handoffs; people stay responsible. It complements the GitHub
