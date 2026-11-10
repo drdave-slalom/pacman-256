@@ -45,7 +45,7 @@ are added to SPEC files.
 | --- | --- | --- |
 | `SPEC/*.md` (repo) | title (first H1), slug, first paragraph (goal), any lane markers | unreadable → unit still listed with `parseError` |
 | `git worktree list --porcelain` | worktree path + branch per checkout | command failure → `gitUnavailable` |
-| `git branch --list 'factory/*'` | branch existence | same |
+| `git branch --list 'factory/*'` + `git for-each-ref refs/remotes/origin/factory/*` | local + remote branch existence (deduplicated) | same |
 | `git diff main...<branch> --numstat` (cached) | per-branch net +add/-del, changed-file count | base/ancestry unavailable → omit totals |
 | `git status --porcelain` (worktree) | dirty flag | same |
 | Herdr `runtime/mailboxes-v5` | live agent records (label, definition, state, available tools) | empty when idle; per-record parse failure → that record `unknown` |
@@ -60,10 +60,14 @@ are added to SPEC files.
   space, case). Example: SPEC file `T3-private-rooms-and-synchronized-movement.md`
   → `t3privateroomsandsynchronizedmovement`; branch `factory/t4-mobile-lobby` →
   `t4mobilelobby`.
-- Matching: a branch/worktree/PR joins a unit when their canonical id contains or
-  equals the unit's canonical id (or vice versa), scored by overlap length; the
-  highest-scoring non-zero match wins. Unmatched artifacts go to an
-  `orphaned` bucket surfaced in the UI (honest pure inference).
+- Matching (implemented): a branch/worktree/PR/handoff joins a unit by score =
+  containment (dominant, ~5000) plus a token-overlap term (~1000 + shared
+  length) for shared normalized tokens. The `factory` namespace token is
+  excluded from overlap. Highest non-zero score wins; ties resolve
+  deterministically. Unmatched artifacts go to an `orphaned` bucket surfaced in
+  the UI (honest pure inference). Known limitation: generic shared tokens
+  (`control`, `web`, `review`, `ui`, `docs`, `spec`) can create ambiguity;
+  adversarial cases are covered by matching tests.
 - Handoffs join via their `agent` label canonical id against the same rule;
   unmatched handoffs → `orphaned`.
 
@@ -113,7 +117,10 @@ type Attention =
   | "orphaned-artifacts" | "parse-error";
 ```
 
-`FactorySnapshot` = `{ generatedAt, repo: { root, branch, dirty }, units: Unit[], agents: AgentRecord[], prs: PullRequest[], errors: string[] }`.
+`FactorySnapshot` = `{ generatedAt, repo: { root, branch, dirty }, units: Unit[], agents: AgentRecord[], prs: PullRequest[], orphaned: { branches: string[]; worktrees: string[]; handoffs: string[]; prs: string[] }, errors: string[] }`.
+
+The `orphaned` field lists artifacts that could not be joined to a unit (see
+Normalized identity); it is always surfaced, never dropped silently.
 
 ## Pure-inference stage decision
 
@@ -127,7 +134,7 @@ For each unit `U`, collect evidence `E = (W, B, I, R, Q, P, C, M)`:
 
 Primary stage (first match wins, evaluated top-down):
 
-1. `M` and no `W` and no `B` → **done** (`readyForCleanup` if `W` still exists).
+1. `M` (PR merged) → **done**; `readyForCleanup` if `W` or `B` still exists.
 2. `P` and `C == green` → **integrate** (`readyToMerge = true`).
 3. `P` → **integrate** (`ciRed = C == "red"`).
 4. `W`/`B` and `I` and `R` and `Q` → **integrate** (awaiting PR; flags

@@ -77,9 +77,10 @@ factory-control/
   state/           # runtime state (audit log, dispatch queue) — gitignored
 ```
 
-Planned commands (defined when code lands): `npm run factory:control` starts the
-server (snapshot + web + action API); the TUI is a pi extension registered in
-the pi config.
+Planned commands (defined when code lands): `npm run factory:control -- snapshot
+[--json]` is the snapshot CLI; `npm run factory:control:serve` starts the server
+(snapshot + web + action API); the TUI is a pi extension registered in the pi
+config.
 
 ## Where the code goes and how it integrates
 
