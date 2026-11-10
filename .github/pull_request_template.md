@@ -1,6 +1,7 @@
 ## Linked issue
 
-Closes #<!-- issue number; omit this line only if no issue exists -->
+<!-- `Closes #<n>`, or "No issue" if none. -->
+Closes #
 
 ## Spec
 

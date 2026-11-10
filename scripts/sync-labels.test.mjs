@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
-import { buildLabelCommands, formatCommand, main, parseArgs, parseLabels } from "./sync-labels.mjs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { buildLabelCommands, formatCommand, isInvokedDirectly, main, parseArgs, parseLabels } from "./sync-labels.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const labelsFile = path.join(repositoryRoot, ".github", "labels.yml");
@@ -148,5 +150,24 @@ test("issue forms only apply labels defined in labels.yml", () => {
         for (const label of used) {
             assert.ok(defined.has(label), `${form} uses undefined label ${label}`);
         }
+    }
+});
+
+test("entrypoint runs when invoked through a symlinked path", () => {
+    const scriptPath = path.join(repositoryRoot, "scripts", "sync-labels.mjs");
+    const directory = realpathSync(mkdtempSync(path.join(tmpdir(), "sync-labels-")));
+    try {
+        const linkPath = path.join(directory, "sync-labels-link.mjs");
+        symlinkSync(scriptPath, linkPath);
+        assert.equal(isInvokedDirectly(linkPath, pathToFileURL(scriptPath).href), true);
+        assert.equal(isInvokedDirectly(path.join(directory, "missing.mjs")), false);
+        assert.equal(isInvokedDirectly(undefined), false);
+
+        const result = spawnSync(process.execPath, [linkPath, "--dry-run"], { encoding: "utf8" });
+        assert.equal(result.status, 0, result.stderr);
+        assert.match(result.stdout, /^\[dry-run\] gh label create type:feature /m);
+        assert.match(result.stdout, new RegExp(`Would sync ${specLabels.length} labels\\.`));
+    } finally {
+        rmSync(directory, { recursive: true, force: true });
     }
 });

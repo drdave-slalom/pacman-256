@@ -6,7 +6,7 @@
 // which creates missing labels and updates existing ones, so repeated runs are idempotent.
 // Labels not listed in the file (including GitHub defaults) are left untouched.
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -173,8 +173,19 @@ export function main(argv = process.argv.slice(2), { run = spawnSync, log = cons
     return commands;
 }
 
-const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
-if (invokedPath === fileURLToPath(import.meta.url)) {
+// Compare real paths so invocation through a symlinked path still runs the script.
+export function isInvokedDirectly(argvPath = process.argv[1], moduleUrl = import.meta.url) {
+    if (!argvPath) {
+        return false;
+    }
+    try {
+        return realpathSync(path.resolve(argvPath)) === realpathSync(fileURLToPath(moduleUrl));
+    } catch {
+        return false;
+    }
+}
+
+if (isInvokedDirectly()) {
     try {
         main();
     } catch (error) {
