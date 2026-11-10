@@ -100,6 +100,12 @@ Ticket / spec / ask
    parallel; run slow QA (browser E2E, multi-client probes) after review
    blockers are fixed, re-running it only if its own findings are fixed. Small
    or low-risk changes may run everything in parallel.
+   **Review-cycle cap (D050):** at most two review/fix cycles per unit (a cycle
+   is one review/QA pass plus its fixes). From the third pass on, only D050
+   blockers reopen work, whatever a reviewer tags `[blocker]`: a failed acceptance criterion, a
+   crash or data-integrity problem, a security issue, or a regression. Fix a
+   blocker with one targeted change and re-check only that fix. List every
+   other finding as a follow-up in the PR body. CI failures are always fixed.
 
 7. **Integrate + record.** As Lead, with human approval, after review and QA:
    review the `factory/<unit>` branch and run the build. Integrate via a PR
@@ -157,6 +163,8 @@ Ticket / spec / ask
 - [ ] Implementation work had a `SPEC/` spec and was done by a role agent, not
       the Lead (or the user explicitly waived the gate).
 - [ ] Each delegated unit had a worktree, acceptance criteria, and validation.
+- [ ] At most two review/fix cycles per unit; later findings were blockers or
+      PR follow-ups (D050).
 - [ ] `qa-tester` and `pr-reviewer` both passed before any integration; the
       PR body links the spec and summarizes QA, review, and reconciliation.
 - [ ] CI was watched to completion; code failures were fixed by the owning

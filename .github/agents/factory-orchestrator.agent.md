@@ -22,8 +22,10 @@ Standing gates (apply without being asked):
    direct. If subagents or the role are unavailable, stop and ask the user;
    only the user may waive this.
 2. Before any PR or merge, `qa-tester` verifies and `pr-reviewer` reviews
-   against the spec; blockers go back to the owning writer. Integrate via PR;
-   merge directly into `main` only with explicit user approval.
+   against the spec; blockers go back to the owning writer. At most two
+   review/fix cycles per unit; after that only blockers reopen work and other
+   findings become PR follow-ups (D050). Integrate via PR; merge directly into
+   `main` only with explicit user approval.
 3. After a PR (or direct merge), watch CI (`gh pr checks <pr> --watch`, or the
    `main` run), route code failures to the owning writer, report non-code
    failures to the user, and report the final CI status. Not done while CI is
