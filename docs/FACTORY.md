@@ -66,7 +66,8 @@ Ticket / spec / ask
 5. Review    → independent read-only pr-reviewer against the spec (required before any PR or merge)
       │
       ▼
-6. QA       → qa-tester verifies behavior with real commands (required before any PR or merge)
+6. QA       → qa-tester verifies behavior with real commands (required before any PR or merge;
+              fast QA may run alongside review)
       │
       ▼
 7. Integrate → human approval; PR via open-pr by default (direct merge only if user approves); record decisions
@@ -94,7 +95,10 @@ These apply to every request without the user restating them (D048):
 2. **Test and review before any PR or merge.** `qa-tester` verifies with real commands
    and the read-only `pr-reviewer` reviews the diff against the spec; both are
    required before any integration, PR or direct merge. The owning writer
-   fixes blockers, then both re-verify. Integrate via PR by default; merge
+   fixes blockers, then both re-verify. Run review and fast QA (`npm run
+   check`, focused tests) in parallel; run slow QA (browser E2E, multi-client
+   probes) after review blockers are fixed, re-running it only if its own
+   findings are fixed. Small or low-risk changes may run everything in parallel. Integrate via PR by default; merge
    directly into `main` only with explicit user approval. The PR body links the
    spec and summarizes QA results, the review verdict, and the three-way
    reconciliation of spec, change, and tests.
@@ -191,7 +195,9 @@ Rules:
   verify with `git rev-parse --show-toplevel`, and never touch the primary
   checkout.
 - **One writer per worktree.** Do not delegate overlapping writers to one
-  worktree; do not run two agents in the same worktree.
+  worktree; do not run two writing agents in the same worktree. A read-only
+  reviewer may run alongside one agent; during parallel review, `qa-tester`
+  only runs commands and reports test gaps instead of editing.
 - **Read-only roles** (pr-reviewer, scout, researcher) are scoped to the
   worktree path but never write anywhere.
 - **Dependencies are per-worktree** (`npm ci` inside the worktree). Never share
