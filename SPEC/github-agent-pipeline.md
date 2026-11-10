@@ -1,6 +1,6 @@
 # Spec: label-driven agent pipeline on GitHub (issue → spec → build → review/QA → merge)
 
-**Status:** Draft, requested by David (2026-11-10) · **Type:** process/CI config · **Depends on:** PR #35 (D055)
+**Status:** Approved by David (2026-11-10); Phase 0 pilot in progress · **Type:** process/CI config · **Depends on:** PR #35 (D055)
 
 ## Goal
 
@@ -77,13 +77,13 @@ Report results; adjust this spec before Phase 1.
 - Concurrency: one active agent run per issue (`agent:active`); max open agent PRs configurable (default 3).
 - Kill switch: repo variable `AGENT_PIPELINE_ENABLED` must be `true`.
 
-## Proposed decision D056 (not yet approved)
+## Decision D056 (approved by David, 2026-11-10)
 
 Label-driven GitHub agent pipeline per this spec. Auto-merge allowed only for
 `type:docs`, `type:chore`, and `follow-up` work after required CI, Copilot code
 review, factory reviewer approval, and QA pass; `type:feature` and `playtest` work
 needs human merge (phone/LAN validation stays human). Refines D048/D050's
-"human approval" for those low-risk types only.
+"human approval" for those low-risk types only. `type:bug` needs a human merge; with mixed labels the strictest wins.
 
 ## Out of scope
 
