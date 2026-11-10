@@ -31,9 +31,11 @@ or commit to a protected default branch.
 4. Run relevant project-defined checks when practical. Inspect the final staged
    diff and run `git diff --cached --check`. Stage only the explicit, in-scope
    paths. Do not commit generated output, credentials, or unrelated files.
-5. Create one commit with a concise, imperative, single-line message. Do not add
-   a commit body or multiline trailer. Verify the commit is on the task branch
-   and that its diff contains only the intended changes.
+5. Create one commit with a concise, imperative, single-line message using
+   `git commit -m "<message>"`. Never run bare `git commit` or launch an
+   interactive commit-message editor. Do not add a commit body or multiline
+   trailer. Verify the commit is on the task branch and that its diff contains
+   only the intended changes.
 6. Push that branch to the configured remote and set its upstream when needed.
    Never push to `main` or the configured default branch. Never force-push,
    rewrite published history, change remotes, or bypass hooks. If the remote is
