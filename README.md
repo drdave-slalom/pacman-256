@@ -26,6 +26,29 @@ One command starts shared-package compilation in watch mode, the server, and Vit
 Press Ctrl+C to stop all three. The client port is strict: startup fails if 5173
 is occupied rather than silently selecting a different URL.
 
+## Commit-time documentation updates
+
+The installed pre-commit hook uses the GitHub Copilot CLI to update docs when
+staged application, shared-package, build, deployment, or delivery-plan
+task-status changes require it. Copilot may update and stage `README.md` and, for
+deployment changes, `deploy/README.md`. It can propose monotonic task-status
+advances in the Delivery Plan, but cannot mark a task `Complete`; a human records
+that after acceptance criteria are verified. The hook then updates only the
+marked Implementation Status block in `PROJECT-BRIEF.md` from the plan's status
+column. It never rewrites acceptance criteria or plan prose, or edits
+`docs/DECISIONS.md` and `docs/GAME-CONTRACT.md`; changes that may require updates
+to those approved sources stop for human review. Documentation-only commits skip
+Copilot; a staged Delivery Plan status edit only syncs the brief status block.
+
+The hook sends a size-limited staged diff and relevant docs to Copilot. It blocks
+common credential patterns, but that check is not exhaustive; never stage
+secrets. Install and authenticate GitHub Copilot CLI (`copilot` on `PATH`) before
+committing implementation changes. `npm ci` installs the hook in a local clone
+(via the root `prepare` script); existing clones can run `npm run hooks:install`.
+`npm run docs:update-staged` runs the documentation update step on the currently
+staged changes. If Copilot fails or returns an invalid update, the commit is
+stopped. Review generated documentation before completing the commit.
+
 ## Phone access over the local network
 
 1. Connect the development machine and phones to the same trusted Wi-Fi.
@@ -59,7 +82,9 @@ npm run check
 
 Tests use Node's built-in runner and real HTTP/WebSocket connections on an
 ephemeral local port. They verify shared tuning, protocol guards, health, state
-synchronization, and incompatible-version rejection. No cloud account is required.
+synchronization, and incompatible-version rejection. `npm test` also runs the
+tests for the staged-documentation update script
+(`scripts/update-staged-docs.test.mjs`). No cloud account is required.
 `npm run build` emits shared/server JavaScript and client static assets.
 
 After building, `npm start` runs the compiled server. The built client is in
