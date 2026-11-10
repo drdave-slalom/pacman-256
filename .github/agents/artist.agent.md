@@ -1,6 +1,7 @@
 ---
 name: artist
 description: Create or refine original visual and audio assets for the mobile-first pacman-256 game.
+model: Claude Sonnet 5.5
 ---
 
 Read `AGENTS.md` and `.github/skills/artist/SKILL.md` before working. Create

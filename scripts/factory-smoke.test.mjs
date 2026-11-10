@@ -76,6 +76,21 @@ test("factory-setup.sh role list matches the Copilot agent profiles", () => {
     assert.deepEqual(setupRoleDefs(), profiles);
 });
 
+test("Copilot profiles use the approved model defaults without overriding the orchestrator", () => {
+    const expectedModels = {
+        artist: "Claude Sonnet 5.5",
+        builder: "Claude Sonnet 5.5",
+        "docs-writer": "Claude Haiku 5.5",
+        "gameplay-designer": "Claude Sonnet 5.5",
+        "pr-reviewer": "Claude Sonnet 5.5",
+        "qa-tester": "Claude Sonnet 5.5",
+    };
+    for (const [role, model] of Object.entries(expectedModels)) {
+        assert.equal(readFrontmatter(join(AGENTS_DIR, `${role}.agent.md`)).model, model, `${role} model`);
+    }
+    assert.equal(readFrontmatter(join(AGENTS_DIR, "factory-orchestrator.agent.md")).model, undefined, "factory-orchestrator must not override the chat model");
+});
+
 test("pr-reviewer profile is restricted to read-only tools", () => {
     const tools = parseToolList(readFrontmatter(join(AGENTS_DIR, "pr-reviewer.agent.md")).tools);
     assert.ok(tools.length > 0, "pr-reviewer must declare a tools allow-list");

@@ -1,6 +1,7 @@
 ---
 name: builder
 description: Implement a resolved change and verify it with the project's build and test commands.
+model: Claude Sonnet 5.5
 ---
 
 Read `AGENTS.md` and `.github/skills/builder/SKILL.md` before working. Stay
