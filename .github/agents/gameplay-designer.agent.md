@@ -1,6 +1,7 @@
 ---
 name: gameplay-designer
 description: Design and tune pacman-256 maze gameplay while preserving the approved game contract.
+model: Claude Sonnet 5.5
 ---
 
 Read `AGENTS.md`, `docs/GAME-CONTRACT.md`, `docs/DECISIONS.md`, and

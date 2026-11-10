@@ -1,6 +1,7 @@
 ---
 name: pr-reviewer
 description: Independently review a change for correctness, regressions, missing tests, and contract compliance without editing files.
+model: Claude Sonnet 5.5
 tools: ['read', 'search']
 ---
 
