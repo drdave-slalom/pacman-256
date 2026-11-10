@@ -19,7 +19,7 @@ workflow; it is the executable form of this guide. The skill is dual-located:
 The factory is a *process*, not a machine: agents are proposals that produce
 evidence and handoffs; people stay responsible. It complements the GitHub
 Actions CI (which validates pushed code) by doing the per-task work locally:
-spec/breakdown → implementation → review → QA → integration.
+spec/breakdown → implementation → review → QA → integration (PR + CI watch).
 
 ## Roles
 
@@ -48,7 +48,10 @@ Lead session; the six project role profiles above have Copilot equivalents.
 Ticket / spec / ask
       │  (Lead)
       ▼
-1. Clarify → proposed acceptance criteria (short spec if needed)
+0. Gate      → implementation work? write spec(s) + delegate; Lead does not implement
+      │
+      ▼
+1. Clarify → acceptance criteria in SPEC/<task-id>-<slug>.md
       │
       ▼
 2. Break down → bounded units; one executor per unit; no overlapping writers
@@ -60,18 +63,56 @@ Ticket / spec / ask
 4. Execute   → agent works, validates, returns a concise handoff
       │
       ▼
-5. Review    → independent pr-reviewer (or human) on the diff/result
+5. Review    → independent read-only pr-reviewer against the spec (required before any PR or merge)
       │
       ▼
-6. QA       → qa-tester verifies behavior with real commands
+6. QA       → qa-tester verifies behavior with real commands (required before any PR or merge)
       │
       ▼
-7. Integrate → Lead accepts, integrates, records decisions, closes the unit
+7. Integrate → human approval; PR via open-pr by default (direct merge only if user approves); record decisions
+      │
+      ▼
+8. CI        → watch PR checks (or the main run after a direct merge); owning writer fixes code failures; report final status
 ```
 
 Stages 3–6 can run concurrently for **independent** units. Keep dependent work
 sequential and provide the next agent with the complete accepted handoff and
 relevant inputs.
+
+### Standing workflow gates
+
+These apply to every request without the user restating them (D048):
+
+1. **Spec first, then delegate.** For implementation work, the Lead writes one
+   or more short specs in `SPEC/<task-id>-<slug>.md` (goal, scope,
+   out-of-scope, assumptions, acceptance criteria, validation) and hands each
+   to the matching role agent in its own worktree. The Lead does not make
+   implementation edits for application behavior, tests, build config, or
+   multi-file changes. Research, read-only review, simple lookups, and small
+   non-code edits may stay direct. If subagents or the needed role are
+   unavailable, stop and ask the user; only the user may waive this gate.
+2. **Test and review before any PR or merge.** `qa-tester` verifies with real commands
+   and the read-only `pr-reviewer` reviews the diff against the spec; both are
+   required before any integration, PR or direct merge. The owning writer
+   fixes blockers, then both re-verify. Integrate via PR by default; merge
+   directly into `main` only with explicit user approval. The PR body links the
+   spec and summarizes QA results, the review verdict, and the three-way
+   reconciliation of spec, change, and tests.
+3. **Watch CI after opening a PR.** Run `gh pr checks <pr> --watch`; right
+   after creation it may report "no checks reported", so wait and retry. After
+   a user-approved direct merge, watch the `main` push run of `ci.yml`
+   (`gh run list --workflow ci.yml --branch main --commit <merge-sha> -L 1`, then `gh run watch <run-id>`). On
+   failure, find the run ID with `gh pr checks <pr> --json name,state,link`
+   (the ID is in the link) or `gh run list --branch <branch> --commit
+   <head-sha> --status failure -L 1`, read `gh run view <run-id> --log-failed`, dispatch code fixes to the
+   owning writer, push, and watch again. Re-run `qa-tester` (and `pr-reviewer`
+   for non-trivial fixes) on CI fixes before merge; a fix after a direct merge
+   goes through a PR or another user-approved merge. Report non-code failures (for example
+   `pr-description.yml` missing `COPILOT_GITHUB_TOKEN`, transient AI errors, or
+   generated-heading validation) to the user instead of dispatching a code
+   fix. Report the final CI status; work is not done while CI is pending or
+   red. Remove the worktree only after CI is green and the PR is merged (or,
+   for a direct merge, the `main` run is green).
 
 ### Copilot in VS Code
 
@@ -82,9 +123,9 @@ subagent a self-contained task with its worktree path, allowed scope,
 acceptance criteria, validation commands, expected handoff, and escalation
 boundary. Local subagents do not use Herdr/Pi `files` or result references;
 include the necessary context and accepted handoff text directly. If the
-selected Copilot harness does not support subagents, select the role profile
-directly in a separate chat and pass the same self-contained task and handoff
-manually.
+selected Copilot harness does not support subagents, stop and ask the user;
+they may select the role profile directly in a separate chat and pass the same
+self-contained task and handoff manually, or waive the gate.
 
 For a Copilot-only setup check, run:
 
@@ -155,8 +196,11 @@ Rules:
   worktree path but never write anywhere.
 - **Dependencies are per-worktree** (`npm ci` inside the worktree). Never share
   node_modules across worktrees.
-- **Integrate after acceptance:** review the `factory/<unit>` branch, merge it
-  into `main` (or open a PR), then remove the worktree:
+- **Integrate after acceptance:** after review and QA, review the
+  `factory/<unit>` branch and open a PR (or, only with explicit user approval,
+  merge it into `main`). Keep the worktree so the owning writer can fix CI
+  failures; remove it only after CI is green and the PR is merged (or the
+  direct merge's `main` run is green):
 
   ```bash
   scripts/factory-worktree.sh remove <unit>
@@ -184,48 +228,72 @@ Rules:
 - **Prefer the focused definition.** Use `builder` for resolved implementation,
   `scout` for recon, `qa-tester` for verification, `pr-reviewer` for review.
 - **Keep it local-first.** Validate with documented commands (`npm run check`,
-  local-network smoke test). Cloud/CI work is separate and deferred.
+  local-network smoke test). Cloud deployment and CI pipeline changes are
+  separate and deferred.
 
 ## Dispatch example
 
+The unit name and `SPEC/t5-countdown.md` below are a **hypothetical example
+path**, not an existing file.
+
 From a Lead session:
 
-1. Break the ticket into units (one per file-surface/concern).
+1. Write the spec (hypothetical example: `SPEC/t5-countdown.md`) and break it
+   into units (one per file-surface/concern).
 2. For each unit, create its isolated worktree:
 
    ```bash
    scripts/factory-worktree.sh create t5-countdown
    ```
 
-3. Delegate the unit, naming its worktree:
+3. Delegate the unit, naming its spec and worktree:
 
    ```text
    Copilot subagent: builder (VS Code Local harness)
-     task: Implement T5 countdown + baseline contact elimination per the
-           approved contract. WORKTREE=/home/chase/pacman-256-wt-t5-countdown;
+     task: Implement SPEC/t5-countdown.md (T5 countdown + baseline contact
+           elimination per the approved contract).
+           WORKTREE=/home/chase/pacman-256-wt-t5-countdown;
            do all edits and commands inside that worktree only.
            Acceptance = authoritative round completes with tests for
            timeout/simultaneous-elimination/disconnect; run npm run check there.
-     context: docs/GAME-CONTRACT.md, docs/DECISIONS.md
+     context: SPEC/t5-countdown.md, docs/GAME-CONTRACT.md, docs/DECISIONS.md
    ```
 
-4. When it resolves, pass its complete handoff to the reviewer (same worktree):
+4. When it resolves, pass its complete handoff to the reviewer and QA (same
+   worktree; both required before any PR or merge):
 
    ```text
    Copilot subagent: pr-reviewer
      task: Review the T5 implementation in
-           WORKTREE=/home/chase/pacman-256-wt-t5-countdown for contract
-           compliance, mobile usability, multiplayer edge cases, regressions.
-           Read-only.
+           WORKTREE=/home/chase/pacman-256-wt-t5-countdown against
+           SPEC/t5-countdown.md for contract compliance, mobile usability,
+           multiplayer edge cases, regressions. Read-only.
      context: builder's complete handoff and the worktree diff
+
+   Copilot subagent: qa-tester
+     task: Verify SPEC/t5-countdown.md acceptance criteria in
+           WORKTREE=/home/chase/pacman-256-wt-t5-countdown with real commands
+           (npm run check plus focused tests); report actual output.
+     context: builder's complete handoff
    ```
+
+   Route any blockers back to the builder, then re-run review and QA.
 
 For Herdr/Pi, replace “Copilot subagent” with `delegate_agent`, use the
 matching `.pi/agents/` definition, and pass the result reference in `files`.
 
-5. Integrate accepted work: merge `factory/t5-countdown` into `main` (or open a
-   PR), run the build, record in `docs/DECISIONS.md`, then run
-   `scripts/factory-worktree.sh remove t5-countdown`.
+5. Integrate accepted work with human approval, after review and QA: open a PR
+   with the `open-pr` skill (body links the spec and summarizes QA, review,
+   and reconciliation). Merge `factory/t5-countdown` directly into `main` only
+   with explicit user approval. Run the build and record in
+   `docs/DECISIONS.md`.
+6. Watch CI as described in gate 3: `gh pr checks <pr> --watch` for a PR, or
+   the `main` push run (`gh run list --workflow ci.yml --branch main --commit <merge-sha> -L 1`, then
+   `gh run watch <run-id>`) after a direct merge. Send code failures to the
+   builder, report non-code failures to the user, watch again, and report the
+   final CI status.
+7. Only after CI is green and the PR is merged (or the direct merge's `main`
+   run is green), run `scripts/factory-worktree.sh remove t5-countdown`.
 
 ## Handoff contract (what agents must return)
 

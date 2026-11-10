@@ -77,6 +77,7 @@ decisions below instead of the delivery plan's initial gameplay proposals.
 | D045 | Team explicitly authorized T1, the runnable skeleton, on 2026-11-09. | Scope: client/server/shared workspace, local startup, build/typecheck/tests, and local phone-access instructions. Does not authorize matchmaking/gameplay tasks or cloud deployment. |
 | D046 | T2 (one maze + touch movement) implemented and validated for team review on 2026-11-10. Decisions: dual touch controls (on-screen D-pad and swipe/drag steering); one fixed 15×11 compact rectilinear maze (original layout); shared map plus a pure continuous-movement/buffered-turn module in `packages/shared` for reuse by the authoritative server; the client drives a locally authoritative prototype only (server movement is T3). | Validation: `npm run check` green; 26 top-level tests (5 map + 17 movement new; 3 shared index; 1 server with 3 subtests); dev-server smoke served the prototype page and /health protocol v1; no server files changed. Independent internal review found no blockers. Follow-ups: physical-phone feel pass (swipe threshold, D-pad reachability, snap-on-wall-turn hop, scroll/page-fit), browser rendering visual pass, accessibility backlogs. |
 | D047 | Dynamic seeded maze generation adopted for the T2 prototype on 2026-11-10. Decisions: a pure, deterministic generator in `packages/shared/src/maze-gen.ts` (mulberry32 PRNG) produces reference-style dense, loop-rich, symmetric 21×19 mazes; fixed canvas with randomized interior; a random seed is chosen per game and displayed in the UI for reproducibility; the same API will let the authoritative server regenerate identical maps from a shared seed when T3 lands. Supersedes the fixed-single-maze part of D019 for the MVP; static `MAZE_MAP` remains the default/fallback and movement accepts an explicit maze. | Validation: `npm run check` green, 38 tests, including generator determinism, invariant (border/width/connectivity/no-2×2/loops) and spawn suites across many seeds. |
+| D048 | Standing factory workflow gates, requested and confirmed by David (contract coordinator, D043) on 2026-11-10: (1) spec in `SPEC/` first, then delegate to the matching role agent; (2) `qa-tester` and `pr-reviewer` before any integration; (3) watch CI after a PR or user-approved merge and report final status. Details: [FACTORY.md](./FACTORY.md#standing-workflow-gates). | Working agreement so agents enforce the workflow without the user restating it each request. Refines D030; worktree isolation and human approval before integration are unchanged. Spec: `SPEC/factory-workflow-gates.md`. |
 
 ### Current combat summary
 
@@ -209,9 +210,11 @@ T1 subsequently received go-ahead in D045; later tasks remain separate.
   Agents are instructed to operate only inside their assigned WORKTREE and to
   verify it with `git rev-parse --show-toplevel`. Read-only roles are scoped
   to the worktree and never write anywhere.
-- Integration remains human-gated: review the `factory/<unit>` branch, merge
-  into `main` (or open a PR), record results, then remove the worktree with
-  `scripts/factory-worktree.sh remove <unit>`.
+- Integration remains human-gated: after review and QA, integrate the
+  `factory/<unit>` branch via PR (direct merge into `main` only with explicit
+  user approval), record results, watch CI, and remove the worktree with
+  `scripts/factory-worktree.sh remove <unit>` only after CI is green and the
+  PR is merged (or the direct merge's `main` run is green). See D048.
 
 ## Maintaining this memory
 
