@@ -41,6 +41,15 @@ The MVP should let a small group of players:
 
 Room creation and joining are the first matchmaking slice. Quick play, accounts, public matchmaking, larger lobbies, and production-scale operations are not prerequisites for this outcome.
 
+## Implementation Status
+
+This is a brief progress index, not a replacement for the detailed [delivery plan](./DELIVERY-PLAN.md). Product requirements above remain authoritative.
+
+<!-- auto-doc-status:start -->
+- T0-T1: Complete.
+- T2-T11: Not started.
+<!-- auto-doc-status:end -->
+
 ## Agreed technical direction and remaining choices
 
 Use a TypeScript/Phaser client and a Node.js/Colyseus room server with shared

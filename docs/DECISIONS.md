@@ -159,23 +159,25 @@ T1 subsequently received go-ahead in D045; later tasks remain separate.
 
 ## T2 implementation context (not new gameplay decisions)
 
-- T2 adds the first gameplay slice in the client: the one shared maze (15×11,
-  compact rectilinear corridors, original layout) rendered from
-  `packages/shared/src/map.ts`, and touch movement driven by a pure shared
-  module (`movement.ts`) implementing approved D018/D040 semantics: continuous
-  motion, buffered turns at legal turn points, wall/bounds blocking, and
-  release does not stop movement.
-- Touch controls: on-screen D-pad (four buttons) and swipe/drag anywhere on the
-  play area both queue directions through the same path. Mobile anti-scroll:
-  `touch-action:none`, `preventDefault` on touchmove, `overscroll-behavior`,
-  and user-select off. Physical-phone feel is unverified.
+- T2 adds the first gameplay slice in the client: a rendered maze with
+  touch and keyboard movement driven by a pure shared module (`movement.ts`)
+  implementing approved D018/D040 semantics: continuous motion, buffered
+  turns at legal turn points, wall/bounds blocking, and release does not
+  stop movement.
+- The maze is now generated per game by a seeded deterministic generator
+  (D047). The original static map was 15×11; it was later enlarged to a
+  21×19 static default/fallback (`MAZE_MAP`).
+- Touch controls: on-screen D-pad (four buttons) and swipe/drag anywhere on
+  the play area; keyboard arrows/WASD queue through the same path. Mobile
+  anti-scroll uses `touch-action:none`, `preventDefault`, and overscroll
+  suppression. Physical-phone feel is unverified.
 - Server/synchronized movement (T3) is intentionally out of scope; no server
   files changed. The shared movement module is written to be reused by the
   authoritative server when T3 lands.
-- Reviewer note: reversal applies immediately anywhere (not gated to junctions);
-  the contract lists buffered-reversal-between-junctions as still-open, so
-  confirm it during T3. Snap-on-wall-turn shifts the actor half a tile when
-  turning from a blocked wall boundary (intended; needs a device feel-check).
+- Movement hardening (post-initial T2): blocked moves rest centered in the
+  current corridor cell (no half-in-wall rest, no recenter hop), and queued
+  turns are evaluated whenever a corridor center is reached (frame-alignment
+  independent), so junctions are not skipped mid-run.
 
 ## T2 dynamic maze generation context (not new gameplay decisions)
 
@@ -193,6 +195,23 @@ T1 subsequently received go-ahead in D045; later tasks remain separate.
   connectors make layouts loopier (turn options instead of dead ends), and a
   validated decoration pass adds tetromino-style L/J/T silhouettes to wall
   bars while preserving maze invariants.
+
+## Local software factory and worktree isolation: 2026-11-09
+
+- The team is establishing a local, agent-powered software factory (see
+  `docs/FACTORY.md`). Role-specific subagents (builder, pr-reviewer,
+  qa-tester, gameplay-designer, artist, docs-writer) are defined as project
+  Herdr agents in `.pi/agents/`, overlaying bundled definitions and loading
+  the matching `.github/skills/` role guidance.
+- Distributed agents must not conflict. Each concurrent unit of work gets its
+  own git worktree, created by `scripts/factory-worktree.sh`, on its own
+  `factory/<unit>` branch, with a separate `npm ci` (no shared node_modules).
+  Agents are instructed to operate only inside their assigned WORKTREE and to
+  verify it with `git rev-parse --show-toplevel`. Read-only roles are scoped
+  to the worktree and never write anywhere.
+- Integration remains human-gated: review the `factory/<unit>` branch, merge
+  into `main` (or open a PR), record results, then remove the worktree with
+  `scripts/factory-worktree.sh remove <unit>`.
 
 ## Maintaining this memory
 
