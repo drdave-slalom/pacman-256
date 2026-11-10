@@ -6,10 +6,12 @@ T2 added a neon-styled seeded maze, continuous movement with buffered turns and
 wall collisions, and D-pad / swipe / keyboard steering. T3 added private rooms and
 server-authoritative synchronized movement: create or join a room by code, pick
 teams, and the host starts a round in which every client sees every player move.
-T5 (in progress) adds a server-driven 3-second countdown, hunter-on-runner contact
-elimination, round outcomes (team elimination, timeout, simultaneous wipe,
-disconnects), and host return-to-lobby. Pickups and vulnerability reversal are
-later tasks (T7); the HUD, spectating, and results UI are T6.
+T5 adds a server-driven 3-second countdown, hunter-on-runner contact elimination,
+round outcomes (team elimination, timeout, simultaneous wipe, disconnects), and
+host return-to-lobby. T6 adds the match HUD (phase, timer, alive counts),
+spectator mode, and a results overlay that shows exactly what the server declared;
+the client never guesses the winner. Pickups and vulnerability reversal are later
+tasks (T7).
 
 ## Requirements and quick start
 
@@ -55,7 +57,10 @@ is occupied rather than silently selecting a different URL.
    taken from the server's `resultWinner`/`resultReason` (never inferred locally),
    and the host gets a **Back to lobby** button that sends `returnToLobby` (teams
    kept); non-hosts see the result and wait for the host. Team buttons and Start
-   are hidden outside the lobby phase. The full results UI is T6.
+   are hidden outside the lobby phase. During countdown/playing/results, the
+   game view shows the match HUD (timer, alive counts) and, for an eliminated
+   local player, a spectator overlay; the results overlay (T6) shows the server
+   result line with the host's **Back to lobby** control.
 7. **Leave** returns to the join screen. When the host leaves, the
    earliest-joined remaining player becomes host. If a leave during the
    countdown empties a side (no hunters or no runners left), the room cancels

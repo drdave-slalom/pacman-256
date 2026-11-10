@@ -304,3 +304,20 @@ tunables remain starting values for review.
   serialized `#room=<code>` from it, parsed it back, and rejoined the same room
   as a second client (phase `lobby`, matching code). Physical-phone LAN pass
   was completed and recorded in D053.
+
+## T6 implementation context (not new gameplay decisions)
+
+- D055 | Team marked T6 complete on 2026-11-10. The client match HUD, spectator
+  mode, and results overlay were implemented in PR #27
+  ([spec](../SPEC/T6-match-hud-spectate-results.md)), stacked on T5 (PR #26) and
+  rebased onto main. Decisions: hybrid rendering (HTML panels for structured
+  HUD/spectator/results content plus a Phaser countdown numeral); the maze phases
+  (countdown/playing/results) route to the game view; result text is derived only
+  from the server's `resultWinner`/`resultReason` when phase is `results` — the
+  client never guesses a winner; spectator steering is gated via `canSteer`; the
+  lobby render keeps the D054 unbalanced-roster behavior. | Recorded after an
+  independent pr-reviewer approval (no blockers) and QA: `npm run check` green
+  (128+16 tests), including 10 `hud-view` unit tests and 3 fast-clock integration
+  tests driving the real room through countdown→playing→(elimination/timeout)→results.
+  Follow-ups: live two-tab browser smoke, physical-phone matrix (T8/T9), T7
+  pickups/vulnerability.
