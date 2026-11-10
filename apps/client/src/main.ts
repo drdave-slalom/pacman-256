@@ -1,302 +1,513 @@
 import Phaser from "phaser";
 import { Client } from "@colyseus/sdk";
+import type { Room } from "@colyseus/sdk";
 import {
+  CLIENT_MESSAGES,
   CONNECTION_ROOM,
-  DEFAULT_MOVE_SPEED_TILES_PER_SECOND,
+  GAME_ROOM,
   MAZE_HEIGHT,
-  MAZE_MAP,
   MAZE_WIDTH,
+  MAX_DISPLAY_NAME_LENGTH,
   PROTOCOL_VERSION,
-  createPlayerMoveState,
-  findSpawnCell,
-  generateMaze,
+  SERVER_MESSAGES,
+  errorMessage,
   isConnectionState,
-  isWalkableIn,
-  stepPlayerMove,
+  isDirection,
+  joinErrorCode,
+  parseActionResult,
+  parseDisplayName,
+  parseInputRejected,
 } from "@maze/shared";
-import type { Direction } from "@maze/shared";
+import type {
+  ChooseTeamMessage,
+  Direction,
+  ErrorCode,
+  GameRoomSnapshot,
+  JoinOptions,
+  StartMatchMessage,
+  Team,
+} from "@maze/shared";
+import { MazeScene, TILE_SIZE } from "./maze-scene.ts";
+import type { MazeSceneSource } from "./maze-scene.ts";
+import {
+  DirectionSender,
+  PendingAction,
+  isPlausibleRoomCode,
+  isRoundActive,
+  leaveMessage,
+  playerViews,
+} from "./session-model.ts";
+import type { ActionOutcome } from "./session-model.ts";
 import "./style.css";
 
-const TILE_SIZE = 32;
-const SWIPE_THRESHOLD = 14;
+/** How long a lobby action may wait for its `actionResult` before it is re-enabled. */
+const ACTION_TIMEOUT_MS = 5_000;
+/** How long a transient notice (e.g. RATE_LIMITED) stays visible. */
+const TRANSIENT_MESSAGE_MS = 3_000;
 
-// Set by MazeScene once it is created; the HTML D-pad buttons below the canvas
-// call this to steer, so the arrows never overlay the maze.
-let steerFromDpad: ((direction: Direction) => void) | null = null;
-
-const gameContainer = document.querySelector<HTMLElement>("#game");
-const button = document.querySelector<HTMLButtonElement>("#connect");
-const status = document.querySelector<HTMLParagraphElement>("#status");
-const seedText = document.querySelector<HTMLParagraphElement>("#seed");
-if (!gameContainer || !button || !status) {
-  throw new Error("The game mount, connect button and status element are required.");
+function element<T extends HTMLElement>(selector: string): T {
+  const found = document.querySelector<T>(selector);
+  if (!found) {
+    throw new Error(`Missing required element ${selector}.`);
+  }
+  return found;
 }
-const connectButton = button;
-const statusText = status;
+
+const ui = {
+  joinPanel: element<HTMLElement>("#join-panel"),
+  nameInput: element<HTMLInputElement>("#display-name"),
+  createButton: element<HTMLButtonElement>("#create-room"),
+  codeInput: element<HTMLInputElement>("#room-code"),
+  joinButton: element<HTMLButtonElement>("#join-room"),
+  lobbyPanel: element<HTMLElement>("#lobby-panel"),
+  lobbyCode: element<HTMLElement>("#lobby-code"),
+  copyCodeButton: element<HTMLButtonElement>("#copy-code"),
+  playerList: element<HTMLUListElement>("#player-list"),
+  hunterButton: element<HTMLButtonElement>("#pick-hunter"),
+  runnerButton: element<HTMLButtonElement>("#pick-runner"),
+  startButton: element<HTMLButtonElement>("#start-match"),
+  lobbyHint: element<HTMLElement>("#lobby-hint"),
+  lobbyNotice: element<HTMLElement>("#lobby-notice"),
+  gamePanel: element<HTMLElement>("#game-panel"),
+  gameMount: element<HTMLElement>("#game"),
+  gameStatus: element<HTMLElement>("#game-status"),
+  dpadButtons: document.querySelectorAll<HTMLButtonElement>("#dpad button[data-direction]"),
+  leaveButtons: document.querySelectorAll<HTMLButtonElement>("[data-leave]"),
+  message: element<HTMLElement>("#message"),
+  connectButton: element<HTMLButtonElement>("#connect"),
+  connectStatus: element<HTMLElement>("#status"),
+};
+ui.nameInput.maxLength = MAX_DISPLAY_NAME_LENGTH;
 
 // The game surface must not scroll or zoom while controlling it.
-gameContainer.addEventListener("touchmove", (event) => event.preventDefault(), {
-  passive: false,
-});
-gameContainer.addEventListener("contextmenu", (event) => event.preventDefault());
-
-function dominantAxis(offset: { x: number; y: number }): Direction | null {
-  if (
-    Math.abs(offset.x) < SWIPE_THRESHOLD &&
-    Math.abs(offset.y) < SWIPE_THRESHOLD
-  ) {
-    return null;
-  }
-  if (Math.abs(offset.x) > Math.abs(offset.y)) {
-    return offset.x > 0 ? "right" : "left";
-  }
-  return offset.y > 0 ? "down" : "up";
-}
-
-interface KeyboardSteerKeys {
-  up: Phaser.Input.Keyboard.Key;
-  down: Phaser.Input.Keyboard.Key;
-  left: Phaser.Input.Keyboard.Key;
-  right: Phaser.Input.Keyboard.Key;
-  w: Phaser.Input.Keyboard.Key;
-  s: Phaser.Input.Keyboard.Key;
-  a: Phaser.Input.Keyboard.Key;
-  d: Phaser.Input.Keyboard.Key;
-}
-
-const KEY_TO_DIRECTION: Array<{ key: keyof KeyboardSteerKeys; direction: Direction }> = [
-  { key: "up", direction: "up" },
-  { key: "w", direction: "up" },
-  { key: "down", direction: "down" },
-  { key: "s", direction: "down" },
-  { key: "left", direction: "left" },
-  { key: "a", direction: "left" },
-  { key: "right", direction: "right" },
-  { key: "d", direction: "right" },
-];
-
-class MazeScene extends Phaser.Scene {
-  private player!: Phaser.GameObjects.Arc;
-  private maze: readonly string[] = MAZE_MAP;
-  private playerState = createPlayerMoveState();
-  private dragPointerId: number | null = null;
-  private dragAccum = { x: 0, y: 0 };
-  private dragLast = { x: 0, y: 0 };
-
-  create(): void {
-    const seed = (Math.random() * 0x100000000) >>> 0;
-    this.maze = generateMaze(seed);
-    const spawn = findSpawnCell(this.maze);
-    this.playerState = createPlayerMoveState(spawn);
-    this.renderMaze();
-    this.createPlayer(spawn);
-    this.setupSwipeSteering();
-    this.setupKeyboardSteering();
-    steerFromDpad = (direction) => this.queueMovement(direction);
-    if (seedText) {
-      seedText.textContent = `Maze seed ${seed}`;
-    }
-  }
-
-  update(_time: number, delta: number): void {
-    const dt = Math.min(delta, 50) / 1000;
-    this.playerState = stepPlayerMove(
-      this.playerState,
-      DEFAULT_MOVE_SPEED_TILES_PER_SECOND,
-      dt,
-      this.maze,
-    );
-    this.player.setPosition(
-      this.playerState.position.x * TILE_SIZE,
-      this.playerState.position.y * TILE_SIZE,
-    );
-  }
-
-  private renderMaze(): void {
-    const tiles = this.add.graphics();
-    // Near-black background; corridors stay darker than the wall zones.
-    tiles.fillStyle(0x05060a, 1);
-    tiles.fillRect(0, 0, MAZE_WIDTH * TILE_SIZE, MAZE_HEIGHT * TILE_SIZE);
-    // Subtle dark-blue tint behind wall cells so wall masses read distinctly
-    // from the black corridors.
-    tiles.fillStyle(0x0b1224, 1);
-    for (let row = 0; row < MAZE_HEIGHT; row++) {
-      for (let col = 0; col < MAZE_WIDTH; col++) {
-        if (!isWalkableIn(this.maze, col, row)) {
-          tiles.fillRect(col * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-        }
-      }
-    }
-
-    // Neon line art, like the reference maze: a glowing stroke runs along
-    // every floor/wall boundary (soft outer halos then a hot bright core).
-    const segments: Array<[number, number, number, number]> = [];
-    for (let row = 0; row < MAZE_HEIGHT; row++) {
-      for (let col = 0; col < MAZE_WIDTH; col++) {
-        if (!isWalkableIn(this.maze, col, row)) {
-          continue;
-        }
-        const x = col * TILE_SIZE;
-        const y = row * TILE_SIZE;
-        const boundary = (
-          dx: number,
-          dy: number,
-          x1: number,
-          y1: number,
-          x2: number,
-          y2: number,
-        ) => {
-          if (!isWalkableIn(this.maze, col + dx, row + dy)) {
-            segments.push([x1, y1, x2, y2]);
-          }
-        }
-        boundary(-1, 0, x, y, x, y + TILE_SIZE);
-        boundary(1, 0, x + TILE_SIZE, y, x + TILE_SIZE, y + TILE_SIZE);
-        boundary(0, -1, x, y, x + TILE_SIZE, y);
-        boundary(0, 1, x, y + TILE_SIZE, x + TILE_SIZE, y + TILE_SIZE);
-      }
-    }
-    const passes: Array<[number, number, number]> = [
-      [7, 0.09, 0x4fc3ff],
-      [4.5, 0.16, 0x4fc3ff],
-      [2.5, 0.95, 0x8ae4ff],
-      [1, 1, 0xe2f7ff],
-    ];
-    for (const [width, alpha, color] of passes) {
-      tiles.lineStyle(width, color, alpha);
-      for (const [x1, y1, x2, y2] of segments) {
-        tiles.lineBetween(x1, y1, x2, y2);
-      }
-    }
-  }
-
-  private createPlayer(spawn: { col: number; row: number }): void {
-    const px = (spawn.col + 0.5) * TILE_SIZE;
-    const py = (spawn.row + 0.5) * TILE_SIZE;
-    this.player = this.add.circle(px, py, TILE_SIZE * 0.35, 0xff9de2);
-    this.player.setDepth(10);
-  }
-
-  private setupSwipeSteering(): void {
-    const isTouchPointer = (pointer: Phaser.Input.Pointer): boolean => {
-      const event = pointer.event as Partial<PointerEvent> | undefined;
-      if (event?.pointerType) {
-        return event.pointerType === "touch";
-      }
-      if (event?.type) {
-        return event.type.startsWith("touch");
-      }
-      // Pointer Events spec: the mouse pointer id is always 0; touch ids are
-      // browser-assigned and non-zero.
-      return pointer.pointerId !== 0;
-    };
-
-    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      // Swipe steering is touch-only; the mouse never steers the player.
-      if (!isTouchPointer(pointer)) {
-        return;
-      }
-      this.dragPointerId = pointer.pointerId;
-      this.dragAccum = { x: 0, y: 0 };
-      this.dragLast = { x: pointer.x, y: pointer.y };
-    });
-
-    this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
-      if (pointer.pointerId !== this.dragPointerId) {
-        return;
-      }
-      if (!isTouchPointer(pointer)) {
-        return;
-      }
-      // Phaser's pointer.movementX/Y are only populated while the mouse is
-      // pointer-locked, so compute deltas from the pointer's own coordinates.
-      this.dragAccum.x += pointer.x - this.dragLast.x;
-      this.dragAccum.y += pointer.y - this.dragLast.y;
-      this.dragLast = { x: pointer.x, y: pointer.y };
-      const steer = dominantAxis(this.dragAccum);
-      if (steer) {
-        this.queueMovement(steer);
-        this.dragAccum = { x: 0, y: 0 };
-      }
-    });
-
-    const endDrag = (pointer: Phaser.Input.Pointer) => {
-      if (pointer.pointerId === this.dragPointerId) {
-        this.dragPointerId = null;
-        this.dragAccum = { x: 0, y: 0 };
-      }
-    };
-    this.input.on("pointerup", endDrag);
-    this.input.on("pointercancel", endDrag);
-  }
-
-  private setupKeyboardSteering(): void {
-    const keyboard = this.input.keyboard;
-    if (!keyboard) {
-      return;
-    }
-    // enableCapture defaults to true, so Phaser calls preventDefault on the
-    // handled keys (arrow keys would otherwise scroll the page).
-    const keys = keyboard.addKeys({
-      up: "UP",
-      down: "DOWN",
-      left: "LEFT",
-      right: "RIGHT",
-      w: "W",
-      s: "S",
-      a: "A",
-      d: "D",
-    }) as KeyboardSteerKeys;
-    for (const { key, direction } of KEY_TO_DIRECTION) {
-      keys[key].on("down", () => this.queueMovement(direction));
-    }
-  }
-
-  private queueMovement(direction: Direction): void {
-    this.playerState = { ...this.playerState, queuedDirection: direction };
-  }
-}
-
-new Phaser.Game({
-  type: Phaser.AUTO,
-  parent: "game",
-  width: MAZE_WIDTH * TILE_SIZE,
-  height: MAZE_HEIGHT * TILE_SIZE,
-  backgroundColor: "#05060a",
-  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
-  scene: MazeScene,
-});
-
-// Wire the HTML D-pad below the canvas. The pad lives outside the Phaser
-// canvas, so it never covers the maze; swipes on the maze itself still work.
-const dpadButtons = document.querySelectorAll<HTMLButtonElement>(
-  "#dpad button[data-direction]",
-);
-for (const button of dpadButtons) {
-  button.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    const direction = button.dataset.direction as Direction;
-    steerFromDpad?.(direction);
-  });
-  button.addEventListener("contextmenu", (event) => event.preventDefault());
-}
+ui.gameMount.addEventListener("touchmove", (event) => event.preventDefault(), { passive: false });
+ui.gameMount.addEventListener("contextmenu", (event) => event.preventDefault());
 
 // In dev, the Vite dev server proxies /multiplayer to the backend and strips
 // the prefix. When the built client is served by the game server itself
 // (production/Kubernetes), Colyseus's matchmaking and room routes live at the
 // document root, so connect there directly.
-const endpoint = new URL(
-  import.meta.env.PROD ? "/" : "/multiplayer",
-  window.location.href,
-);
+const endpoint = new URL(import.meta.env.PROD ? "/" : "/multiplayer", window.location.href);
 endpoint.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 const client = new Client(endpoint.toString());
 
-connectButton.addEventListener("click", async () => {
-  connectButton.disabled = true;
-  statusText.textContent = "Connecting to the local Colyseus server...";
+type View = "join" | "lobby" | "game";
+
+let room: Room | null = null;
+let snapshot: GameRoomSnapshot | null = null;
+/** True while a create/join is in flight; blocks concurrent attempts. */
+let joining = false;
+const pending = new PendingAction();
+let pendingTimer: number | undefined;
+let requestCounter = 0;
+let directionSender = new DirectionSender();
+let heldDirectionTimer: number | undefined;
+let game: Phaser.Game | null = null;
+let renderedLobbyKey = "";
+let messageTimer: number | undefined;
+
+/** Alert-style message for failures; `transient` ones clear themselves. */
+function showMessage(text: string, transient = false): void {
+  window.clearTimeout(messageTimer);
+  messageTimer = undefined;
+  ui.message.textContent = text;
+  ui.message.hidden = text === "";
+  if (transient && text !== "") {
+    messageTimer = window.setTimeout(() => showMessage(""), TRANSIENT_MESSAGE_MS);
+  }
+}
+
+/** Non-alert lobby status text (polite live region). */
+function showNotice(text: string): void {
+  ui.lobbyNotice.textContent = text;
+}
+
+function showView(view: View): void {
+  ui.joinPanel.hidden = view !== "join";
+  ui.lobbyPanel.hidden = view !== "lobby";
+  ui.gamePanel.hidden = view !== "game";
+  if (view === "game") {
+    startRenderer();
+  } else {
+    stopRenderer();
+  }
+}
+
+function startRenderer(): void {
+  if (game) {
+    return;
+  }
+  game = new Phaser.Game({
+    type: Phaser.AUTO,
+    parent: ui.gameMount,
+    width: MAZE_WIDTH * TILE_SIZE,
+    height: MAZE_HEIGHT * TILE_SIZE,
+    backgroundColor: "#05060a",
+    scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+  });
+  const source: MazeSceneSource = {
+    snapshot: () => snapshot,
+    localPlayerId: () => room?.sessionId ?? "",
+    steer: sendDirection,
+  };
+  game.scene.add("maze", MazeScene, true, source);
+}
+
+/** Destroyed outside play so Phaser's key capture never blocks typing in the forms. */
+function stopRenderer(): void {
+  game?.destroy(true);
+  game = null;
+}
+
+/**
+ * The single direction-request path for the HTML D-pad, swipe, and keyboard.
+ * Input outside an active round is dropped; the sender dedupes, sequences, and
+ * budgets it.
+ */
+function sendDirection(direction: Direction): void {
+  if (!room || !snapshot || !isRoundActive(snapshot)) {
+    return;
+  }
+  const message = directionSender.next(snapshot.roundId, direction, performance.now());
+  if (message) {
+    room.send(CLIENT_MESSAGES.setDirection, message);
+  }
+  scheduleHeldDirection();
+}
+
+/** Release a direction held back by the input budget once a slot frees. */
+function scheduleHeldDirection(): void {
+  if (heldDirectionTimer !== undefined || !directionSender.hasHeld) {
+    return;
+  }
+  heldDirectionTimer = window.setTimeout(() => {
+    heldDirectionTimer = undefined;
+    if (!room || !snapshot || !isRoundActive(snapshot)) {
+      return;
+    }
+    const message = directionSender.flush(snapshot.roundId, performance.now());
+    if (message) {
+      room.send(CLIENT_MESSAGES.setDirection, message);
+    }
+    scheduleHeldDirection();
+  }, directionSender.msUntilBudget(performance.now()) + 1);
+}
+
+function joinFailureMessage(error: unknown): string {
+  const code = joinErrorCode(error);
+  if (code === "INVALID_INPUT") {
+    return `The server rejected that name. Use 1-${MAX_DISPLAY_NAME_LENGTH} characters without unsupported (control or invisible) characters.`;
+  }
+  if (code) {
+    return errorMessage(code);
+  }
+  return "Could not reach the game server. Check that it is running and that you are on the same network, then try again.";
+}
+
+async function enterRoom(action: "create" | "join"): Promise<void> {
+  if (joining || room) {
+    return;
+  }
+  const displayName = parseDisplayName(ui.nameInput.value);
+  if (displayName === null) {
+    showMessage(`Enter a name of 1-${MAX_DISPLAY_NAME_LENGTH} characters without unsupported (control or invisible) characters.`);
+    ui.nameInput.focus();
+    return;
+  }
+  const code = ui.codeInput.value.trim();
+  if (action === "join" && code === "") {
+    showMessage("Enter the room code from the host.");
+    ui.codeInput.focus();
+    return;
+  }
+  if (action === "join" && !isPlausibleRoomCode(code)) {
+    // Room codes are Colyseus room IDs; anything else cannot exist.
+    showMessage(errorMessage("ROOM_NOT_FOUND"));
+    ui.codeInput.focus();
+    return;
+  }
+  const options: JoinOptions = { protocolVersion: PROTOCOL_VERSION, displayName };
+  joining = true;
+  ui.createButton.disabled = true;
+  ui.joinButton.disabled = true;
+  showMessage(action === "create" ? "Creating a room..." : "Joining the room...");
   try {
-    const room = await client.create(CONNECTION_ROOM, {
+    // A rejected join also makes the SDK log a closed-connection warning in the
+    // console; the player sees only the mapped message below.
+    const joined = action === "create"
+      ? await client.create(GAME_ROOM, options)
+      : await client.joinById(code, options);
+    if (room) {
+      // Defensive: never hold two rooms. A join that resolves after another
+      // session was attached is left immediately.
+      void joined.leave();
+      return;
+    }
+    attachRoom(joined);
+    showMessage("");
+  } catch (error) {
+    showMessage(joinFailureMessage(error));
+  } finally {
+    joining = false;
+    ui.createButton.disabled = false;
+    ui.joinButton.disabled = false;
+  }
+}
+
+function attachRoom(joined: Room): void {
+  room = joined;
+  snapshot = null;
+  renderedLobbyKey = "";
+  directionSender = new DirectionSender();
+  ui.lobbyCode.textContent = "";
+  ui.playerList.replaceChildren();
+  ui.lobbyHint.textContent = "";
+  showNotice("");
+  // MVP has no reconnect: a dropped socket must end the session right away
+  // (visible message + join screen) instead of retrying in the background.
+  joined.reconnection.enabled = false;
+  // Every handler ignores events from a room that is no longer current, so a
+  // stale room can never touch the snapshot, pending action, or session.
+  const isCurrent = (): boolean => room === joined;
+  joined.onStateChange((state: { toJSON(): unknown }) => {
+    if (!isCurrent()) {
+      return;
+    }
+    snapshot = state.toJSON() as GameRoomSnapshot;
+    render();
+  });
+  joined.onMessage(SERVER_MESSAGES.actionResult, (raw: unknown) => {
+    if (!isCurrent()) {
+      return;
+    }
+    const result = parseActionResult(raw);
+    const outcome = result ? pending.onActionResult(result) : null;
+    if (outcome) {
+      finishAction(outcome);
+    }
+  });
+  joined.onMessage(SERVER_MESSAGES.inputRejected, (raw: unknown) => {
+    if (!isCurrent()) {
+      return;
+    }
+    const rejection = parseInputRejected(raw);
+    if (!rejection) {
+      return;
+    }
+    const outcome = pending.onInputRejected(rejection.code);
+    if (outcome) {
+      finishAction(outcome);
+      return;
+    }
+    handleInputRejection(rejection.code);
+  });
+  joined.onError((code?: number, message?: string) => {
+    if (!isCurrent()) {
+      return;
+    }
+    // Transport errors arrive without a code; onLeave reports the disconnect.
+    console.debug("Room error", code, message);
+    if (typeof code === "number") {
+      showMessage("The game server reported an error. If play stops, leave and join again.");
+    }
+  });
+  joined.onLeave((code: number) => {
+    if (!isCurrent()) {
+      return;
+    }
+    // A requested leave resets the session first, so only unexpected leaves reach here.
+    const text = leaveMessage(code, false);
+    resetSession();
+    showMessage(text ?? "");
+  });
+  // The first state arrives right after joining; show the lobby meanwhile.
+  showView("lobby");
+}
+
+function handleInputRejection(code: ErrorCode): void {
+  if (code === "STALE_ROUND") {
+    // Expected around round changes; not worth a visible message (contract §7).
+    console.debug("Input ignored by the server: STALE_ROUND");
+    return;
+  }
+  if (code === "RATE_LIMITED") {
+    directionSender.onRateLimited();
+    scheduleHeldDirection();
+    showMessage(errorMessage(code), true);
+    return;
+  }
+  showMessage(errorMessage(code));
+}
+
+function resetSession(): void {
+  clearPending();
+  window.clearTimeout(heldDirectionTimer);
+  heldDirectionTimer = undefined;
+  setLobbyBusy(false);
+  room = null;
+  snapshot = null;
+  showView("join");
+}
+
+function sendAction(
+  type: "chooseTeam" | "startMatch",
+  payload: (requestId: string) => ChooseTeamMessage | StartMatchMessage,
+): void {
+  if (!room) {
+    return;
+  }
+  const requestId = `${type}-${++requestCounter}`;
+  if (!pending.begin(requestId)) {
+    return;
+  }
+  pendingTimer = window.setTimeout(() => {
+    const outcome = pending.onTimeout(requestId);
+    if (outcome) {
+      finishAction(outcome);
+    }
+  }, ACTION_TIMEOUT_MS);
+  setLobbyBusy(true);
+  showMessage("");
+  showNotice("");
+  room.send(type, payload(requestId));
+}
+
+function clearPending(): void {
+  pending.cancel();
+  window.clearTimeout(pendingTimer);
+  pendingTimer = undefined;
+}
+
+function finishAction(outcome: ActionOutcome): void {
+  window.clearTimeout(pendingTimer);
+  pendingTimer = undefined;
+  setLobbyBusy(false);
+  if (outcome.kind === "accepted") {
+    showMessage("");
+  } else if (outcome.kind === "rejected") {
+    showMessage(errorMessage(outcome.code));
+  } else {
+    showMessage("The server did not answer in time. Try again.");
+  }
+}
+
+function setLobbyBusy(busy: boolean): void {
+  ui.hunterButton.disabled = busy;
+  ui.runnerButton.disabled = busy;
+  ui.startButton.disabled = busy;
+}
+
+const TEAM_LABELS = { hunter: "Hunters", runner: "Runners", unassigned: "no team yet" } as const;
+
+function render(): void {
+  if (!room || !snapshot) {
+    return;
+  }
+  const localId = room.sessionId;
+  const players = playerViews(snapshot, localId);
+  const local = players.find((player) => player.isLocal);
+  if (isRoundActive(snapshot)) {
+    showView("game");
+    const status =
+      `Room ${snapshot.roomCode} · ${players.length} players · team: ${local ? TEAM_LABELS[local.team] : "not in round"} · you: pulsing white ring`;
+    // A live region: rewriting identical text at patch rate would re-announce it.
+    if (ui.gameStatus.textContent !== status) {
+      ui.gameStatus.textContent = status;
+    }
+    return;
+  }
+  showView("lobby");
+  const isHost = snapshot.hostPlayerId === localId;
+  // Patches arrive ~20 Hz even in the lobby; only touch the DOM when the roster changes.
+  const lobbyKey = JSON.stringify([snapshot.roomCode, snapshot.phase, isHost, players.map((p) => [p.id, p.displayName, p.team, p.isHost])]);
+  if (lobbyKey === renderedLobbyKey) {
+    return;
+  }
+  renderedLobbyKey = lobbyKey;
+  ui.lobbyCode.textContent = snapshot.roomCode;
+  ui.playerList.replaceChildren(
+    ...players.map((player) => {
+      const item = document.createElement("li");
+      item.dataset.team = player.team;
+      const tags = [player.isHost ? "host" : "", player.isLocal ? "you" : ""].filter(Boolean).join(", ");
+      item.textContent = `${player.displayName}: ${TEAM_LABELS[player.team]}${tags ? ` (${tags})` : ""}`;
+      return item;
+    }),
+  );
+  ui.startButton.hidden = !isHost;
+  ui.lobbyHint.textContent = snapshot.phase !== "lobby"
+    ? `Room phase: ${snapshot.phase}.`
+    : isHost
+      ? "Pick teams, then start when hunters and runners are balanced (1v1 or 2v2)."
+      : "Pick a team. The host starts the match.";
+}
+
+function pickTeam(team: Team): void {
+  sendAction(CLIENT_MESSAGES.chooseTeam, (requestId) => ({ requestId, team }));
+}
+
+ui.createButton.addEventListener("click", () => void enterRoom("create"));
+ui.joinButton.addEventListener("click", () => void enterRoom("join"));
+ui.codeInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.repeat) {
+    void enterRoom("join");
+  }
+});
+ui.hunterButton.addEventListener("click", () => pickTeam("hunter"));
+ui.runnerButton.addEventListener("click", () => pickTeam("runner"));
+ui.startButton.addEventListener("click", () => {
+  sendAction(CLIENT_MESSAGES.startMatch, (requestId) => ({ requestId }));
+});
+ui.copyCodeButton.addEventListener("click", async () => {
+  const code = snapshot?.roomCode ?? "";
+  try {
+    await navigator.clipboard.writeText(code);
+    showNotice("Room code copied.");
+  } catch {
+    showNotice(`Copy failed. Share the code manually: ${code}`);
+  }
+});
+for (const button of ui.leaveButtons) {
+  button.addEventListener("click", () => {
+    const leaving = room;
+    if (!leaving) {
+      return;
+    }
+    // Update the UI now; the stale-room guards ignore the room's late events.
+    resetSession();
+    showMessage("");
+    void leaving.leave();
+  });
+}
+
+// HTML D-pad below the maze. It lives in the game panel, so it is hidden
+// outside play, and sendDirection drops presses when no round is active.
+for (const button of ui.dpadButtons) {
+  const direction = button.dataset.direction;
+  if (!isDirection(direction)) {
+    continue;
+  }
+  button.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    sendDirection(direction);
+  });
+  // Keyboard activation (Enter/Space on a focused button) fires a click with
+  // detail 0; pointer clicks were already handled on pointerdown.
+  button.addEventListener("click", (event) => {
+    if (event.detail === 0) {
+      sendDirection(direction);
+    }
+  });
+  button.addEventListener("contextmenu", (event) => event.preventDefault());
+}
+
+showView("join");
+
+ui.connectButton.addEventListener("click", async () => {
+  ui.connectButton.disabled = true;
+  ui.connectStatus.textContent = "Connecting to the local Colyseus server...";
+  try {
+    const check = await client.create(CONNECTION_ROOM, {
       protocolVersion: PROTOCOL_VERSION,
     });
     await new Promise<void>((resolve, reject) => {
@@ -304,7 +515,7 @@ connectButton.addEventListener("click", async () => {
         () => reject(new Error("Timed out waiting for authoritative server state.")),
         5_000,
       );
-      room.onStateChange.once((state: unknown) => {
+      check.onStateChange.once((state: unknown) => {
         window.clearTimeout(timer);
         if (isConnectionState(state)) {
           resolve();
@@ -312,21 +523,25 @@ connectButton.addEventListener("click", async () => {
           reject(new Error("Server returned an incompatible connection snapshot."));
         }
       });
-      room.onError((code, message) => {
+      check.onError((code, message) => {
         window.clearTimeout(timer);
-        reject(new Error(`Server error ${code}: ${message}`));
+        reject(new Error(
+          typeof code === "number"
+            ? `Server error ${code}${message ? `: ${message}` : ""}`
+            : "The connection to the server failed",
+        ));
       });
-      room.onLeave((code) => {
+      check.onLeave((code) => {
         window.clearTimeout(timer);
         reject(new Error(`Server closed the connection (${code}).`));
       });
-    }).finally(() => room.leave());
-    statusText.textContent = `Connected: shared protocol v${PROTOCOL_VERSION}, authoritative lobby state received.`;
+    }).finally(() => check.leave());
+    ui.connectStatus.textContent = `Connected: shared protocol v${PROTOCOL_VERSION}, authoritative lobby state received.`;
   } catch (error) {
     console.error("Connection check failed", error);
-    statusText.textContent =
+    ui.connectStatus.textContent =
       `Connection failed: ${error instanceof Error ? error.message : String(error)}. Check the server terminal and network.`;
   } finally {
-    connectButton.disabled = false;
+    ui.connectButton.disabled = false;
   }
 });

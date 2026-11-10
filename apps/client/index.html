@@ -7,26 +7,63 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     />
     <meta name="theme-color" content="#10172b" />
-    <title>Maze Workshop - Maze + Touch Prototype</title>
+    <title>Maze Workshop - Private Rooms</title>
   </head>
   <body>
     <main>
       <h1>Maze Workshop</h1>
-      <p>
-        T2 prototype: a new maze is generated every game. Steer with the
-        on-screen D-pad or swipe on the maze. Arrow keys / WASD also work.
-        The connection check is below.
-      </p>
-      <div id="game" aria-label="Maze movement prototype"></div>
-      <div id="dpad" aria-label="On-screen direction pad" role="group">
-        <button type="button" data-direction="up" aria-label="Move up"><span aria-hidden="true">▲</span></button>
-        <button type="button" data-direction="left" aria-label="Move left"><span aria-hidden="true">◀</span></button>
-        <button type="button" data-direction="right" aria-label="Move right"><span aria-hidden="true">▶</span></button>
-        <button type="button" data-direction="down" aria-label="Move down"><span aria-hidden="true">▼</span></button>
-      </div>
-      <p id="seed" role="status" aria-live="polite"></p>
-      <button id="connect" type="button">Check server connection</button>
-      <p id="status" role="status" aria-live="polite">Ready to connect.</p>
+      <p id="message" class="message" role="alert" aria-live="assertive" hidden></p>
+
+      <section id="join-panel" class="panel" aria-labelledby="join-title">
+        <h2 id="join-title">Play</h2>
+        <label for="display-name">Your name</label>
+        <input id="display-name" type="text" autocomplete="nickname" spellcheck="false" placeholder="1-16 characters" />
+        <button id="create-room" type="button">Create room</button>
+        <label for="room-code">Room code</label>
+        <div class="row">
+          <input id="room-code" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Code from the host" />
+          <button id="join-room" type="button">Join</button>
+        </div>
+      </section>
+
+      <section id="lobby-panel" class="panel" aria-labelledby="lobby-title" hidden>
+        <h2 id="lobby-title">Lobby</h2>
+        <div class="row">
+          <p>Room code: <strong id="lobby-code" class="code"></strong></p>
+          <button id="copy-code" type="button">Copy</button>
+        </div>
+        <p id="lobby-notice" role="status" aria-live="polite"></p>
+        <ul id="player-list" aria-label="Players"></ul>
+        <div class="row">
+          <button id="pick-hunter" type="button" class="team-hunter">Hunters</button>
+          <button id="pick-runner" type="button" class="team-runner">Runners</button>
+        </div>
+        <p id="lobby-hint"></p>
+        <div class="row">
+          <button id="start-match" type="button" hidden>Start match</button>
+          <button type="button" data-leave>Leave</button>
+        </div>
+      </section>
+
+      <section id="game-panel" aria-label="Match" hidden>
+        <div id="game" aria-label="Maze. Steer with the D-pad below, a swipe, or arrow keys / WASD."></div>
+        <div id="dpad" aria-label="On-screen direction pad" role="group">
+          <button type="button" data-direction="up" aria-label="Move up"><span aria-hidden="true">▲</span></button>
+          <button type="button" data-direction="left" aria-label="Move left"><span aria-hidden="true">◀</span></button>
+          <button type="button" data-direction="right" aria-label="Move right"><span aria-hidden="true">▶</span></button>
+          <button type="button" data-direction="down" aria-label="Move down"><span aria-hidden="true">▼</span></button>
+        </div>
+        <div class="row">
+          <p id="game-status" role="status" aria-live="polite"></p>
+          <button type="button" data-leave>Leave</button>
+        </div>
+      </section>
+
+      <details class="diagnostics">
+        <summary>Server connection check</summary>
+        <button id="connect" type="button">Check server connection</button>
+        <p id="status" role="status" aria-live="polite">Ready to connect.</p>
+      </details>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

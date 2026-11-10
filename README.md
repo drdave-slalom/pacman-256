@@ -2,13 +2,13 @@
 
 Original mobile-web maze-chase workshop project. T1 shipped a runnable skeleton
 (Phaser rendering, a Colyseus connection check, shared protocol/rule constants).
-T2 adds the first gameplay slice in the client: a neon-styled maze generated at
-the start of every game (seeded, deterministic), continuous movement with
-buffered turns and wall collisions, and D-pad / swipe / keyboard steering.
+T2 added the first gameplay slice: a neon-styled seeded maze, continuous movement
+with buffered turns and wall collisions, and D-pad / swipe / keyboard steering.
 T3 adds a private `GameRoom` on the server (see below): join validation, team
-selection, host-started matches, and authoritative 30 Hz movement. The client
-has a tested, DOM-free session model (`apps/client/src/session-model.ts`) for
-this room; countdown, contact combat, pickups, and round end remain later tasks.
+selection, host-started matches, and authoritative 30 Hz movement. The client now
+connects to this room: a join screen, a lobby with team selection and host start,
+and a server-driven maze view. Countdown, contact combat, pickups, and round end
+remain later tasks.
 
 ## Requirements and quick start
 
@@ -22,12 +22,17 @@ npm ci
 npm run dev
 ```
 
-Open **http://localhost:5173**. You should see a newly generated neon maze with
-a player blob you can steer (D-pad, swipe, or arrow keys/WASD; a maze seed is
-shown for reproducibility). A **Check server connection** button remains below:
-clicking it must report `Connected: shared protocol v1, authoritative lobby
-state received.` The check creates a disposable diagnostic room and leaves it;
-it does not create a playable private match.
+Open **http://localhost:5173**. You should see a join screen: enter a display
+name, then **create a room** or **join** with a room code. In the lobby, pick a
+team (hunters/runners), copy the room code to share it, and the host starts the
+match once teams are balanced (1v1 or 2v2). During a round the client renders the
+server's maze and every player (team-colored; your own player has a pulsing white
+ring), and steers by HTML D-pad, swipe, or arrow keys/WASD. Movement is
+server-authoritative: the client only sends direction intent. Leave buttons return
+to the join screen. A **Check server connection** button remains in the
+diagnostics section: clicking it must report `Connected: shared protocol v1,
+authoritative lobby state received.` The check creates a disposable diagnostic
+room and leaves it.
 
 One command starts shared-package compilation in watch mode, the server, and Vite.
 Press Ctrl+C to stop all three. The client port is strict: startup fails if 5173
@@ -55,21 +60,27 @@ room. It is exercised by integration tests with real Colyseus SDK clients.
 - **Leave:** host transfers to the earliest remaining player; empty rooms are
   disposed.
 
-## Client session model (T3)
+## Client (T3)
 
-`apps/client/src/session-model.ts` holds pure helpers (no DOM/Phaser) for the
-client side of the game room:
-
-- Round detection and maze identity (`isRoundActive`, `mazeKey`) and
-  snapshot-to-view mapping (`playerViews`).
-- `DirectionSender`: sends `setDirection` only on direction changes, sequences
-  from 0 per round, and keeps a client-side budget below the server rate limit.
-  Changes made over budget are held (latest wins) and flushed when budget frees,
-  including a re-hold after a `RATE_LIMITED` rejection.
-- `PendingAction`: tracks one in-flight `chooseTeam`/`startMatch` request until
-  its correlated accept/reject, an uncorrelated `INVALID_INPUT`, or a timeout.
-- `isPlausibleRoomCode`, `Interpolator` (glides between patches, snaps on large
-  jumps), and `leaveMessage` (player-facing text for unexpected disconnects).
+- `apps/client/src/main.ts` owns the DOM flow (join, lobby, game panels), the
+  Colyseus room connection, and the single direction-request path shared by D-pad,
+  swipe, and keyboard. Input outside an active round is dropped. The Phaser game is
+  created only while a round is active and destroyed otherwise, so key capture
+  never blocks typing in forms. There is no reconnect: a dropped connection ends
+  the session with a visible message and returns to the join screen.
+- `apps/client/src/maze-scene.ts` renders the server-seeded maze and interpolated
+  players; it never moves players itself.
+- `apps/client/src/session-model.ts` holds pure helpers (no DOM/Phaser):
+  - Round detection and maze identity (`isRoundActive`, `mazeKey`) and
+    snapshot-to-view mapping (`playerViews`).
+  - `DirectionSender`: sends `setDirection` only on direction changes, sequences
+    from 0 per round, and keeps a client-side budget below the server rate limit.
+    Changes made over budget are held (latest wins) and flushed when budget frees,
+    including a re-hold after a `RATE_LIMITED` rejection.
+  - `PendingAction`: tracks one in-flight `chooseTeam`/`startMatch` request until
+    its correlated accept/reject, an uncorrelated `INVALID_INPUT`, or a timeout.
+  - `isPlausibleRoomCode`, `Interpolator` (glides between patches, snaps on large
+    jumps), and `leaveMessage` (player-facing text for unexpected disconnects).
 
 ## Commit-time documentation updates
 
@@ -99,9 +110,10 @@ stopped. Review generated documentation before completing the commit.
 1. Connect the development machine and phones to the same trusted Wi-Fi.
 2. Find the machine's LAN address in network settings, or use the Network URL
    printed by Vite.
-3. Open `http://<machine-LAN-IP>:5173` on the phone and run the connection check.
-   Do **not** use `localhost` on a phone; that addresses the phone itself.
-4. Repeat on each target browser. This skeleton has not yet been verified on
+3. Open `http://<machine-LAN-IP>:5173` on the phone and create or join a room (or
+   run the connection check). Do **not** use `localhost` on a phone; that
+   addresses the phone itself.
+4. Repeat on each target browser. The client has not yet been verified on
    physical iOS/Android devices.
 
 Vite listens on `0.0.0.0`. It proxies `/multiplayer` HTTP and WebSocket traffic to
@@ -134,7 +146,8 @@ cover private-room join/failure codes, team selection, host-only balanced start,
 synchronized movement, input rejection and rate limiting, flood disconnect, and
 host transfer/room disposal. Client unit tests (`apps/client/src/*.test.ts`)
 cover the session model: input dedupe/sequencing/rate budgeting, pending-action
-resolution, room-code validation, interpolation, and leave messages. `npm test`
+resolution, room-code validation, interpolation, and leave messages. The DOM and
+Phaser wiring in `main.ts`/`maze-scene.ts` has no automated tests. `npm test`
 also runs the tests for the staged-documentation update script
 (`scripts/update-staged-docs.test.mjs`) and the software-factory smoke tests
 (`scripts/factory-smoke.test.mjs`). No cloud account is required.
@@ -180,7 +193,7 @@ in GitHub branch protection/rulesets; the workflow alone does not enforce that.
 
 | Location | Responsibility |
 |---|---|
-| [apps/client](./apps/client/) | Phaser/Vite browser client, session model, and local proxy |
+| [apps/client](./apps/client/) | Phaser/Vite browser client (join/lobby/game UI, maze scene), session model, and local proxy |
 | [apps/server](./apps/server/) | Colyseus server, diagnostic room, private game room, and integration tests |
 | [packages/shared](./packages/shared/) | Browser/server protocol (room messages, validators, error codes), types, maze/spawn logic, and approved tuning |
 | [Game contract](./docs/GAME-CONTRACT.md) | Approved behavior and interface baseline |
@@ -201,5 +214,5 @@ Compiled output, dependencies, and the local AE Toolkit checkout remain ignored.
   `PORT`. Do not launch multiple development stacks in the same working directory.
 - **Shared package not found:** run commands from the root; root scripts build the
   shared package first. Workspace-only commands assume that build already exists.
-- **Server restart:** rooms are in memory. Rerun the connection check;
-  no reconnect or persistence behavior is implied.
+- **Server restart:** rooms are in memory and there is no reconnect; the client
+  returns to the join screen with a message. Create or join a room again.
