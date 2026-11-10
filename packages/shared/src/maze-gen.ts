@@ -35,12 +35,14 @@ const ODD_ROWS = [1, 3, 5, 7, 9, 11, 13, 15, 17];
 /** Even columns that may carry vertical connectors (mirrored pairs + center). */
 const CONNECTOR_COLS = [2, 4, 6, 8, 10, 12, 14, 16, 18];
 const CONNECTOR_PAIRS: Array<[number, number]> = [
-  [2, 18],
   [4, 16],
   [6, 14],
   [8, 12],
 ];
 const CENTER_COL = 10;
+/** Outer perimeter columns, always open vertically so every row loops around. */
+const RING_CONNECTOR_COLS = [1, 19] as const;
+const CONNECTOR_PROBABILITY = 0.6;
 
 function blankMaze(): string[] {
   const rows: string[] = [];
@@ -162,26 +164,27 @@ export function generateMaze(seed: number): readonly string[] {
 
   // Vertical connectors between consecutive odd rows. Decisions are mirrored
   // across the center column and center row for a symmetric, reference-like
-  // feel. Each band keeps at least one connector for connectivity.
+  // feel. The outer perimeter columns are always open, forming an unbroken
+  // ring that lets every row loop back on itself, so corridors offer turn
+  // options rather than dead ends on either side. Higher connector probability
+  // adds more internal loops.
   const bands = [0, 1, 2, 3]; // mirror pairs (0,7), (1,6), (2,5), (3,4)
   for (const band of bands) {
     const rowA = ODD_ROWS[band]! + 1; // even row between odd rows
     const rowB = ODD_ROWS[7 - band]! + 1;
-    const openedA: number[] = [];
-    const openedB: number[] = [];
+    const openedA = new Set<number>(RING_CONNECTOR_COLS);
+    const openedB = new Set<number>(RING_CONNECTOR_COLS);
     for (const [left, right] of CONNECTOR_PAIRS) {
-      if (random() < 0.5) {
-        openedA.push(left, right);
-        openedB.push(left, right);
+      if (random() < CONNECTOR_PROBABILITY) {
+        openedA.add(left);
+        openedA.add(right);
+        openedB.add(left);
+        openedB.add(right);
       }
     }
-    if (random() < 0.5) {
-      openedA.push(CENTER_COL);
-      openedB.push(CENTER_COL);
-    }
-    if (openedA.length === 0) {
-      openedA.push(CENTER_COL);
-      openedB.push(CENTER_COL);
+    if (random() < CONNECTOR_PROBABILITY) {
+      openedA.add(CENTER_COL);
+      openedB.add(CENTER_COL);
     }
     for (const col of openedA) {
       setCell(maze, col, rowA, FLOOR);
