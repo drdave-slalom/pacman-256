@@ -97,9 +97,30 @@ class MazeScene extends Phaser.Scene {
 
   private renderMaze(): void {
     const tiles = this.add.graphics();
-    tiles.fillStyle(0x10172b, 1);
+    // Near-black background; corridors stay dark so the neon walls glow.
+    tiles.fillStyle(0x05060a, 1);
     tiles.fillRect(0, 0, MAZE_WIDTH * TILE_SIZE, MAZE_HEIGHT * TILE_SIZE);
-    tiles.fillStyle(0x243658, 1);
+    // Layered fake-bloom: larger, faint cyan halos behind each wall tile,
+    // then the bright neon-blue wall core.
+    for (const [expand, alpha] of [
+      [6, 0.08],
+      [3, 0.16],
+    ] as const) {
+      tiles.fillStyle(0x4fc3ff, alpha);
+      for (let row = 0; row < MAZE_HEIGHT; row++) {
+        for (let col = 0; col < MAZE_WIDTH; col++) {
+          if (!isWalkable(col, row)) {
+            tiles.fillRect(
+              col * TILE_SIZE - expand,
+              row * TILE_SIZE - expand,
+              TILE_SIZE + expand * 2,
+              TILE_SIZE + expand * 2,
+            );
+          }
+        }
+      }
+    }
+    tiles.fillStyle(0x59d7ff, 1);
     for (let row = 0; row < MAZE_HEIGHT; row++) {
       for (let col = 0; col < MAZE_WIDTH; col++) {
         if (!isWalkable(col, row)) {
@@ -112,7 +133,7 @@ class MazeScene extends Phaser.Scene {
   private createPlayer(): void {
     const px = (PLAYER_SPAWN.col + 0.5) * TILE_SIZE;
     const py = (PLAYER_SPAWN.row + 0.5) * TILE_SIZE;
-    this.player = this.add.circle(px, py, TILE_SIZE * 0.35, 0x7be6d6);
+    this.player = this.add.circle(px, py, TILE_SIZE * 0.35, 0xff9de2);
     this.player.setDepth(10);
   }
 
@@ -220,7 +241,7 @@ new Phaser.Game({
   parent: "game",
   width: MAZE_WIDTH * TILE_SIZE,
   height: MAZE_HEIGHT * TILE_SIZE,
-  backgroundColor: "#10172b",
+  backgroundColor: "#05060a",
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   scene: MazeScene,
 });

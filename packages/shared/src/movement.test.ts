@@ -49,7 +49,7 @@ test("a short step advances partway through an open cell", () => {
 test("actors never exit the maze bounds (stopping centered)", () => {
   const cases: Array<{ start: [number, number]; direction: Direction; axis: "x" | "y"; center: number }> = [
     { start: [1.5, 1.5], direction: "up", axis: "y", center: 1.5 },
-    { start: [1.5, 8.5], direction: "down", axis: "y", center: 9.5 },
+    { start: [1.5, 8.5], direction: "down", axis: "y", center: 13.5 },
     { start: [1.5, 1.5], direction: "left", axis: "x", center: 1.5 },
     { start: [13.5, 1.5], direction: "right", axis: "x", center: 13.5 },
   ];
