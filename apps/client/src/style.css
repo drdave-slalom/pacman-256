@@ -252,6 +252,10 @@ input {
   border-color: #ffd23f;
 }
 
+#results-local {
+  color: #9aa3b5;
+}
+
 #dpad button:disabled {
   opacity: 0.4;
   cursor: not-allowed;

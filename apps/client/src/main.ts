@@ -5,6 +5,7 @@ import {
   CLIENT_MESSAGES,
   CONNECTION_ROOM,
   GAME_ROOM,
+  GAME_RULES,
   MAZE_HEIGHT,
   MAZE_WIDTH,
   MAX_DISPLAY_NAME_LENGTH,
@@ -41,7 +42,6 @@ import type { ActionOutcome } from "./session-model.ts";
 import {
   aliveCounts,
   canSteer,
-  countdownRemaining,
   formatClock,
   isLocalEliminated,
   isMazePhase,
@@ -114,8 +114,10 @@ const ui = {
   hudRunners: element<HTMLElement>("#hud-runners"),
   hudStatus: element<HTMLElement>("#hud-status"),
   spectatorOverlay: element<HTMLElement>("#spectator-overlay"),
+  spectatorText: element<HTMLElement>("#spectator-text"),
   resultsOverlay: element<HTMLElement>("#results-overlay"),
   resultsLine: element<HTMLElement>("#results-line"),
+  resultsLocal: element<HTMLElement>("#results-local"),
   dpadButtons: document.querySelectorAll<HTMLButtonElement>("#dpad button[data-direction]"),
   leaveButtons: document.querySelectorAll<HTMLButtonElement>("[data-leave]"),
   message: element<HTMLElement>("#message"),
@@ -450,6 +452,9 @@ function setLobbyBusy(busy: boolean): void {
 
 const TEAM_LABELS = { hunter: "Hunters", runner: "Runners", unassigned: "no team yet" } as const;
 
+/** Spectator notice, set only when the overlay is revealed so the polite live region announces it. */
+const SPECTATOR_TEXT = "You were eliminated. Spectating until the round ends.";
+
 function render(): void {
   if (!room || !snapshot) {
     return;
@@ -516,18 +521,21 @@ function renderLobby(snapshot: GameRoomSnapshot, localId: string): void {
 function renderGame(snapshot: GameRoomSnapshot, localId: string): void {
   const phase = snapshot.phase;
   const counts = aliveCounts(snapshot);
+  // One prominent countdown readout lives in the scene (Phaser numeral) while
+  // the HUD timer shows the round clock: its length during countdown, then the
+  // time remaining while playing.
   const timer =
     phase === "playing"
       ? formatClock(roundTimeRemaining(snapshot))
       : phase === "countdown"
-        ? String(countdownRemaining(snapshot))
+        ? formatClock(GAME_RULES.roundDurationMs)
         : "";
-  const local = snapshot.players[localId];
-  const statusText = local
-    ? local.alive
-      ? `you: ${TEAM_LABELS[local.team]}`
-      : "you: eliminated — spectating"
-    : "you: not in this round";
+  // The local client always has a roster entry while a maze phase renders; the
+  // server keeps one player record per connected client.
+  const local = snapshot.players[localId]!;
+  const statusText = local.alive
+    ? `you: ${TEAM_LABELS[local.team]}`
+    : "you: eliminated — spectating";
   // Patch-rate safe: rewrite the HUD only when a derived string changed.
   const hudKey = JSON.stringify([phase, timer, counts, statusText]);
   if (hudKey !== renderedHudKey) {
@@ -540,15 +548,27 @@ function renderGame(snapshot: GameRoomSnapshot, localId: string): void {
     ui.hudStatus.textContent = statusText;
   }
   // Spectator overlay: shown while the local player is eliminated during play.
-  ui.spectatorOverlay.hidden = !(phase === "playing" && isLocalEliminated(snapshot, localId));
+  // The notice is set only at reveal so its polite live region announces the
+  // elimination instead of riding on the HUD status.
+  const spectating = phase === "playing" && isLocalEliminated(snapshot, localId);
+  if (spectating) {
+    if (ui.spectatorOverlay.hidden) {
+      ui.spectatorText.textContent = SPECTATOR_TEXT;
+    }
+  } else if (ui.spectatorText.textContent !== "") {
+    ui.spectatorText.textContent = "";
+  }
+  ui.spectatorOverlay.hidden = !spectating;
   // Results overlay: exactly the server-declared line; host returns to lobby.
   const result = resultView(snapshot);
   const isHost = snapshot.hostPlayerId === localId;
   if (result !== null) {
-    const resultsKey = JSON.stringify([result.line, isHost]);
+    const localEliminated = isLocalEliminated(snapshot, localId);
+    const resultsKey = JSON.stringify([result.line, isHost, localEliminated]);
     if (resultsKey !== renderedResultsKey) {
       renderedResultsKey = resultsKey;
       ui.resultsLine.textContent = result.line + (isHost ? "" : " Waiting for the host to return to the lobby.");
+      ui.resultsLocal.textContent = localEliminated ? "You were eliminated." : "";
       ui.returnLobbyButton.hidden = !isHost;
     }
   } else {
