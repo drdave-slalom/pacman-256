@@ -50,7 +50,8 @@ button {
 #dpad {
   display: grid;
   grid-template-columns: repeat(3, 56px);
-  grid-template-rows: repeat(3, 56px);
+  /* Inverted T: up on top; left/down/right in the middle row. */
+  grid-template-rows: repeat(2, 56px);
   gap: 0.5rem;
   justify-content: center;
   margin-top: 1rem;
@@ -91,4 +92,112 @@ button {
 
 #dpad button:active {
   background: #3d5a94;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+h1 {
+  margin: 0 0 0.75rem;
+  font-size: 1.5rem;
+}
+
+h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.2rem;
+}
+
+.panel {
+  display: grid;
+  gap: 0.6rem;
+  padding: 1rem;
+  border: 1px solid #22304f;
+  border-radius: 0.75rem;
+  background: #0b1224;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.row > input {
+  flex: 1 1 10rem;
+}
+
+.row > p {
+  flex: 1 1 auto;
+  margin: 0;
+}
+
+input {
+  min-height: 48px;
+  padding: 0 0.75rem;
+  font: inherit;
+  /* 16px+ avoids iOS zoom-on-focus. */
+  font-size: max(1rem, 16px);
+  color: inherit;
+  background: #05060a;
+  border: 1px solid #3a4c74;
+  border-radius: 0.5rem;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.code {
+  font-family: ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  -webkit-user-select: all;
+  user-select: all;
+}
+
+#lobby-notice {
+  margin: 0;
+  min-height: 1.25em;
+  color: #9fe8c9;
+}
+
+#player-list {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+#player-list li[data-team="hunter"] {
+  color: #ff8b70;
+}
+
+#player-list li[data-team="runner"] {
+  color: #7fe3ff;
+}
+
+.team-hunter {
+  border: 2px solid #ff6b4a;
+}
+
+.team-runner {
+  border: 2px solid #4ad8ff;
+}
+
+.message {
+  margin: 0 0 0.75rem;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  background: #3a1620;
+  border: 1px solid #ff6b81;
+}
+
+#game-panel #game {
+  margin: 0 0 0.5rem;
+}
+
+#game-panel #dpad {
+  margin: 0.5rem 0 1rem;
+}
+
+.diagnostics {
+  margin-top: 1.5rem;
+  color: #9aa3b5;
 }

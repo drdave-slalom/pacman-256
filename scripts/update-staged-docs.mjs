@@ -269,38 +269,52 @@ export function detectDocsBackend() {
     return "copilot";
 }
 
-function runCopilot(prompt) {
-    const copilot = spawnSync("copilot", ["-p", prompt, "-s", "--no-ask-user"], {
-        cwd: repositoryRoot,
-        encoding: "utf8",
-        timeout: 180_000,
-        maxBuffer: 1024 * 1024,
-        env: {
-            PATH: process.env.PATH,
-            HOME: process.env.HOME,
-            USER: process.env.USER,
-            LOGNAME: process.env.LOGNAME,
-            TERM: process.env.TERM,
-            LANG: process.env.LANG,
-            TMPDIR: process.env.TMPDIR,
-            XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
-            COPILOT_HOME: process.env.COPILOT_HOME,
-            COPILOT_GITHUB_TOKEN: process.env.COPILOT_GITHUB_TOKEN,
-            GH_TOKEN: process.env.GH_TOKEN,
-            GITHUB_TOKEN: process.env.GITHUB_TOKEN,
-            HTTPS_PROXY: process.env.HTTPS_PROXY,
-            HTTP_PROXY: process.env.HTTP_PROXY,
-            NO_PROXY: process.env.NO_PROXY,
-            NO_COLOR: "1",
+export function buildCopilotInvocation(prompt, environment) {
+    // The prompt goes on stdin: very large `-p` arguments crash Copilot CLI (V8 fatal error).
+    return {
+        command: "copilot",
+        args: ["-s", "--no-ask-user"],
+        options: {
+            cwd: repositoryRoot,
+            input: prompt,
+            encoding: "utf8",
+            timeout: 180_000,
+            maxBuffer: 1024 * 1024,
+            env: {
+                PATH: environment.PATH,
+                HOME: environment.HOME,
+                USER: environment.USER,
+                LOGNAME: environment.LOGNAME,
+                TERM: environment.TERM,
+                LANG: environment.LANG,
+                TMPDIR: environment.TMPDIR,
+                XDG_CONFIG_HOME: environment.XDG_CONFIG_HOME,
+                COPILOT_HOME: environment.COPILOT_HOME,
+                COPILOT_GITHUB_TOKEN: environment.COPILOT_GITHUB_TOKEN,
+                GH_TOKEN: environment.GH_TOKEN,
+                GITHUB_TOKEN: environment.GITHUB_TOKEN,
+                HTTPS_PROXY: environment.HTTPS_PROXY,
+                HTTP_PROXY: environment.HTTP_PROXY,
+                NO_PROXY: environment.NO_PROXY,
+                NO_COLOR: "1",
+            },
         },
-    });
+    };
+}
+
+function runCopilot(prompt) {
+    const invocation = buildCopilotInvocation(prompt, process.env);
+    const copilot = spawnSync(invocation.command, invocation.args, invocation.options);
 
     if (copilot.error) {
         const hint = copilot.error.code === "ENOENT" ? "Install and authenticate GitHub Copilot CLI (`copilot` on PATH)." : copilot.error.message;
         throw new Error(`Copilot docs update failed: ${hint}`);
     }
     if (copilot.status !== 0) {
-        throw new Error(`Copilot docs update failed with exit code ${copilot.status}: ${(copilot.stderr || "").slice(0, 1000)}`);
+        const outcome = copilot.status === null
+            ? `was terminated by signal ${copilot.signal ?? "unknown"}`
+            : `failed with exit code ${copilot.status}`;
+        throw new Error(`Copilot docs update ${outcome}: ${(copilot.stderr || "").slice(0, 1000)}`);
     }
     return copilot.stdout || "";
 }
@@ -361,6 +375,54 @@ function generateDocsResponse(prompt) {
     return { backend, stdout };
 }
 
+export function resolveDocumentationUpdates({
+    prompt,
+    plan,
+    currentDocs,
+    currentDeliveryPlan,
+    currentBrief,
+    generate = generateDocsResponse,
+}) {
+    // Ask for the docs response; if the agent misses the JSON schema, re-ask
+    // once with the validator's feedback before giving up.
+    let attemptPrompt = prompt;
+    let response = null;
+    let updates = null;
+    let backend = "copilot";
+    let stdout = "";
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+        ({ backend, stdout } = generate(attemptPrompt));
+        try {
+            response = parseCopilotResponse(stdout);
+            updates = validateCopilotResponse(response, plan.docPaths, currentDocs);
+            break;
+        } catch (error) {
+            if (attempt === 2) {
+                const dumpPath = path.join(repositoryRoot, ".cache", "docs-agent-response.txt");
+                writeFileSync(dumpPath, stdout, "utf8");
+                const snippet = stdout.replace(/\s+/g, " ").slice(0, 600);
+                throw new Error(`${error.message} Raw ${backend} response saved to ${dumpPath}; preview: ${snippet}`);
+            }
+            attemptPrompt =
+                `${prompt}\n\nYour previous reply failed validation: ${error.message}\nNow reply ONLY with the exact JSON object described above; nothing else.`;
+        }
+    }
+    const updatedDeliveryPlan = plan.updateTaskStatuses
+        ? applyTaskStatusUpdates(currentDeliveryPlan, response.taskStatuses)
+        : currentDeliveryPlan;
+    const updatedBrief = plan.syncBrief
+        ? replaceManagedStatusBlock(currentBrief, renderBriefTaskStatus(updatedDeliveryPlan))
+        : currentBrief;
+    const changedUpdates = updates.filter(({ path: filePath, content }) => content !== currentDocs[filePath]);
+    if (updatedDeliveryPlan !== currentDeliveryPlan) {
+        changedUpdates.push({ path: "DELIVERY-PLAN.md", content: updatedDeliveryPlan });
+    }
+    if (updatedBrief !== currentBrief) {
+        changedUpdates.push({ path: "PROJECT-BRIEF.md", content: updatedBrief });
+    }
+    return { backend, changedUpdates };
+}
+
 function main() {
     const stagedPaths = runGit(["diff", "--cached", "--name-only", "--diff-filter=ACMRD", "-z"], {
         preserveWhitespace: true,
@@ -407,43 +469,14 @@ function main() {
         plan.docPaths.map((filePath) => [filePath, readFileSync(path.join(repositoryRoot, filePath), "utf8")]),
     );
     const prompt = createPrompt({ sourcePaths: plan.sourcePaths, diff, currentDocs, currentDeliveryPlan });
-    // Ask for the docs response; if the agent misses the JSON schema, re-ask
-    // once with the validator's feedback before giving up.
-    let attemptPrompt = prompt;
-    let updates = null;
-    let backend = "copilot";
-    let stdout = "";
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-        ({ backend, stdout } = generateDocsResponse(attemptPrompt));
-        try {
-            const response = parseCopilotResponse(stdout);
-            updates = validateCopilotResponse(response, plan.docPaths, currentDocs);
-            break;
-        } catch (error) {
-            if (attempt === 2) {
-                const dumpPath = path.join(repositoryRoot, ".cache", "docs-agent-response.txt");
-                writeFileSync(dumpPath, stdout, "utf8");
-                const snippet = stdout.replace(/\s+/g, " ").slice(0, 600);
-                throw new Error(`${error.message} Raw ${backend} response saved to ${dumpPath}; preview: ${snippet}`);
-            }
-            attemptPrompt =
-                `${prompt}\n\nYour previous reply failed validation: ${error.message}\nNow reply ONLY with the exact JSON object described above; nothing else.`;
-        }
-    }
+    const { backend, changedUpdates } = resolveDocumentationUpdates({
+        prompt,
+        plan,
+        currentDocs,
+        currentDeliveryPlan,
+        currentBrief,
+    });
     const docsLabel = backend === "pi" ? "Pi agent" : "Copilot";
-    const updatedDeliveryPlan = plan.updateTaskStatuses
-        ? applyTaskStatusUpdates(currentDeliveryPlan, response.taskStatuses)
-        : currentDeliveryPlan;
-    const updatedBrief = plan.syncBrief
-        ? replaceManagedStatusBlock(currentBrief, renderBriefTaskStatus(updatedDeliveryPlan))
-        : currentBrief;
-    const changedUpdates = updates.filter(({ path: filePath, content }) => content !== currentDocs[filePath]);
-    if (updatedDeliveryPlan !== currentDeliveryPlan) {
-        changedUpdates.push({ path: "DELIVERY-PLAN.md", content: updatedDeliveryPlan });
-    }
-    if (updatedBrief !== currentBrief) {
-        changedUpdates.push({ path: "PROJECT-BRIEF.md", content: updatedBrief });
-    }
     if (changedUpdates.length === 0) {
         console.log(`${docsLabel} found no documentation changes to stage.`);
         return;

@@ -4,10 +4,16 @@ import path from "node:path";
 import { Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import express from "express";
-import { CONNECTION_ROOM, PROTOCOL_VERSION } from "@maze/shared";
+import { CONNECTION_ROOM, GAME_ROOM, PROTOCOL_VERSION } from "@maze/shared";
 import { ConnectionRoom } from "./connection-room.ts";
+import { GameRoom, gameRoomWithSeedSource, type MazeSeedSource } from "./game-room.ts";
 
-export function createGameServer() {
+export interface GameServerOptions {
+  /** Trusted server-side maze seed source (tests); defaults to a random uint32. */
+  mazeSeedSource?: MazeSeedSource;
+}
+
+export function createGameServer(options: GameServerOptions = {}) {
   const httpServer = createServer();
   const server = new Server({
     transport: new WebSocketTransport({ server: httpServer }),
@@ -24,5 +30,9 @@ export function createGameServer() {
     },
   });
   server.define(CONNECTION_ROOM, ConnectionRoom);
+  server.define(
+    GAME_ROOM,
+    options.mazeSeedSource ? gameRoomWithSeedSource(options.mazeSeedSource) : GameRoom,
+  );
   return { server, httpServer };
 }

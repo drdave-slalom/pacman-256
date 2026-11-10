@@ -56,3 +56,50 @@ export {
 export type { PlayerMoveState, Vec2 } from "./movement.ts";
 
 export { findSpawnCell, generateMaze } from "./maze-gen.ts";
+
+export {
+  CLIENT_MESSAGES,
+  ERROR_CODES,
+  ERROR_MESSAGES,
+  GAME_ROOM,
+  INPUT_RATE_LIMIT_MAX_MESSAGES,
+  INPUT_RATE_LIMIT_WINDOW_MS,
+  MAX_CLIENT_MESSAGES_PER_SECOND,
+  MAX_DISPLAY_NAME_LENGTH,
+  MAX_REQUEST_ID_LENGTH,
+  MAX_ROUND_ID_LENGTH,
+  MAX_TEAM_SIZE,
+  PATCH_INTERVAL_MS,
+  SERVER_MESSAGES,
+  SIMULATION_DT_SECONDS,
+  SIMULATION_HZ,
+  errorMessage,
+  isDirection,
+  isErrorCode,
+  joinErrorCode,
+  joinErrorText,
+  parseActionResult,
+  parseChooseTeam,
+  parseDisplayName,
+  parseInputRejected,
+  parseJoinOptions,
+  parseSetDirection,
+  parseStartMatch,
+  readRequestId,
+} from "./protocol.ts";
+export type {
+  ActionResultMessage,
+  ChooseTeamMessage,
+  ErrorCode,
+  GameRoomSnapshot,
+  InputRejectedMessage,
+  JoinOptions,
+  PlayerSnapshot,
+  PlayerTeam,
+  QueuedDirection,
+  SetDirectionMessage,
+  StartMatchMessage,
+} from "./protocol.ts";
+
+export { SPAWN_CORNER_INSET_TILES, findSpawnCells, spawnDirection } from "./spawn.ts";
+export type { SpawnCell, SpawnCells } from "./spawn.ts";

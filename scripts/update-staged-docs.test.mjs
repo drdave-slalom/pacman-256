@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     applyTaskStatusUpdates,
+    buildCopilotInvocation,
     containsLikelySecret,
     detectDocsBackend,
     getDocumentationPlan,
@@ -9,6 +10,7 @@ import {
     readTaskStatuses,
     renderBriefTaskStatus,
     replaceManagedStatusBlock,
+    resolveDocumentationUpdates,
     validateCopilotResponse,
 } from "./update-staged-docs.mjs";
 
@@ -150,4 +152,51 @@ test("docs backend selection honors Pi session environment and DOCS_LLM override
             }
         }
     }
+});
+
+test("Copilot prompt is sent on stdin, never in argv", () => {
+    const prompt = `Update docs.\n${"x".repeat(120_000)}\nPROMPT_SENTINEL`;
+    const invocation = buildCopilotInvocation(prompt, { PATH: "/usr/bin", HOME: "/home/test", SECRET_VALUE: "nope" });
+    assert.equal(invocation.command, "copilot");
+    assert.deepEqual(invocation.args, ["-s", "--no-ask-user"]);
+    assert.ok(!invocation.args.includes("-p"));
+    assert.ok(invocation.args.every((argument) => !argument.includes("PROMPT_SENTINEL") && !argument.includes("Update docs.")));
+    assert.equal(invocation.options.input, prompt);
+    assert.equal(invocation.options.encoding, "utf8");
+    assert.equal(invocation.options.timeout, 180_000);
+    assert.equal(invocation.options.env.PATH, "/usr/bin");
+    assert.equal(invocation.options.env.NO_COLOR, "1");
+    assert.ok(!("SECRET_VALUE" in invocation.options.env));
+});
+
+test("validated response is applied after the retry loop (task statuses, docs, brief)", () => {
+    const brief = "# Brief\n\n<!-- auto-doc-status:start -->\n- stale.\n<!-- auto-doc-status:end -->\n";
+    const replies = [
+        "Here is the update.",
+        JSON.stringify({
+            requiresHumanReview: false,
+            updates: [{ path: "README.md", content: "# Readme\n\nUpdated.\n" }],
+            taskStatuses: [{ id: "T2", status: "In progress" }],
+        }),
+    ];
+    const prompts = [];
+    const { backend, changedUpdates } = resolveDocumentationUpdates({
+        prompt: "PROMPT",
+        plan: { sourcePaths: ["apps/client/src/main.ts"], docPaths: ["README.md"], syncBrief: true, updateTaskStatuses: true },
+        currentDocs: { "README.md": "# Readme\n" },
+        currentDeliveryPlan: taskPlan,
+        currentBrief: brief,
+        generate: (prompt) => {
+            prompts.push(prompt);
+            return { backend: "copilot", stdout: replies[prompts.length - 1] };
+        },
+    });
+    assert.equal(backend, "copilot");
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1], /previous reply failed validation/);
+    const byPath = Object.fromEntries(changedUpdates.map(({ path, content }) => [path, content]));
+    assert.deepEqual(Object.keys(byPath).sort(), ["DELIVERY-PLAN.md", "PROJECT-BRIEF.md", "README.md"]);
+    assert.equal(byPath["README.md"], "# Readme\n\nUpdated.\n");
+    assert.equal(readTaskStatuses(byPath["DELIVERY-PLAN.md"]).statuses.get("T2").status, "In progress");
+    assert.match(byPath["PROJECT-BRIEF.md"], /- T2: In progress\./);
 });
