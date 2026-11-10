@@ -189,6 +189,10 @@ T1 subsequently received go-ahead in D045; later tasks remain separate.
 - The static `MAZE_MAP` (21×19) remains the default used by movement unit
   tests and by the generator fallback; `isInsideIn`/`isWalkableIn` operate on
   an explicit grid.
+- Generator refinements (2026-11-10): an always-open perimeter ring and denser
+  connectors make layouts loopier (turn options instead of dead ends), and a
+  validated decoration pass adds tetromino-style L/J/T silhouettes to wall
+  bars while preserving maze invariants.
 
 ## Maintaining this memory
 
