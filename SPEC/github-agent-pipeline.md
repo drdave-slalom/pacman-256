@@ -57,6 +57,28 @@ review = approve, QA marker = pass, no `agent:needs-human`.
    another `.github/agents` profile in-session. If yes, step 3 can be one assignment.
 Report results; adjust this spec before Phase 1.
 
+### Phase 0 results (2026-11-10, issue #36 → PR #37)
+
+1. **Profile honored: yes.** Assignment via REST with `custom_agent: docs-writer` applied
+   the profile, including its `model:` frontmatter. `Claude Haiku 5.5` is not available
+   to the cloud agent, so the first run failed before starting. Re-assigning with
+   `agent_assignment.model: "auto"` worked. **Dispatch must always send `model: "auto"`**
+   (or a cloud-available model); the local VS Code model defaults (PR #25) stay unchanged.
+   The change was correct and minimal. Copilot used the PR template but left
+   "Linked issue" empty and appended its own `Fixes #36`, so the issue still links.
+   It ignored the request to report which profile/instructions it loaded.
+2. **`@copilot` from a workflow: not yet tested directly.** Comments posted with
+   `COPILOT_ASSIGN_TOKEN` are authored by David's account, so they should behave like
+   human comments. Verify in Phase 1.
+3. **gh-aw can load profiles: yes (docs).** `{{#runtime-import .github/agents/<name>.agent.md}}`
+   injects files under `.github/`; frontmatter fields such as `model:` are not applied.
+4. **CI approval: required.** CI and `pr-description.yml` runs on the Copilot branch
+   completed as `action_required` and the PR stayed a draft. Phase 1 must either turn off
+   the approval requirement for Copilot PRs in the repo's Copilot cloud agent settings or
+   have the gate workflow approve runs, and must mark the PR ready itself (the agent
+   leaves it as a draft).
+5. **Orchestrator delegation in-session: not yet tested.**
+
 **Phase 1: build the chain** (files below). **Phase 2: docs + D056.**
 
 ## Files
