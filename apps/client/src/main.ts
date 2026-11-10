@@ -46,6 +46,28 @@ function dominantAxis(offset: { x: number; y: number }): Direction | null {
   return offset.y > 0 ? "down" : "up";
 }
 
+interface KeyboardSteerKeys {
+  up: Phaser.Input.Keyboard.Key;
+  down: Phaser.Input.Keyboard.Key;
+  left: Phaser.Input.Keyboard.Key;
+  right: Phaser.Input.Keyboard.Key;
+  w: Phaser.Input.Keyboard.Key;
+  s: Phaser.Input.Keyboard.Key;
+  a: Phaser.Input.Keyboard.Key;
+  d: Phaser.Input.Keyboard.Key;
+}
+
+const KEY_TO_DIRECTION: Array<{ key: keyof KeyboardSteerKeys; direction: Direction }> = [
+  { key: "up", direction: "up" },
+  { key: "w", direction: "up" },
+  { key: "down", direction: "down" },
+  { key: "s", direction: "down" },
+  { key: "left", direction: "left" },
+  { key: "a", direction: "left" },
+  { key: "right", direction: "right" },
+  { key: "d", direction: "right" },
+];
+
 class MazeScene extends Phaser.Scene {
   private player!: Phaser.GameObjects.Arc;
   private playerState = createPlayerMoveState();
@@ -57,6 +79,7 @@ class MazeScene extends Phaser.Scene {
     this.createPlayer();
     this.setupSwipeSteering();
     this.setupDpad();
+    this.setupKeyboardSteering();
   }
 
   update(_time: number, delta: number): void {
@@ -162,6 +185,28 @@ class MazeScene extends Phaser.Scene {
         arrow.fillTriangle(bx + r, by, bx - r * 0.9, by - r, bx - r * 0.9, by + r);
       }
       arrow.setDepth(21);
+    }
+  }
+
+  private setupKeyboardSteering(): void {
+    const keyboard = this.input.keyboard;
+    if (!keyboard) {
+      return;
+    }
+    // enableCapture defaults to true, so Phaser calls preventDefault on the
+    // handled keys (arrow keys would otherwise scroll the page).
+    const keys = keyboard.addKeys({
+      up: "UP",
+      down: "DOWN",
+      left: "LEFT",
+      right: "RIGHT",
+      w: "W",
+      s: "S",
+      a: "A",
+      d: "D",
+    }) as KeyboardSteerKeys;
+    for (const { key, direction } of KEY_TO_DIRECTION) {
+      keys[key].on("down", () => this.queueMovement(direction));
     }
   }
 
