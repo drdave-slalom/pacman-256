@@ -3,16 +3,16 @@
 # factory-setup.sh — verify (and optionally repair) the pacman-256 local
 # software factory environment.
 #
-# It checks the three layers the factory depends on:
+# It checks the runtime-specific layers the factory depends on:
 #   1. Runtime / CLI      — Node, npm, git, Herdr (herdr), Pi (pi)
 #   2. Herdr + Pi plugins — Pi agent npm packages (pi-herdsman, pi-web-access,
 #      question tool) and the Herdr <-> Pi integration extension
-#   3. Project factory assets — .pi/agents/ role definitions, .github/skills/
-#      role skills, the factory-orchestrator skill (canonical + mirror), the
-#      worktree script, and the contract docs.
+#   3. Project factory assets — runtime agent profiles, .github/skills/ role
+#      skills, the worktree script, and the contract docs.
 #
 # Usage:
 #   scripts/factory-setup.sh          # verify, report, no changes
+#   scripts/factory-setup.sh --copilot # verify Copilot workspace setup (no Pi/Herdr)
 #   scripts/factory-setup.sh --fix    # attempt safe remediation, then re-check
 #   scripts/factory-setup.sh --quiet  # only print failures
 #   scripts/factory-setup.sh --help   # this help
@@ -57,6 +57,7 @@ FACTORY_DOCS=(FACTORY.md DECISIONS.md GAME-CONTRACT.md)
 # ---------------------------------------------------------------------------
 
 MODE_QUIET=0
+COPILOT_ONLY=0
 FAILURES=0
 WARNINGS=0
 PASS_LABEL=""
@@ -87,6 +88,7 @@ for arg in "$@"; do
   case "$arg" in
     --fix)   FIX_ENABLED=1 ;;
     --quiet) MODE_QUIET=1 ;;
+    --copilot) COPILOT_ONLY=1 ;;
     --help|-h) usage ;;
     *) printf 'Unknown option: %s\n' "$arg" >&2; exit 2 ;;
   esac
@@ -148,7 +150,11 @@ run_checks() {
 # 1. Runtime / CLI
 # ---------------------------------------------------------------------------
 
-section "1/4  Runtime / CLI"
+if [[ $COPILOT_ONLY -eq 1 ]]; then
+  section "1/2  Shared runtime"
+else
+  section "1/4  Runtime / CLI"
+fi
 
 if command -v node >/dev/null 2>&1; then
   NODE_VER="$(node --version 2>/dev/null | sed 's/^v//')"
@@ -167,28 +173,30 @@ else
   fail "npm not found on PATH"
 fi
 
-PI_MISSING=0
-if command -v pi >/dev/null 2>&1; then
-  ok "pi $(pi --version 2>/dev/null | head -1)"
-else
-  PI_MISSING=1
-  fail "pi not found on PATH"
-  warn "install Pi (see https://pi.dev/docs/latest/quickstart) so \`pi\` is on PATH"
-fi
-
-HERDR_MISSING=0
-if command -v herdr >/dev/null 2>&1; then
-  HERDR_VER="$(herdr --version 2>/dev/null | head -1)"
-  ok "herdr $HERDR_VER"
-  if herdr status >/dev/null 2>&1; then
-    ok "herdr server running"
+if [[ $COPILOT_ONLY -eq 0 ]]; then
+  PI_MISSING=0
+  if command -v pi >/dev/null 2>&1; then
+    ok "pi $(pi --version 2>/dev/null | head -1)"
   else
-    warn "herdr server is not running — start it with \`herdr\` before delegating"
+    PI_MISSING=1
+    fail "pi not found on PATH"
+    warn "install Pi (see https://pi.dev/docs/latest/quickstart) so \`pi\` is on PATH"
   fi
-else
-  HERDR_MISSING=1
-  fail "herdr not found on PATH"
-  warn "install Herdr (see https://herdr.dev/docs/install/) so \`herdr\` is on PATH"
+
+  HERDR_MISSING=0
+  if command -v herdr >/dev/null 2>&1; then
+    HERDR_VER="$(herdr --version 2>/dev/null | head -1)"
+    ok "herdr $HERDR_VER"
+    if herdr status >/dev/null 2>&1; then
+      ok "herdr server running"
+    else
+      warn "herdr server is not running — start it with \`herdr\` before delegating"
+    fi
+  else
+    HERDR_MISSING=1
+    fail "herdr not found on PATH"
+    warn "install Herdr (see https://herdr.dev/docs/install/) so \`herdr\` is on PATH"
+  fi
 fi
 
 if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -201,38 +209,39 @@ fi
 # 2. Pi agent packages (plugins)
 # ---------------------------------------------------------------------------
 
-section "2/4  Pi agent packages (plugins)"
+if [[ $COPILOT_ONLY -eq 0 ]]; then
+  section "2/4  Pi agent packages (plugins)"
 
-if [[ ! -d "$PI_NPM/node_modules" ]]; then
-  fail "Pi agent npm dir not found: $PI_NPM"
-  warn "run \`pi install npm:pi-herdsman\` (and sibling packages) after installing Pi, or set PI_NPM"
-  PI_PACKAGES=()
-fi
-
-for pkg in "${PI_PACKAGES[@]}"; do
-  ver="$(pkg_version "$pkg")"
-  if [[ -n "$ver" ]]; then
-    ok "$pkg $ver"
-  else
-    fail "$pkg is not installed"
-    if [[ $PI_MISSING -eq 0 ]]; then
-      fix pi install "npm:$pkg"
-    fi
+  if [[ ! -d "$PI_NPM/node_modules" ]]; then
+    fail "Pi agent npm dir not found: $PI_NPM"
+    warn "run \`pi install npm:pi-herdsman\` (and sibling packages) after installing Pi, or set PI_NPM"
   fi
-done
+
+  for pkg in "${PI_PACKAGES[@]}"; do
+    ver="$(pkg_version "$pkg")"
+    if [[ -n "$ver" ]]; then
+      ok "$pkg $ver"
+    else
+      fail "$pkg is not installed"
+      if [[ $PI_MISSING -eq 0 ]]; then
+        fix pi install "npm:$pkg"
+      fi
+    fi
+  done
 
 # ---------------------------------------------------------------------------
 # 3. Herdr <-> Pi integration
 # ---------------------------------------------------------------------------
 
-section "3/4  Herdr <-> Pi integration"
+  section "3/4  Herdr <-> Pi integration"
 
-if [[ -f "$HERDR_PI_EXT" ]] && grep -qF "$HERDR_PI_MARKER" "$HERDR_PI_EXT" 2>/dev/null; then
-  ok "herdr pi integration installed ($HERDR_PI_EXT)"
-else
-  fail "herdr pi integration is missing ($HERDR_PI_MARKER not found)"
-  if [[ $HERDR_MISSING -eq 0 ]]; then
-    fix herdr integration install pi
+  if [[ -f "$HERDR_PI_EXT" ]] && grep -qF "$HERDR_PI_MARKER" "$HERDR_PI_EXT" 2>/dev/null; then
+    ok "herdr pi integration installed ($HERDR_PI_EXT)"
+  else
+    fail "herdr pi integration is missing ($HERDR_PI_MARKER not found)"
+    if [[ $HERDR_MISSING -eq 0 ]]; then
+      fix herdr integration install pi
+    fi
   fi
 fi
 
@@ -240,26 +249,44 @@ fi
 # 4. Project software-factory assets
 # ---------------------------------------------------------------------------
 
-section "4/4  Project factory assets"
+if [[ $COPILOT_ONLY -eq 1 ]]; then
+  section "2/2  Copilot project assets"
+else
+  section "4/4  Project factory assets"
+fi
 
-# --- Role definitions in .pi/agents/ + their role skills --------------------
+# --- Runtime role definitions and shared role skills ------------------------
 for role in $ROLE_DEFS; do
-  def="$ROOT/.pi/agents/$role.md"
   skill="$ROOT/.github/skills/$role/SKILL.md"
 
-  if [[ -f "$def" ]]; then
-    name="$(fm_name "$def")"
-    if [[ "$name" == "$role" ]]; then
-      if fm_has_desc "$def"; then
-        ok "definition .pi/agents/$role.md (name=$role, description present)"
+  if [[ $COPILOT_ONLY -eq 1 ]]; then
+    def="$ROOT/.github/agents/$role.agent.md"
+    if [[ -f "$def" ]]; then
+      name="$(fm_name "$def")"
+      if [[ "$name" == "$role" ]] && fm_has_desc "$def"; then
+        ok "Copilot agent .github/agents/$role.agent.md"
       else
-        fail ".pi/agents/$role.md has no non-empty description"
+        fail ".github/agents/$role.agent.md has invalid name or no description"
       fi
     else
-      fail ".pi/agents/$role.md frontmatter name is '$name', expected '$role'"
+      fail "Copilot agent missing: .github/agents/$role.agent.md"
     fi
   else
-    fail "role definition missing: .pi/agents/$role.md"
+    def="$ROOT/.pi/agents/$role.md"
+    if [[ -f "$def" ]]; then
+      name="$(fm_name "$def")"
+      if [[ "$name" == "$role" ]]; then
+        if fm_has_desc "$def"; then
+          ok "definition .pi/agents/$role.md (name=$role, description present)"
+        else
+          fail ".pi/agents/$role.md has no non-empty description"
+        fi
+      else
+        fail ".pi/agents/$role.md frontmatter name is '$name', expected '$role'"
+      fi
+    else
+      fail "role definition missing: .pi/agents/$role.md"
+    fi
   fi
 
   if [[ ! -f "$skill" ]]; then
@@ -267,9 +294,10 @@ for role in $ROLE_DEFS; do
   fi
 done
 
-# --- Factory-orchestrator skill: canonical + mirror in sync ------------------
+# --- Factory-orchestrator skill and runtime profile -------------------------
 CANON="$ROOT/.github/skills/factory-orchestrator/SKILL.md"
 MIRROR="$ROOT/.agents/skills/factory-orchestrator/SKILL.md"
+COPILOT_ORCHESTRATOR="$ROOT/.github/agents/factory-orchestrator.agent.md"
 
 if [[ -f "$CANON" ]]; then
   canon_name="$(fm_name "$CANON")"
@@ -283,7 +311,15 @@ else
   MIRROR=""
 fi
 
-if [[ -f "$MIRROR" ]]; then
+if [[ $COPILOT_ONLY -eq 1 ]]; then
+  if [[ -f "$COPILOT_ORCHESTRATOR" ]] &&
+    [[ "$(fm_name "$COPILOT_ORCHESTRATOR")" == "factory-orchestrator" ]] &&
+    fm_has_desc "$COPILOT_ORCHESTRATOR"; then
+    ok "Copilot orchestrator .github/agents/factory-orchestrator.agent.md"
+  else
+    fail "Copilot orchestrator profile missing or invalid"
+  fi
+elif [[ -f "$MIRROR" ]]; then
   mirror_name="$(fm_name "$MIRROR")"
   if [[ "$mirror_name" == "factory-orchestrator" ]]; then
     ok "mirror skill .agents/skills/factory-orchestrator/SKILL.md"

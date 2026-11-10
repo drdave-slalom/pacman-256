@@ -31,7 +31,7 @@ Ticket / spec / ask
   → 1. Clarify (acceptance criteria)
   → 2. Break down (bounded units; one executor each)
   → 3. Worktree per unit (scripts/factory-worktree.sh)
-  → 4. Delegate (delegate_agent → narrowest role definition)
+  → 4. Delegate (runtime-native subagent → narrowest role profile)
   → 5. Review (pr-reviewer or human)
   → 6. QA (qa-tester, when behavior must be verified)
   → 7. Integrate + record (merge factory/<unit>, update DECISIONS.md)
@@ -52,21 +52,22 @@ Ticket / spec / ask
    # → WORKTREE=/home/chase/pacman-256-wt-<unit>, BRANCH=factory/<unit>
    ```
 
-4. **Delegate** with `delegate_agent`, naming the worktree in the task:
+4. **Delegate** using the active runtime's native subagent support:
 
-   - `builder` — resolved implementation; edits + `npm run check`.
-   - `pr-reviewer` — read-only review; never write.
-   - `qa-tester` — verification; writes tests only.
-   - `gameplay-designer` — design/tuning proposals.
-   - `artist` — original assets (no Pac-Man/branding).
-   - `docs-writer` — docs/decision log.
-   - `scout` — read-only codebase reconnaissance.
-   - `researcher` — external/authoritative research.
+   - **Copilot in VS Code:** in the Local harness, use the `runSubagent`
+     capability with the matching `.github/agents/<role>.agent.md` profile.
+     Include the complete task and context in each invocation; do not rely on
+     Herdr/Pi result references. If the active Copilot harness lacks subagents,
+     use the role profile directly in a separate chat and pass the task and
+     handoff manually.
+   - **Herdr/Pi:** use `delegate_agent` with the matching `.pi/agents/`
+     definition, pass relevant files, and forward result references exactly.
 
    Every task must include: objective, scope, acceptance criteria, validation
-   steps, and `WORKTREE=<abs path>` (agents must work only inside it). Pass
-   relevant files via `files`; forward completed-Agent result refs (e.g.
-   `result:builder#3`) exactly, never as summaries.
+   steps, expected handoff, escalation boundary, and `WORKTREE=<abs path>`
+   (agents must work only inside it). Pass the full accepted handoff and
+   relevant inputs to dependent Copilot subagents; with Herdr/Pi, forward its
+   result reference exactly.
 
 5. **Review.** After a writer resolves, delegate `pr-reviewer` on the same
    worktree (read-only), or review yourself. Human approval stays required
@@ -108,6 +109,7 @@ Ticket / spec / ask
 ## Final checks
 
 - [ ] Each delegated unit had a worktree, acceptance criteria, and validation.
-- [ ] Independent units ran in parallel; dependent work waited for result refs.
+- [ ] Independent units ran in parallel; dependent work received the complete
+      accepted handoff (and the Herdr/Pi result ref when applicable).
 - [ ] Writers and reviewers never shared a worktree.
 - [ ] Accepted work merged into `main`; worktrees removed; decisions recorded.

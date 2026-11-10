@@ -2,29 +2,32 @@
 
 This is the operating guide for the **local, agent-powered software factory**
 for pacman-256. It defines how we break work into bounded units and distribute
-it across role-specific subagents running locally in **Herdr** (Pi Herdsman),
-with a human Lead owning acceptance and integration.
+them across role-specific subagents, with a human Lead owning acceptance and
+integration. The factory supports GitHub Copilot in VS Code and the original
+Herdr (Pi Herdsman) runtime.
 
 **Lead sessions should load the `factory-orchestrator` skill** to run this
 workflow; it is the executable form of this guide. The skill is dual-located:
 
 - Canonical instructions: `.github/skills/factory-orchestrator/SKILL.md`
-  (loaded by GitHub Copilot; the single source of truth).
+  (loaded by Copilot; the single source of truth).
 - Pi mirror: `.agents/skills/factory-orchestrator/SKILL.md` (loads the
   canonical file, so the two never drift).
+- Copilot role profiles: `.github/agents/*.agent.md` (workspace agents used
+  for role-based delegation in VS Code).
 
 The factory is a *process*, not a machine: agents are proposals that produce
 evidence and handoffs; people stay responsible. It complements the GitHub
 Actions CI (which validates pushed code) by doing the per-task work locally:
 spec/breakdown → implementation → review → QA → integration.
 
-## Roles (Herdr definitions)
+## Roles
 
-All factory roles are defined as project-local Herdr agents in
-`.pi/agents/`. They inherit project context (`AGENTS.md`, brief, contract) and
-load the matching skill from `.github/skills/`.
+Herdr role definitions remain in `.pi/agents/`. Copilot workspace profiles are
+in `.github/agents/`; both runtimes use the matching role skill in
+`.github/skills/`.
 
-| Definition | Project skill | Typical assignment | Read-only? |
+| Profile | Project skill | Typical assignment | Read-only? |
 | --- | --- | --- | --- |
 | `builder` | `builder` | Implement a resolved change; build/test/package; fix build pipeline | no |
 | `pr-reviewer` | `pr-reviewer` | Independently review a diff/PR/plan | **yes** |
@@ -32,8 +35,12 @@ load the matching skill from `.github/skills/`.
 | `gameplay-designer` | `gameplay-designer` | Design/tune a mechanic; write short spec or constant changes | no |
 | `artist` | `artist` | Create/edit original sprites, tiles, UI, audio | no |
 | `docs-writer` | `docs-writer` | Update README/docs/decision log | no |
-| `scout` | (bundled) | Read-only reconnaissance of unfamiliar code | **yes** |
-| `researcher` | (bundled) | External/authoritative research | **yes** |
+| `scout` | runtime-specific | Read-only reconnaissance of unfamiliar code | **yes** |
+| `researcher` | runtime-specific | External/authoritative research | **yes** |
+
+Herdr supplies bundled `scout` and `researcher` definitions. In Copilot, use an
+available read-only subagent for these tasks or do the bounded research in the
+Lead session; the six project role profiles above have Copilot equivalents.
 
 ## Pipeline
 
@@ -47,8 +54,7 @@ Ticket / spec / ask
 2. Break down → bounded units; one executor per unit; no overlapping writers
       │
       ▼
-3. Dispatch  → delegate_agent to the narrowest capable definition,
-      │          passing relevant files + result refs
+3. Dispatch  → runtime-native subagent using the narrowest role profile
       │
       ▼
 4. Execute   → agent works, validates, returns a concise handoff
@@ -63,15 +69,45 @@ Ticket / spec / ask
 7. Integrate → Lead accepts, integrates, records decisions, closes the unit
 ```
 
-Stages 3–6 can run concurrently for **independent** units; dependencies are
-passed as result refs through `files` (e.g. gameplay-designer spec →
-builder implementation → pr-reviewer review).
+Stages 3–6 can run concurrently for **independent** units. Keep dependent work
+sequential and provide the next agent with the complete accepted handoff and
+relevant inputs.
+
+### Copilot in VS Code
+
+Use the `factory-orchestrator` skill or the `factory-orchestrator` workspace
+agent in `.github/agents/`. In VS Code's Local harness, enable **Run Subagent**
+and ask the orchestrator to dispatch with the matching role profile. Give each
+subagent a self-contained task with its worktree path, allowed scope,
+acceptance criteria, validation commands, expected handoff, and escalation
+boundary. Local subagents do not use Herdr/Pi `files` or result references;
+include the necessary context and accepted handoff text directly. If the
+selected Copilot harness does not support subagents, select the role profile
+directly in a separate chat and pass the same self-contained task and handoff
+manually.
+
+For a Copilot-only setup check, run:
+
+```bash
+scripts/factory-setup.sh --copilot
+```
+
+In the VS Code Agent Customizations editor, verify the workspace agents appear
+and try a small, read-only task before relying on delegation. The check script
+validates repository files, not VS Code's active harness or agent runtime.
+
+### Herdr / Pi
+
+Use the `.pi/agents/` definitions with Herdr's `delegate_agent` interface.
+Create a separate worktree for each unit, pass relevant files, and forward
+completed-agent result references exactly as described below. The default
+`scripts/factory-setup.sh` mode continues to validate this original runtime.
 
 ## Worktree isolation
 
-Each concurrent agent gets its **own git worktree** so parallel agents never
-write to the same files or the primary checkout. Herdr does not do this
-automatically; the Lead does it with `scripts/factory-worktree.sh`.
+Each concurrent writing agent gets its **own git worktree** so parallel agents
+never write to the same files or the primary checkout. The Lead creates them
+with `scripts/factory-worktree.sh`.
 
 ```bash
 # Create a sibling worktree (default parent: /home/chase) on branch factory/<unit>,
@@ -113,8 +149,9 @@ Rules:
   4. validation expectations (exact commands);
   5. expected handoff;
   6. escalation boundary (what to ask the owner about).
-- **Reuse evidence, don't duplicate it.** Pass completed-Agent result refs
-  exactly (e.g. `result:agent#3`) via `files` to dependent work.
+- **Reuse evidence, don't duplicate it.** Pass the full accepted handoff and
+  relevant context to dependent Copilot subagents. With Herdr/Pi, pass
+  completed-Agent result refs exactly (e.g. `result:agent#3`) via `files`.
 - **No competing writers.** Never overlap file-ownership boundaries; one agent
   writes a given file at a time.
 - **Prefer the focused definition.** Use `builder` for resolved implementation,
@@ -136,27 +173,28 @@ From a Lead session:
 3. Delegate the unit, naming its worktree:
 
    ```text
-   delegate_agent
-     definition: builder
+   Copilot subagent: builder (VS Code Local harness)
      task: Implement T5 countdown + baseline contact elimination per the
            approved contract. WORKTREE=/home/chase/pacman-256-wt-t5-countdown;
            do all edits and commands inside that worktree only.
            Acceptance = authoritative round completes with tests for
            timeout/simultaneous-elimination/disconnect; run npm run check there.
-     files: [docs/GAME-CONTRACT.md, docs/DECISIONS.md]
+     context: docs/GAME-CONTRACT.md, docs/DECISIONS.md
    ```
 
-4. When it resolves, forward its result ref to the reviewer (same worktree):
+4. When it resolves, pass its complete handoff to the reviewer (same worktree):
 
    ```text
-   delegate_agent
-     definition: pr-reviewer
+   Copilot subagent: pr-reviewer
      task: Review the T5 implementation in
            WORKTREE=/home/chase/pacman-256-wt-t5-countdown for contract
            compliance, mobile usability, multiplayer edge cases, regressions.
            Read-only.
-     files: [result:<builder result ref>]
+     context: builder's complete handoff and the worktree diff
    ```
+
+For Herdr/Pi, replace “Copilot subagent” with `delegate_agent`, use the
+matching `.pi/agents/` definition, and pass the result reference in `files`.
 
 5. Integrate accepted work: merge `factory/t5-countdown` into `main` (or open a
    PR), run the build, record in `docs/DECISIONS.md`, then run
@@ -171,18 +209,20 @@ Every factory agent returns a concise handoff:
 - findings/decisions;
 - unresolved risks/blockers;
 - remaining work;
-- reusable output paths/result refs.
+- reusable output paths and, when supported, result refs.
 
 Treat summaries as proposals. **Human approval stays mandatory** before a
 change lands or a decision is recorded.
 
 ## Definition maintenance
 
-- Factory definitions live in `.pi/agents/` (project layer) and are committed
-  so all teammates share them. They overlay bundled definitions by `name`.
-- To change a role: edit the matching `.pi/agents/<name>.md` (frontmatter
-  capabilities + body guidance). Refresh with `list_agents`.
-- Never edit bundled `dist/agents/` files; override via project layer.
+- Herdr definitions live in `.pi/agents/`; Copilot workspace agents live in
+  `.github/agents/`. Keep both project layers committed so teammates can use
+  either runtime.
+- To change a role's shared workflow, update `.github/skills/<name>/SKILL.md`.
+  Update the runtime-specific profile only for instructions or capabilities
+  that differ between Copilot and Herdr/Pi.
+- Never edit bundled Herdr `dist/agents/` files; override via `.pi/agents/`.
 - If a definition references a disabled child, it is dropped from discovery;
   keep child definitions available.
 
@@ -200,9 +240,9 @@ change lands or a decision is recorded.
 
 ## Validation checklist for the factory itself
 
-## Validation checklist for the factory itself
-
-- [ ] `list_agents` shows the six role definitions (builder, pr-reviewer,
+- [ ] `scripts/factory-setup.sh --copilot` passes and the VS Code Agent
+      Customizations editor lists the Copilot factory agents.
+- [ ] Herdr `list_agents` shows the six role definitions (builder, pr-reviewer,
       qa-tester, gameplay-designer, artist, docs-writer).
 - [ ] `scripts/factory-worktree.sh create <unit>` produces a sibling worktree
       on branch `factory/<unit>` with a working `npm ci`; a second agent in a
@@ -212,4 +252,5 @@ change lands or a decision is recorded.
 - [ ] A `builder` change passes `npm run check`.
 - [ ] A `pr-reviewer` review is read-only and returns prioritized findings.
 - [ ] A `qa-tester` verification uses real commands and actual output.
-- [ ] Dependent work receives the prior agent's result ref, not a summary.
+- [ ] Dependent work receives the full accepted handoff; Herdr/Pi also
+      forwards the prior agent's result ref.
