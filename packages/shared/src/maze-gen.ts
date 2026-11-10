@@ -147,6 +147,80 @@ function validateMaze(maze: readonly string[]): boolean {
   return edges >= totalFloors;
 }
 
+/** Collect maximal '#' runs on even interior rows (candidate wall bars). */
+function collectBars(maze: string[]): Array<{ row: number; from: number; to: number }> {
+  const bars: Array<{ row: number; from: number; to: number }> = [];
+  for (let row = 2; row < MAZE_HEIGHT - 1; row += 2) {
+    let run = -1;
+    for (let col = 1; col < MAZE_WIDTH - 1; col++) {
+      if (maze[row]?.charAt(col) === WALL) {
+        if (run < 0) {
+          run = col;
+        }
+      } else if (run >= 0) {
+        if (col - run >= 2) {
+          bars.push({ row, from: run, to: col - 1 });
+        }
+        run = -1;
+      }
+    }
+    if (run >= 0 && MAZE_WIDTH - 1 - run >= 2) {
+      bars.push({ row, from: run, to: MAZE_WIDTH - 2 });
+    }
+  }
+  return bars;
+}
+
+/** Candidate tetromino-style leg positions for a wall bar (L/J/T feet). */
+function legCandidates(
+  bar: { row: number; from: number; to: number },
+  maze: string[],
+): Array<{ col: number; row: number }> {
+  const cols = new Set<number>([bar.from, bar.to, Math.floor((bar.from + bar.to) / 2)]);
+  const out: Array<{ col: number; row: number }> = [];
+  for (const col of cols) {
+    for (const dy of [-1, 1]) {
+      const row = bar.row + dy;
+      if (row > 0 && row < MAZE_HEIGHT - 1 && maze[row]?.charAt(col) === FLOOR) {
+        out.push({ col, row });
+      }
+    }
+  }
+  return out;
+}
+
+function cloneMaze(maze: string[]): string[] {
+  return [...maze];
+}
+
+/**
+ * Decorate wall bars with tetromino-style extensions. Each candidate leg is
+ * applied only when the resulting maze still validates (connected, bordered,
+ * no 2x2 open blocks), so corridors keep working.
+ */
+function decorateWithTetrominoes(maze: string[], random: () => number): string[] {
+  const bars = collectBars(maze);
+  if (bars.length === 0) {
+    return maze;
+  }
+  for (const bar of bars) {
+    if (random() > 0.45) {
+      continue;
+    }
+    const legs = legCandidates(bar, maze);
+    if (legs.length === 0) {
+      continue;
+    }
+    const leg = legs[Math.floor(random() * legs.length)]!;
+    const trial = cloneMaze(maze);
+    setCell(trial, leg.col, leg.row, WALL);
+    if (validateMaze(trial)) {
+      maze = trial;
+    }
+  }
+  return maze;
+}
+
 /**
  * Generate a 21x19 maze for a seed. Deterministic; returns the static
  * `MAZE_MAP` fallback if the generated maze ever fails validation.
@@ -194,7 +268,11 @@ export function generateMaze(seed: number): readonly string[] {
     }
   }
 
-  return validateMaze(maze) ? maze : MAZE_MAP;
+  if (!validateMaze(maze)) {
+    return MAZE_MAP;
+  }
+  const decorated = decorateWithTetrominoes(maze, random);
+  return validateMaze(decorated) ? decorated : maze;
 }
 
 /** First walkable cell scanning outward from the maze center (deterministic). */
