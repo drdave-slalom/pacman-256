@@ -18,6 +18,12 @@
         The connection check is below.
       </p>
       <div id="game" aria-label="Maze movement prototype"></div>
+      <div id="dpad" aria-label="On-screen direction pad" role="group">
+        <button type="button" data-direction="up" aria-label="Move up"><span aria-hidden="true">▲</span></button>
+        <button type="button" data-direction="left" aria-label="Move left"><span aria-hidden="true">◀</span></button>
+        <button type="button" data-direction="right" aria-label="Move right"><span aria-hidden="true">▶</span></button>
+        <button type="button" data-direction="down" aria-label="Move down"><span aria-hidden="true">▼</span></button>
+      </div>
       <p id="seed" role="status" aria-live="polite"></p>
       <button id="connect" type="button">Check server connection</button>
       <p id="status" role="status" aria-live="polite">Ready to connect.</p>

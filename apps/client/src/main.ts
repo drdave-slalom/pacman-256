@@ -20,6 +20,10 @@ import "./style.css";
 const TILE_SIZE = 32;
 const SWIPE_THRESHOLD = 14;
 
+// Set by MazeScene once it is created; the HTML D-pad buttons below the canvas
+// call this to steer, so the arrows never overlay the maze.
+let steerFromDpad: ((direction: Direction) => void) | null = null;
+
 const gameContainer = document.querySelector<HTMLElement>("#game");
 const button = document.querySelector<HTMLButtonElement>("#connect");
 const status = document.querySelector<HTMLParagraphElement>("#status");
@@ -87,8 +91,8 @@ class MazeScene extends Phaser.Scene {
     this.renderMaze();
     this.createPlayer(spawn);
     this.setupSwipeSteering();
-    this.setupDpad();
     this.setupKeyboardSteering();
+    steerFromDpad = (direction) => this.queueMovement(direction);
     if (seedText) {
       seedText.textContent = `Maze seed ${seed}`;
     }
@@ -192,12 +196,6 @@ class MazeScene extends Phaser.Scene {
       if (!isTouchPointer(pointer)) {
         return;
       }
-      const overPad = this.input
-        .hitTestPointer(pointer)
-        .some((target) => target.getData("dpad") === true);
-      if (overPad) {
-        return;
-      }
       this.dragPointerId = pointer.pointerId;
       this.dragAccum = { x: 0, y: 0 };
       this.dragLast = { x: pointer.x, y: pointer.y };
@@ -230,45 +228,6 @@ class MazeScene extends Phaser.Scene {
     };
     this.input.on("pointerup", endDrag);
     this.input.on("pointercancel", endDrag);
-  }
-
-  private setupDpad(): void {
-    const size = 56;
-    const gap = 6;
-    const cx = this.scale.width - size * 1.65;
-    const cy = this.scale.height - size * 1.65;
-    const buttons: Array<{ direction: Direction; dx: number; dy: number }> = [
-      { direction: "up", dx: 0, dy: -1 },
-      { direction: "down", dx: 0, dy: 1 },
-      { direction: "left", dx: -1, dy: 0 },
-      { direction: "right", dx: 1, dy: 0 },
-    ];
-
-    for (const cfg of buttons) {
-      const bx = cx + cfg.dx * (size + gap);
-      const by = cy + cfg.dy * (size + gap);
-      const pad = this.add
-        .rectangle(bx, by, size, size, 0x2c4672, 0.85)
-        .setStrokeStyle(2, 0x7be6d6, 0.8)
-        .setInteractive()
-        .setData("dpad", true)
-        .setDepth(20);
-      pad.on("pointerdown", () => this.queueMovement(cfg.direction));
-
-      const arrow = this.add.graphics();
-      const r = 12;
-      arrow.fillStyle(0xeef4ff, 1);
-      if (cfg.direction === "up") {
-        arrow.fillTriangle(bx, by - r, bx - r, by + r * 0.9, bx + r, by + r * 0.9);
-      } else if (cfg.direction === "down") {
-        arrow.fillTriangle(bx, by + r, bx - r, by - r * 0.9, bx + r, by - r * 0.9);
-      } else if (cfg.direction === "left") {
-        arrow.fillTriangle(bx - r, by, bx + r * 0.9, by - r, bx + r * 0.9, by + r);
-      } else {
-        arrow.fillTriangle(bx + r, by, bx - r * 0.9, by - r, bx - r * 0.9, by + r);
-      }
-      arrow.setDepth(21);
-    }
   }
 
   private setupKeyboardSteering(): void {
@@ -307,6 +266,20 @@ new Phaser.Game({
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   scene: MazeScene,
 });
+
+// Wire the HTML D-pad below the canvas. The pad lives outside the Phaser
+// canvas, so it never covers the maze; swipes on the maze itself still work.
+const dpadButtons = document.querySelectorAll<HTMLButtonElement>(
+  "#dpad button[data-direction]",
+);
+for (const button of dpadButtons) {
+  button.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    const direction = button.dataset.direction as Direction;
+    steerFromDpad?.(direction);
+  });
+  button.addEventListener("contextmenu", (event) => event.preventDefault());
+}
 
 // In dev, the Vite dev server proxies /multiplayer to the backend and strips
 // the prefix. When the built client is served by the game server itself
