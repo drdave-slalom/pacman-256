@@ -47,8 +47,7 @@ This is a brief progress index, not a replacement for the detailed [delivery pla
 
 <!-- auto-doc-status:start -->
 - T0-T1: Complete.
-- T2: Implemented; validation pending.
-- T3: In progress.
+- T2-T3: Implemented; validation pending.
 - T4-T11: Not started.
 <!-- auto-doc-status:end -->
 

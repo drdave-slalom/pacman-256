@@ -5,10 +5,10 @@ Original mobile-web maze-chase workshop project. T1 shipped a runnable skeleton
 T2 adds the first gameplay slice in the client: a neon-styled maze generated at
 the start of every game (seeded, deterministic), continuous movement with
 buffered turns and wall collisions, and D-pad / swipe / keyboard steering.
-T3 groundwork in `packages/shared` adds the private-room wire protocol
-validators and deterministic team spawn cells; the server room and client
-integration are not part of this README's runnable flow yet. Synchronized
-multiplayer movement and combat remain later tasks.
+T3 adds a private `GameRoom` on the server (see below): join validation, team
+selection, host-started matches, and authoritative 30 Hz movement. The client
+does not use it yet; client integration, countdown, contact combat, pickups, and
+round end remain later tasks.
 
 ## Requirements and quick start
 
@@ -32,6 +32,29 @@ it does not create a playable private match.
 One command starts shared-package compilation in watch mode, the server, and Vite.
 Press Ctrl+C to stop all three. The client port is strict: startup fails if 5173
 is occupied rather than silently selecting a different URL.
+
+## Server game room (T3)
+
+The server defines a private game room (`GAME_ROOM`) alongside the diagnostic
+room. It is exercised by integration tests with real Colyseus SDK clients; the
+browser client does not use it yet.
+
+- **Join:** protocol version and display name are validated on create and join;
+  unknown options are rejected. Rooms are private (join by room code, not
+  matchmaking), hold up to four players, and admit joins in the lobby only.
+  Failures map to shared error codes (`ROOM_NOT_FOUND`, `ROOM_FULL`,
+  `JOIN_CLOSED`, `PROTOCOL_MISMATCH`, `INVALID_INPUT`).
+- **Lobby:** `chooseTeam` enforces team capacity; `startMatch` requires the host
+  and balanced teams (1v1 or 2v2, no unassigned players). Results are returned
+  as `actionResult` messages correlated by `requestId`.
+- **Play:** the server picks a per-round maze seed, places players on distinct
+  spawn cells, and runs a fixed 30 Hz simulation using the shared movement
+  module. `setDirection` input is validated (round ID, increasing sequence,
+  direction); malformed, stale, out-of-phase, and rate-limited input is rejected
+  with `inputRejected`, and duplicates are dropped. Exceeding the hard message
+  cap disconnects only the offending client.
+- **Leave:** host transfers to the earliest remaining player; empty rooms are
+  disposed.
 
 ## Commit-time documentation updates
 
@@ -91,7 +114,10 @@ Tests use Node's built-in runner and real HTTP/WebSocket connections on an
 ephemeral local port. They verify shared tuning, protocol guards and validators
 (display names, join options, room messages, error-code mapping), spawn-cell
 placement across many maze seeds, health, state synchronization, and
-incompatible-version rejection. `npm test` also runs the
+incompatible-version rejection. Game-room integration tests (`game-room.test.ts`)
+cover private-room join/failure codes, team selection, host-only balanced start,
+synchronized movement, input rejection and rate limiting, flood disconnect, and
+host transfer/room disposal. `npm test` also runs the
 tests for the staged-documentation update script
 (`scripts/update-staged-docs.test.mjs`) and the software-factory smoke tests
 (`scripts/factory-smoke.test.mjs`). No cloud account is required.
@@ -138,7 +164,7 @@ in GitHub branch protection/rulesets; the workflow alone does not enforce that.
 | Location | Responsibility |
 |---|---|
 | [apps/client](./apps/client/) | Phaser/Vite browser client and local proxy |
-| [apps/server](./apps/server/) | Colyseus server, diagnostic room, and integration tests |
+| [apps/server](./apps/server/) | Colyseus server, diagnostic room, private game room, and integration tests |
 | [packages/shared](./packages/shared/) | Browser/server protocol (room messages, validators, error codes), types, maze/spawn logic, and approved tuning |
 | [Game contract](./docs/GAME-CONTRACT.md) | Approved behavior and interface baseline |
 | [Decision log](./docs/DECISIONS.md) | Durable team decisions and implementation context |
@@ -158,5 +184,5 @@ Compiled output, dependencies, and the local AE Toolkit checkout remain ignored.
   `PORT`. Do not launch multiple development stacks in the same working directory.
 - **Shared package not found:** run commands from the root; root scripts build the
   shared package first. Workspace-only commands assume that build already exists.
-- **Server restart:** diagnostic rooms are in memory. Rerun the connection check;
+- **Server restart:** rooms are in memory. Rerun the connection check;
   no reconnect or persistence behavior is implied.
