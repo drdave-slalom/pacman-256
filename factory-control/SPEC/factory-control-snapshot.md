@@ -52,7 +52,7 @@ are added to SPEC files.
 | Herdr `results/` | agent handoffs: parse the leading `Agent result source: {...}` JSON (agent label, definition, session id) + handoff text | per-file parse failure → row `unknown` retained |
 | Herdr `result-ref-reservations/` | unit-labeled subdirs (e.g. `t4-review/1`) — auxiliary mapping aid | optional |
 | `gh pr list --state all --json number,title,state,headRefName,...` | PRs by head branch | gh unavailable → `unavailable` |
-| `gh pr checks <pr>` | per-check state | per-PR failure → `unknown` |
+| `gh pr checks <pr> --json state,bucket,name,workflow` | per-check state; checks = SUCCESS→green, FAILURE/ERROR→red, pending/queued→pending, “no checks reported”→none, gh failure→unknown | per-PR failure → `unknown` |
 
 ### Normalized identity
 
@@ -65,9 +65,10 @@ are added to SPEC files.
   length) for shared normalized tokens. The `factory` namespace token is
   excluded from overlap. Highest non-zero score wins; ties resolve
   deterministically. Unmatched artifacts go to an `orphaned` bucket surfaced in
-  the UI (honest pure inference). Known limitation: generic shared tokens
-  (`control`, `web`, `review`, `ui`, `docs`, `spec`) can create ambiguity;
-  adversarial cases are covered by matching tests.
+  the UI (honest pure inference). A generic-token denylist (`factory`, `control`,
+  `center`, `spec`, `web`, `ui`, `tui`, `review`, `qa`, `docs`, `actions`,
+  `impl`, `test`, `m0`) prevents token-overlap false joins on generic words; containment
+  remains dominant. Ambiguity and containment-dominance cases are covered by matching tests.
 - Handoffs join via their `agent` label canonical id against the same rule;
   unmatched handoffs → `orphaned`.
 
