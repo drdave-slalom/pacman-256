@@ -80,6 +80,8 @@ decisions below instead of the delivery plan's initial gameplay proposals.
 | D048 | Standing factory workflow gates, requested and confirmed by David (contract coordinator, D043) on 2026-11-10: (1) spec in `SPEC/` first, then delegate to the matching role agent; (2) `qa-tester` and `pr-reviewer` before any integration; (3) watch CI after a PR or user-approved merge and report final status. Details: [FACTORY.md](./FACTORY.md#standing-workflow-gates). | Working agreement so agents enforce the workflow without the user restating it each request. Refines D030; worktree isolation and human approval before integration are unchanged. Spec: `SPEC/factory-workflow-gates.md`. |
 | D049 | T3 start flow and client scope, chosen by David on 2026-11-10: `chooseTeam` plus a host `startMatch` with balanced 1v1/2v2 teams goes directly to `playing`; T5 adds the 3-second countdown, contact, and round end. T3 ships a minimal working client UI; T4 polishes the mobile lobby and LAN docs. | Follows the approved contract's lobby flow without pulling T5 scope into T3. Spec: `SPEC/T3-private-rooms-and-synchronized-movement.md`. |
 | D050 | Review-cycle cap, requested and confirmed by David (contract coordinator, D043) on 2026-11-10: at most two review/fix cycles per unit; afterwards only blockers (failed acceptance criterion, crash/data integrity, security, regression) reopen work with one targeted fix re-checked alone, and other findings become PR follow-ups. CI failures are always fixed. Details: [FACTORY.md](./FACTORY.md#standing-workflow-gates). | Prevents endless review/fix loops observed during T3 while keeping blockers and green CI mandatory. Refines D048. |
+| D051 | T4 (mobile lobby / local-network phone access) is implemented on the T3 client and mirrors the view in the URL hash: `#room=<code>` restores the room and auto-rejoins with the remembered display name; the join screen is the default. It adds `AppRoute`/`parseAppRoute`/`serializeAppRoute` to shared, persists the display name in `localStorage`, and documents the coordination model and firewall/network requirements. | Shipped 2026-11-10. Adopts T3's protocol constants as-is (no duplicates). Validation: `npm run check` green; QA smoke created and rejoined a real `GAME_ROOM` room via the hash round-trip. Physical-phone LAN pass remains pending. |
+| D052 | Drop the pre-T3 offline "Enter prototype maze" fallback from the client, because T3's live private-room flow supersedes it. | T3 merged (PR #19); the standalone prototype demo is no longer needed and removing it avoids maintaining two lobbies. |
 
 ### Current combat summary
 
@@ -277,3 +279,25 @@ tunables remain starting values for review.
 ## T2-T4 completion verification
 
 - D053 | Team manually verified T2, T3, and T4 complete on 2026-11-10. T2 (maze + touch movement, PR #10) passed the physical-phone check; T3 (private rooms + synchronized movement, PR #19) passed two-client LAN verification; T4 (mobile lobby / local-network phone access, PR #21) passed the LAN rejoin smoke and phone verification. Delivery-plan statuses for T2-T4 updated from "implemented; validation pending" to "Complete"; brief status block synced. | Recorded by the team after manual verification; remaining T5-T11 stay "not started".
+
+## T4 implementation context (not new gameplay decisions)
+
+- T4 merged onto the T3 client (after PR #19). The T3 flow is the single lobby:
+  create/join by code, team pick, host start, and synchronized play. T4 adds
+  the URL-hash view state and mobile/network documentation; the pre-T3 offline
+  prototype-maze fallback is dropped (D052).
+- Client (`apps/client/src/main.ts`): display name is persisted to
+  `localStorage` on create/join; a successful room entry writes `#room=<code>`
+  via `history.replaceState` (leaving clears it). On page load, a `#room=<code>`
+  hash restores the code and display name and automatically attempts the join,
+  so refreshing in a room drops the player back into it (join errors surface
+  with the existing mapped messages).
+- Shared (`packages/shared/src/index.ts`): `AppRoute` (`lobby` | `room`),
+  `parseAppRoute`, `serializeAppRoute`, and `ROOM_CODE_MAX_LENGTH` with tests.
+  The T3 `GAME_ROOM`/`parseDisplayName`/`errorMessage`/`joinErrorCode` protocol
+  is used as-is; T4 adds no duplicate protocol constants.
+- Validation: `npm run check` green (84 shared/server/protocol tests; 15
+  docs/factory tests; builds). QA smoke re-created a real `GAME_ROOM` room,
+  serialized `#room=<code>` from it, parsed it back, and rejoined the same room
+  as a second client (phase `lobby`, matching code). Physical-phone LAN pass
+  was completed and recorded in D053.

@@ -169,12 +169,16 @@ Keep evidence concise: link tasks/specs to PRs, report real test results, and sh
 
 T0 is complete; the [game contract](./docs/GAME-CONTRACT.md) is approved (D044).
 T1 is implemented (D045). T2 (one maze + touch movement, keyboard input, and
-seeded dynamic maze generation) merged in PR #10; its physical-phone feel pass
-(swipe threshold, D-pad reachability, scroll/page-fit) is still pending. T3
-(private rooms and server-synchronized movement, D049) is implemented and its PR
-is pending teammate review; the two-phone LAN check happens with T4 (mobile
-lobby / local-network phone access), the next unit. Run the
-[README two-browser walkthrough](./README.md#two-browser-walkthrough) to review T3.
+seeded dynamic maze generation) merged in PR #10 and passed the physical-phone
+feel pass. T3 (private rooms and server-synchronized movement, D049) merged in
+PR #19 and passed two-client LAN verification. T4 (mobile lobby / local-network
+phone access) merged in PR #21 and passed the LAN rejoin smoke and phone
+verification; it mirrors the view in the URL hash (`#room=<code>` reopens the
+room with the saved display name), documents the coordination model and
+firewall/network requirements, and drops the pre-T3 offline prototype fallback.
+T2-T4 were manually verified complete on 2026-11-10 (D053); T5-T11 remain not
+started. Run the
+[README two-browser walkthrough](./README.md#two-browser-walkthrough) to review T3/T4.
 David coordinates contract changes; Chase reviews.
 Local-server validation precedes cloud work. Confirm actual test devices and
 performance targets before acceptance.
