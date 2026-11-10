@@ -79,6 +79,8 @@ Work in 60–120 minute increments. At each checkpoint, merge reviewed work, run
 
 Each chunk includes its tests, acceptance evidence, and a human-reviewed diff. Split any chunk that cannot produce a reviewable result within half a day.
 
+Per-unit tracking lives in GitHub Issues (scoping profile tracker: `github`, D055); this table stays the overview and will link each unit's issue once filed. See [FACTORY.md](./docs/FACTORY.md#github-tracker).
+
 | ID | Status | Chunk / owner | Estimate | Depends on | Acceptance checkpoint |
 |---|---|---|---|---|---|
 | T0 | Complete | Approve MVP rules, contracts, and scope / All | Completed checkpoint | — | Shared contract reviewed and approved; see D044. |
@@ -138,7 +140,7 @@ T2, T3, and T4 run in parallel after T1. T5 and T6 can proceed in parallel again
 5. **Review and integrate:** another person reviews intent and diff. Run tests and the local-network smoke check before calling the task complete.
 6. **Hand off:** record changed behavior, validation results, limitations, and next step in the PR/task so a fresh AI session can continue.
 
-If the team wants the formal toolkit pipeline, explicitly invoke `scope-prd` to formalize the brief, then `scope-prd-to-spec`, then `scope-spec-to-tickets` after approving the spec. Follow each skill's confirmation gates; do not generate every artifact merely to show toolkit usage. A short local task list is sufficient until the team chooses a tracker; publish nothing externally without approval.
+If the team wants the formal toolkit pipeline, explicitly invoke `scope-prd` to formalize the brief, then `scope-prd-to-spec`, then `scope-spec-to-tickets` after approving the spec. Follow each skill's confirmation gates; do not generate every artifact merely to show toolkit usage. The team chose GitHub Issues as the tracker (D055); file tickets there only with approval, and publish nothing else externally without approval.
 
 ### First tooling follow-ups
 
