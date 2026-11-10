@@ -204,7 +204,7 @@ outcome rules (`round.test.ts`), health, state synchronization, and
 incompatible-version rejection. Game-room integration tests (`game-room.test.ts`)
 use an injectable fake clock and cover private-room join/failure codes, team
 selection, host-only balanced start, countdown, synchronized movement, contact
-elimination, timeout/disconnect/wipe outcomes, return to lobby, input rejection
+elimination, timeout and disconnect outcomes, return to lobby, input rejection
 and rate limiting, flood disconnect, and host transfer/room disposal. Client unit
 tests (`apps/client/src/*.test.ts`)
 cover the session model: input dedupe/sequencing/rate budgeting, pending-action

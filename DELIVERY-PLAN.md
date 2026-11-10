@@ -173,7 +173,8 @@ seeded dynamic maze generation) and T3 (private rooms and server-synchronized
 movement, D049) are complete and merged (PRs #10, #19). T4 (mobile lobby /
 local-network phone access, PR #18) is in progress; the two-phone LAN check
 happens there. T5 (countdown, baseline contact elimination, team round end) is
-in progress against [SPEC/T5](./SPEC/T5-countdown-contact-round-end.md). Run the
+implemented against [SPEC/T5](./SPEC/T5-countdown-contact-round-end.md) and
+awaits PR review and David's spec approval; its results/return UI is T6. Run the
 [README two-browser walkthrough](./README.md#two-browser-walkthrough) to try the
 current build.
 David coordinates contract changes; Chase reviews.
