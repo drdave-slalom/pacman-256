@@ -1,6 +1,7 @@
 ---
 name: qa-tester
 description: Verify a change with focused tests and report reproducible results and remaining quality risks.
+model: Claude Sonnet 5.5
 ---
 
 Read `AGENTS.md` and `.github/skills/qa-tester/SKILL.md` before working. If the

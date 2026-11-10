@@ -38,7 +38,34 @@ import {
   playerViews,
 } from "./session-model.ts";
 import type { ActionOutcome } from "./session-model.ts";
+import { parseAppRoute, serializeAppRoute } from "@maze/shared";
+import type { AppRoute } from "@maze/shared";
 import "./style.css";
+
+const DISPLAY_NAME_STORAGE_KEY = "maze-workshop.display-name";
+
+function rememberDisplayName(name: string): void {
+  try {
+    window.localStorage.setItem(DISPLAY_NAME_STORAGE_KEY, name);
+  } catch {
+    // Storage may be unavailable; the URL still restores the view.
+  }
+}
+
+function savedDisplayName(): string | null {
+  try {
+    return window.localStorage.getItem(DISPLAY_NAME_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Mirror the current view in the URL hash without reloading the page. */
+function setRouteHash(route: AppRoute): void {
+  const hash = serializeAppRoute(route);
+  const path = `${window.location.pathname}${window.location.search}`;
+  window.history.replaceState(null, "", hash ? `${path}${hash}` : path);
+}
 
 /** How long a lobby action may wait for its `actionResult` before it is re-enabled. */
 const ACTION_TIMEOUT_MS = 5_000;
@@ -214,6 +241,7 @@ async function enterRoom(action: "create" | "join"): Promise<void> {
     ui.nameInput.focus();
     return;
   }
+  rememberDisplayName(displayName);
   const code = ui.codeInput.value.trim();
   if (action === "join" && code === "") {
     showMessage("Enter the room code from the host.");
@@ -263,6 +291,7 @@ function attachRoom(joined: Room): void {
   ui.playerList.replaceChildren();
   ui.lobbyHint.textContent = "";
   showNotice("");
+  setRouteHash({ view: "room", code: joined.roomId });
   // MVP has no reconnect: a dropped socket must end the session right away
   // (visible message + join screen) instead of retrying in the background.
   joined.reconnection.enabled = false;
@@ -346,6 +375,7 @@ function resetSession(): void {
   setLobbyBusy(false);
   room = null;
   snapshot = null;
+  setRouteHash({ view: "lobby" });
   showView("join");
 }
 
@@ -502,6 +532,23 @@ for (const button of ui.dpadButtons) {
 }
 
 showView("join");
+
+// Restore any saved display name so a refresh can rejoin a room.
+const savedName = savedDisplayName();
+if (savedName !== null) {
+  ui.nameInput.value = savedName;
+}
+
+// Restore the view from the URL hash: auto-rejoin a room if one was open.
+const initialRoute = parseAppRoute(window.location.hash);
+if (initialRoute.view === "room") {
+  if (isPlausibleRoomCode(initialRoute.code)) {
+    ui.codeInput.value = initialRoute.code;
+    void enterRoom("join");
+  } else {
+    showMessage("The saved room code is invalid. Enter a code to join.");
+  }
+}
 
 ui.connectButton.addEventListener("click", async () => {
   ui.connectButton.disabled = true;

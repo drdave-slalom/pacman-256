@@ -41,9 +41,11 @@ is occupied rather than silently selecting a different URL.
    round starts.
 6. Steer with the D-pad, a touch swipe on the play area, or arrow keys/WASD
    (mouse drags do not steer). Both
-   windows show every player as a team-colored circle; your own player has a
-   pulsing white ring. The client only sends direction intent; the server moves
-   players and the client interpolates between updates. A hunter touching a runner
+   windows show every player as a team-colored ghost mascot (hunters yellow,
+   runners cyan) whose pupils glance toward the direction of travel; your own
+   player has a white outline and a pulsing white ring. The client only sends
+   direction intent; the server moves players and the client interpolates between
+   updates. A hunter touching a runner
    eliminates the runner; eliminated players stop moving and their input is
    ignored. The round ends when a team is eliminated or at the 180-second deadline
    (runners win). The host can then return everyone to the lobby (teams kept) via
@@ -51,6 +53,11 @@ is occupied rather than silently selecting a different URL.
 7. **Leave** returns to the join screen. When the host leaves, the
    earliest-joined remaining player becomes host. Leaving during the countdown
    that unbalances teams cancels back to the lobby.
+
+The current view is mirrored in the URL hash, so a refresh restores it:
+`#room=<code>` reopens the room and attempts to rejoin with the display name
+remembered from the previous session. The join screen is the default (no hash).
+An invalid code in the hash shows a message instead of attempting to join.
 
 Errors are shown on the page, and the UI returns to a usable state:
 
@@ -124,12 +131,15 @@ diagnostic room. Integration tests exercise it with real Colyseus SDK clients.
 ## Client (T3)
 
 - `apps/client/src/main.ts` owns the DOM flow (join, lobby, game panels), the
-  Colyseus connection, and the single direction-request path shared by D-pad,
-  swipe, and keyboard. Input outside an active round, or from a player who is not
-  alive (spectating), is dropped. The Phaser game
-  exists only during a round, so key capture never blocks typing in forms.
+  Colyseus connection, URL-hash view restore (via shared `parseAppRoute` /
+  `serializeAppRoute`), the remembered display name (`localStorage`), and the
+  single direction-request path shared by D-pad, swipe, and keyboard. Input
+  outside an active round, or from a player who is not alive (spectating), is
+  dropped. The Phaser game exists only during a round, so key capture never
+  blocks typing in forms.
 - `apps/client/src/maze-scene.ts` renders the server-seeded maze and interpolated
-  players; it never moves players itself.
+  players as ghost mascots (domed body, scalloped feet, eyes that glance along
+  the direction of travel); it never moves players itself.
 - `apps/client/src/session-model.ts` holds pure, unit-tested helpers (no
   DOM/Phaser): round detection and snapshot mapping; `DirectionSender` (sends
   only direction changes, sequences from 0 per round, and stays within a
@@ -197,7 +207,8 @@ npm run check
 ```
 
 Tests use Node's built-in runner and real HTTP/WebSocket connections on an
-ephemeral local port. They verify shared tuning, protocol guards and validators
+ephemeral local port. They verify shared tuning, app-route hash parsing and
+serialization, protocol guards and validators
 (display names, join options, room messages including `returnToLobby`, error-code
 mapping), spawn-cell placement across many maze seeds, swept contact and round
 outcome rules (`round.test.ts`), health, state synchronization, and
@@ -257,7 +268,7 @@ in GitHub branch protection/rulesets; the workflow alone does not enforce that.
 |---|---|
 | [apps/client](./apps/client/) | Phaser/Vite browser client (join/lobby/game UI, maze scene), session model, and local proxy |
 | [apps/server](./apps/server/) | Colyseus server, diagnostic room, private game room, and integration tests |
-| [packages/shared](./packages/shared/) | Browser/server protocol (room messages, validators, error codes), types, maze/spawn logic, contact/round-outcome rules, and approved tuning |
+| [packages/shared](./packages/shared/) | Browser/server protocol (room messages, validators, error codes), app-route hash helpers, types, maze/spawn logic, contact/round-outcome rules, and approved tuning |
 | [Game contract](./docs/GAME-CONTRACT.md) | Approved behavior and interface baseline |
 | [Decision log](./docs/DECISIONS.md) | Durable team decisions and implementation context |
 | [Delivery plan](./DELIVERY-PLAN.md) | Task boundaries and milestones |

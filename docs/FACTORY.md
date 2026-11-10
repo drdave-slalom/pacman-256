@@ -136,6 +136,26 @@ selected Copilot harness does not support subagents, stop and ask the user;
 they may select the role profile directly in a separate chat and pass the same
 self-contained task and handoff manually, or waive the gate.
 
+#### Copilot model defaults
+
+The workspace role profiles set these model defaults for Copilot in VS Code's
+Local harness:
+
+| Role profile | Model |
+|---|---|
+| `builder` | Claude Sonnet 5.5 |
+| `pr-reviewer` | Claude Sonnet 5.5 |
+| `qa-tester` | Claude Sonnet 5.5 |
+| `gameplay-designer` | Claude Sonnet 5.5 |
+| `artist` | Claude Sonnet 5.5 |
+| `docs-writer` | Claude Haiku 5.5 |
+| `factory-orchestrator` | No profile override |
+
+When a worker profile declares `model`, the Local harness selects that model
+for the worker instead of following the model selected for the orchestrator's
+chat. The orchestrator profile intentionally omits `model`, so its conversation
+continues to use the user's selected chat model.
+
 For a Copilot-only setup check, run:
 
 ```bash

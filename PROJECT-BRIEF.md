@@ -46,8 +46,7 @@ Room creation and joining are the first matchmaking slice. Quick play, accounts,
 This is a brief progress index, not a replacement for the detailed [delivery plan](./DELIVERY-PLAN.md). Product requirements above remain authoritative.
 
 <!-- auto-doc-status:start -->
-- T0-T3: Complete.
-- T4: In progress.
+- T0-T4: Complete.
 - T5: Implemented; validation pending.
 - T6-T11: Not started.
 <!-- auto-doc-status:end -->

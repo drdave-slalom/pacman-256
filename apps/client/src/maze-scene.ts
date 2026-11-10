@@ -15,10 +15,68 @@ const LOCAL_RING_RADIUS = PLAYER_RADIUS + 7;
 const LOCAL_RING_WIDTH = 5;
 
 const TEAM_COLORS: Readonly<Record<PlayerTeam, number>> = {
-  hunter: 0xff6b4a,
-  runner: 0x4ad8ff,
+  hunter: 0xffd23f,
+  runner: 0x3fe0ff,
   unassigned: 0x9aa3b5,
 };
+
+// Ghost-mascot geometry, expressed relative to PLAYER_RADIUS so the sprite
+// scales with the tile size. The body is a domed top with scalloped feet; two
+// eyes with pupils that glance toward the direction of travel.
+const GHOST_FEET = 3;
+const GHOST_FOOT_BASE = PLAYER_RADIUS * 1.0;
+const GHOST_FOOT_NOTCH = PLAYER_RADIUS * 0.58;
+const EYE_OFFSET_X = PLAYER_RADIUS * 0.42;
+const EYE_OFFSET_Y = -PLAYER_RADIUS * 0.22;
+const EYE_WHITE_RADIUS = PLAYER_RADIUS * 0.33;
+const PUPIL_RADIUS = PLAYER_RADIUS * 0.17;
+const PUPIL_SHIFT = PLAYER_RADIUS * 0.14;
+const EYE_COLOR = 0xffffff;
+const PUPIL_COLOR = 0x0b1224;
+
+/** A player rendered as a ghost: body graphic, eye whites, and glancing pupils. */
+interface Mascot {
+  container: Phaser.GameObjects.Container;
+  body: Phaser.GameObjects.Graphics;
+  leftPupil: Phaser.GameObjects.Arc;
+  rightPupil: Phaser.GameObjects.Arc;
+  team: PlayerTeam;
+  facing: { x: number; y: number };
+  lastPos: { x: number; y: number } | null;
+}
+
+/**
+ * Draws a classic ghost silhouette into `g`: a semicircular dome on top, flat
+ * sides, and a scalloped bottom edge. Centered on the origin so the mascot's
+ * container can be positioned directly at the player's tile coordinate.
+ */
+function drawGhostBody(
+  g: Phaser.GameObjects.Graphics,
+  color: number,
+  radius: number,
+  local: boolean,
+): void {
+  const w = radius;
+  g.clear();
+  g.fillStyle(color, 1);
+  g.beginPath();
+  // Top dome: a semicircle centered on the origin, sweeping over the top.
+  g.arc(0, 0, w, Math.PI, 0, true);
+  g.lineTo(w, GHOST_FOOT_BASE);
+  // Scalloped feet, traced right to left back to the dome's left edge.
+  const stepW = (2 * w) / GHOST_FEET;
+  for (let i = 0; i < GHOST_FEET; i++) {
+    const xRight = w - i * stepW;
+    g.lineTo(xRight - stepW / 2, GHOST_FOOT_NOTCH);
+    g.lineTo(xRight - stepW, GHOST_FOOT_BASE);
+  }
+  g.closePath();
+  g.fillPath();
+  if (local) {
+    g.lineStyle(3, 0xffffff, 1);
+    g.strokePath();
+  }
+}
 
 /** What the scene reads each frame; the network session owns the data. */
 export interface MazeSceneSource {
@@ -71,7 +129,7 @@ export class MazeScene extends Phaser.Scene {
   private renderedMazeKey: string | null = null;
   private lastRevision = -1;
   private readonly interpolator = new Interpolator();
-  private readonly circles = new Map<string, Phaser.GameObjects.Arc>();
+  private readonly mascots = new Map<string, Mascot>();
   private localRing!: Phaser.GameObjects.Arc;
   private dragPointerId: number | null = null;
   private dragAccum = { x: 0, y: 0 };
@@ -125,29 +183,64 @@ export class MazeScene extends Phaser.Scene {
     for (const view of views) {
       present.add(view.id);
       const position = this.interpolator.sample(view.id, now) ?? view;
-      let circle = this.circles.get(view.id);
-      if (!circle) {
-        circle = this.add.circle(0, 0, PLAYER_RADIUS, TEAM_COLORS[view.team]);
-        circle.setDepth(view.isLocal ? 11 : 10);
-        if (view.isLocal) {
-          circle.setStrokeStyle(3, 0xffffff, 1);
-        }
-        this.circles.set(view.id, circle);
+      let mascot = this.mascots.get(view.id);
+      if (!mascot) {
+        mascot = this.createMascot(view.team, view.isLocal);
+        this.mascots.set(view.id, mascot);
       }
-      circle.setFillStyle(TEAM_COLORS[view.team]);
-      circle.setPosition(position.x * TILE_SIZE, position.y * TILE_SIZE);
+      if (mascot.team !== view.team) {
+        mascot.team = view.team;
+        drawGhostBody(mascot.body, TEAM_COLORS[view.team], PLAYER_RADIUS, view.isLocal);
+      }
+      const x = position.x * TILE_SIZE;
+      const y = position.y * TILE_SIZE;
+      this.updateFacing(mascot, x, y);
+      mascot.container.setPosition(x, y);
       if (view.isLocal) {
-        this.localRing.setPosition(circle.x, circle.y);
+        this.localRing.setPosition(x, y);
         localShown = true;
       }
     }
     this.localRing.setVisible(localShown);
-    for (const [id, circle] of this.circles) {
+    for (const [id, mascot] of this.mascots) {
       if (!present.has(id)) {
-        circle.destroy();
-        this.circles.delete(id);
+        mascot.container.destroy();
+        this.mascots.delete(id);
       }
     }
+  }
+
+  /** Builds a ghost mascot: body graphic plus eye whites and glancing pupils. */
+  private createMascot(team: PlayerTeam, isLocal: boolean): Mascot {
+    const body = this.add.graphics();
+    drawGhostBody(body, TEAM_COLORS[team], PLAYER_RADIUS, isLocal);
+    const leftEye = this.add.circle(-EYE_OFFSET_X, EYE_OFFSET_Y, EYE_WHITE_RADIUS, EYE_COLOR);
+    const rightEye = this.add.circle(EYE_OFFSET_X, EYE_OFFSET_Y, EYE_WHITE_RADIUS, EYE_COLOR);
+    const leftPupil = this.add.circle(-EYE_OFFSET_X, EYE_OFFSET_Y, PUPIL_RADIUS, PUPIL_COLOR);
+    const rightPupil = this.add.circle(EYE_OFFSET_X, EYE_OFFSET_Y, PUPIL_RADIUS, PUPIL_COLOR);
+    const container = this.add.container(0, 0, [body, leftEye, rightEye, leftPupil, rightPupil]);
+    container.setDepth(isLocal ? 11 : 10);
+    return { container, body, leftPupil, rightPupil, team, facing: { x: 0, y: 1 }, lastPos: null };
+  }
+
+  /** Points the pupils along the mascot's recent travel; holds still when idle. */
+  private updateFacing(mascot: Mascot, x: number, y: number): void {
+    if (mascot.lastPos) {
+      const dx = x - mascot.lastPos.x;
+      const dy = y - mascot.lastPos.y;
+      if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
+        if (Math.abs(dx) > Math.abs(dy)) {
+          mascot.facing = { x: Math.sign(dx), y: 0 };
+        } else {
+          mascot.facing = { x: 0, y: Math.sign(dy) };
+        }
+      }
+    }
+    mascot.lastPos = { x, y };
+    const px = mascot.facing.x * PUPIL_SHIFT;
+    const py = mascot.facing.y * PUPIL_SHIFT;
+    mascot.leftPupil.setPosition(-EYE_OFFSET_X + px, EYE_OFFSET_Y + py);
+    mascot.rightPupil.setPosition(EYE_OFFSET_X + px, EYE_OFFSET_Y + py);
   }
 
   private renderMaze(maze: readonly string[]): void {
