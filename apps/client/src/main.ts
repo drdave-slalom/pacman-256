@@ -580,8 +580,6 @@ function renderGame(snapshot: GameRoomSnapshot, localId: string): void {
     button.disabled = !steerable;
   }
 }
-  }
-}
 
 function pickTeam(team: Team): void {
   sendAction(CLIENT_MESSAGES.chooseTeam, (requestId) => ({ requestId, team }));
