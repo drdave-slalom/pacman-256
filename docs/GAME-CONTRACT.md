@@ -20,8 +20,10 @@ The team subsequently authorized T1 only; see D045 for the implementation bounda
 `lobby → countdown → playing → results → lobby`
 
 - Only the server changes phases. A room holds at most four connected participants.
-- Players choose teams in the lobby, capped at two per team. A match needs balanced
-  1v1 or 2v2 teams. The host requests start; countdown lasts three seconds.
+- Players choose teams in the lobby; a team may hold any number of players up to
+  the room's four-player cap. Starting requires at least one hunter and one runner;
+  an unbalanced roster (e.g. 3v1, 2v1) is a warning, not a block. The host
+  requests start; countdown lasts three seconds.
 - Losing balance cancels countdown and returns to lobby.
 - No mid-round joins. Proposed clarification: reject joins during countdown and
   results too; join admission is lobby-only to avoid changing an active roster.
@@ -46,7 +48,7 @@ identifier usable as a private join code initially; exact code format is unappro
 |---|---|---|
 | Create / join | protocol version, display name; room code for join | Validate version/name, phase and capacity; assign server-side player identity. |
 | `chooseTeam` | request ID, `hunter` or `runner` | Lobby only; enforce team capacity; publish accepted state. |
-| `startMatch` | request ID | Host only, balanced roster, lobby only; begin countdown. |
+| `startMatch` | request ID | Host only, at least one player per team, lobby only; begin countdown. |
 | `setDirection` | round ID, increasing input sequence, `up/down/left/right` | Alive current-round participant during play only; server queues desired turn. |
 | `returnToLobby` | request ID | Host only, results only; reset round state and publish lobby. |
 | Leave | Colyseus leave operation | Apply removal and cleanup policy. |
@@ -161,7 +163,9 @@ spam; preserve enough diagnostic information to investigate failures.
 
 ## 8. Acceptance scenarios for contract review
 
-1. Balanced 1v1 and 2v2 start; unbalanced start is rejected; lost balance cancels countdown.
+1. Any roster with at least one hunter and one runner starts (1v1, 2v2, 3v1,
+   2v1, …); an empty side is rejected; unbalanced rosters warn but do not block
+   start; lost balance cancels countdown.
 2. Full/unknown/non-lobby rooms produce explicit join failures; only host starts/resets.
 3. Direction buffering turns legally; touch release preserves motion; walls block;
    teammate overlap works; fast opposing crossings cannot evade contact.

@@ -13,7 +13,7 @@ test("findSpawnCells returns distinct walkable cells in team quadrants for many 
     const spawns = findSpawnCells(maze);
     const all = [...spawns.hunter, ...spawns.runner];
     const keys = new Set(all.map((cell) => `${cell.col},${cell.row}`));
-    assert.equal(keys.size, 4, `seed ${seed}: spawns must be distinct`);
+    assert.equal(keys.size, 6, `seed ${seed}: spawns must be distinct`);
     for (const cell of all) {
       assert.ok(isWalkableIn(maze, cell.col, cell.row), `seed ${seed}: ${JSON.stringify(cell)} walkable`);
     }
@@ -26,11 +26,27 @@ test("findSpawnCells returns distinct walkable cells in team quadrants for many 
   }
 });
 
+test("findSpawnCells yields three distinct walkable cells per team", () => {
+  for (const seed of SEEDS) {
+    const maze = generateMaze(seed);
+    const spawns = findSpawnCells(maze);
+    for (const side of ["hunter", "runner"] as const) {
+      const team = spawns[side];
+      assert.equal(team.length, 3, `seed ${seed}: ${side} has 3 spawns`);
+      const keys = new Set(team.map((cell) => `${cell.col},${cell.row}`));
+      assert.equal(keys.size, 3, `seed ${seed}: ${side} spawns must be distinct`);
+      for (const cell of team) {
+        assert.ok(isWalkableIn(maze, cell.col, cell.row), `seed ${seed}: ${side} ${JSON.stringify(cell)} walkable`);
+      }
+    }
+  }
+});
+
 test("findSpawnCells is deterministic per maze and works on the static map", () => {
   const maze = generateMaze(42);
   assert.deepEqual(findSpawnCells(maze), findSpawnCells(generateMaze(42)));
   const fallback = findSpawnCells(MAZE_MAP);
-  assert.equal(new Set([...fallback.hunter, ...fallback.runner].map((c) => `${c.col},${c.row}`)).size, 4);
+  assert.equal(new Set([...fallback.hunter, ...fallback.runner].map((c) => `${c.col},${c.row}`)).size, 6);
 });
 
 test("spawn inset is tunable", () => {

@@ -6,6 +6,7 @@ import {
   CLIENT_MESSAGES,
   GAME_ROOM,
   INPUT_RATE_LIMIT_MAX_MESSAGES,
+  MAZE_HEIGHT,
   MAX_CLIENT_MESSAGES_PER_SECOND,
   PROTOCOL_VERSION,
   SERVER_MESSAGES,
@@ -258,7 +259,7 @@ test("AC2: join failures reach the SDK with mappable codes", { timeout: 20_000 }
   });
 });
 
-test("AC3: chooseTeam enforces capacity and phase with correlated results", { timeout: 15_000 }, async (t) => {
+test("AC3: chooseTeam enforces phase with correlated results; no team cap", { timeout: 15_000 }, async (t) => {
   const harness = await startServer(t);
   const a = await harness.create("A");
   const b = await harness.join(a.room.roomId, "B");
@@ -267,7 +268,7 @@ test("AC3: chooseTeam enforces capacity and phase with correlated results", { ti
   expectAccepted(await a.request("chooseTeam", { team: "hunter" }));
   expectAccepted(await a.request("chooseTeam", { team: "hunter" })); // re-choosing is accepted
   expectAccepted(await b.request("chooseTeam", { team: "hunter" }));
-  expectRejected(await c.request("chooseTeam", { team: "hunter" }), "TEAM_FULL");
+  expectAccepted(await c.request("chooseTeam", { team: "hunter" })); // third hunter allowed (no TEAM_FULL)
   expectRejected(await c.request("chooseTeam", { team: "ghost" }), "INVALID_INPUT");
   c.room.send(CLIENT_MESSAGES.chooseTeam, { team: "runner" });
   assert.equal((await c.nextRejection()).code, "INVALID_INPUT", "uncorrelatable request -> inputRejected");
@@ -281,19 +282,67 @@ test("AC3: chooseTeam enforces capacity and phase with correlated results", { ti
   expectRejected(await a.request("chooseTeam", { team: "runner" }), "INVALID_PHASE");
 });
 
-test("AC4: startMatch requires host and balanced teams; 2v2 starts with distinct spawns", { timeout: 15_000 }, async (t) => {
+test("AC4: startMatch requires host and every player assigned; 2v1 starts", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t);
+  const a = await harness.create("A");
+  const b = await harness.join(a.room.roomId, "B");
+  const c = await harness.join(a.room.roomId, "C");
+  expectRejected(await b.request("startMatch", {}), "HOST_REQUIRED");
+  expectRejected(await a.request("startMatch", {}), "INVALID_INPUT"); // nobody picked yet
+  expectAccepted(await a.request("chooseTeam", { team: "hunter" }));
+  expectRejected(await a.request("startMatch", {}), "INVALID_INPUT"); // empty runner side
+  expectAccepted(await b.request("chooseTeam", { team: "hunter" }));
+  expectRejected(await a.request("startMatch", {}), "INVALID_INPUT"); // empty runner side
+  expectAccepted(await c.request("chooseTeam", { team: "runner" }));
+  expectRejected(await b.request("startMatch", {}), "HOST_REQUIRED");
+  // 2v1 with all players assigned starts: no equal-count requirement.
+  expectAccepted(await a.request("startMatch", {}));
+  const state = await c.waitFor((s) => s.phase === "playing", "playing");
+  const hunters = Object.values(state.players).filter((p) => p.team === "hunter");
+  const runners = Object.values(state.players).filter((p) => p.team === "runner");
+  assert.equal(hunters.length, 2);
+  assert.equal(runners.length, 1);
+  const maze = generateMaze(state.mazeSeed);
+  const cells = [...hunters, ...runners].map((p) => `${p.x},${p.y}`);
+  assert.equal(new Set(cells).size, 3, "assigned spawns must be distinct");
+  for (const player of [...hunters, ...runners]) {
+    assert.ok(isWalkableIn(maze, Math.floor(player.x), Math.floor(player.y)));
+    assert.equal(player.lastInputSequence, -1);
+  }
+  expectRejected(await a.request("startMatch", {}), "INVALID_PHASE");
+});
+
+test("AC4: start with an unassigned player present is rejected", { timeout: 15_000 }, async (t) => {
   const harness = await startServer(t);
   const a = await harness.create("A");
   const b = await harness.join(a.room.roomId, "B");
   const c = await harness.join(a.room.roomId, "C");
   const d = await harness.join(a.room.roomId, "D");
-  expectRejected(await b.request("startMatch", {}), "HOST_REQUIRED");
-  expectRejected(await a.request("startMatch", {}), "TEAMS_UNBALANCED");
   expectAccepted(await a.request("chooseTeam", { team: "hunter" }));
   expectAccepted(await b.request("chooseTeam", { team: "hunter" }));
   expectAccepted(await c.request("chooseTeam", { team: "runner" }));
-  expectRejected(await a.request("startMatch", {}), "TEAMS_UNBALANCED"); // D unassigned
-  expectRejected(await a.request("startMatch", { phase: "playing" }), "INVALID_INPUT");
+  // D never picked: start must be rejected and the lobby phase preserved.
+  expectRejected(await a.request("startMatch", {}), "INVALID_INPUT");
+  assert.equal(a.snapshot().phase, "lobby");
+  // Once D picks, the same all-assigned roster starts.
+  expectAccepted(await d.request("chooseTeam", { team: "runner" }));
+  expectAccepted(await a.request("startMatch", {}));
+  const state = await c.waitFor((s) => s.phase === "playing", "playing");
+  const hunters = Object.values(state.players).filter((p) => p.team === "hunter");
+  const runners = Object.values(state.players).filter((p) => p.team === "runner");
+  assert.equal(hunters.length, 2);
+  assert.equal(runners.length, 2);
+});
+
+test("AC4: balanced 2v2 starts with distinct spawns", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t);
+  const a = await harness.create("A");
+  const b = await harness.join(a.room.roomId, "B");
+  const c = await harness.join(a.room.roomId, "C");
+  const d = await harness.join(a.room.roomId, "D");
+  expectAccepted(await a.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await b.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await c.request("chooseTeam", { team: "runner" }));
   expectAccepted(await d.request("chooseTeam", { team: "runner" }));
   expectRejected(await b.request("startMatch", {}), "HOST_REQUIRED");
   expectAccepted(await a.request("startMatch", {}));
@@ -310,18 +359,46 @@ test("AC4: startMatch requires host and balanced teams; 2v2 starts with distinct
   expectRejected(await a.request("startMatch", {}), "INVALID_PHASE");
 });
 
-test("AC4: balanced 1v1 starts; unassigned player blocks start", { timeout: 15_000 }, async (t) => {
+test("AC4: balanced 1v1 starts; empty side is rejected", { timeout: 15_000 }, async (t) => {
   const harness = await startServer(t);
   const a = await harness.create("A");
   const b = await harness.join(a.room.roomId, "B");
   expectAccepted(await a.request("chooseTeam", { team: "hunter" }));
-  expectRejected(await a.request("startMatch", {}), "TEAMS_UNBALANCED");
+  expectRejected(await a.request("startMatch", {}), "INVALID_INPUT");
   expectAccepted(await b.request("chooseTeam", { team: "hunter" }));
-  expectRejected(await a.request("startMatch", {}), "TEAMS_UNBALANCED");
+  expectRejected(await a.request("startMatch", {}), "INVALID_INPUT");
   expectAccepted(await b.request("chooseTeam", { team: "runner" }));
   expectAccepted(await a.request("startMatch", {}));
   const state = await b.waitFor((s) => s.phase === "playing", "playing");
   assert.notEqual(`${playerOf(state, a.id).x},${playerOf(state, a.id).y}`, `${playerOf(state, b.id).x},${playerOf(state, b.id).y}`);
+});
+
+test("AC4: 3v1 starts and assigns three hunter spawns", { timeout: 15_000 }, async (t) => {
+  const harness = await startServer(t);
+  const a = await harness.create("A");
+  const b = await harness.join(a.room.roomId, "B");
+  const c = await harness.join(a.room.roomId, "C");
+  const d = await harness.join(a.room.roomId, "D");
+  expectAccepted(await a.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await b.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await c.request("chooseTeam", { team: "hunter" }));
+  expectAccepted(await d.request("chooseTeam", { team: "runner" }));
+  expectAccepted(await a.request("startMatch", {}));
+  const state = await d.waitFor((s) => s.phase === "playing", "playing");
+  const hunters = Object.values(state.players).filter((p) => p.team === "hunter");
+  const runners = Object.values(state.players).filter((p) => p.team === "runner");
+  assert.equal(hunters.length, 3);
+  assert.equal(runners.length, 1);
+  const maze = generateMaze(state.mazeSeed);
+  const cells = [...hunters, ...runners].map((p) => `${p.x},${p.y}`);
+  assert.equal(new Set(cells).size, 4, "spawns must be distinct");
+  for (const player of [...hunters, ...runners]) {
+    assert.ok(isWalkableIn(maze, Math.floor(player.x), Math.floor(player.y)));
+    assert.equal(player.lastInputSequence, -1);
+  }
+  const midRow = Math.floor(MAZE_HEIGHT / 2);
+  for (const hunter of hunters) assert.ok(Math.floor(hunter.y) < midRow, "hunters spawn in the top half");
+  for (const runner of runners) assert.ok(Math.floor(runner.y) > midRow, "runners spawn in the bottom half");
 });
 
 test("AC5: B observes A move after A's setDirection; positions stay walkable", { timeout: 15_000 }, async (t) => {

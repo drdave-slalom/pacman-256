@@ -49,7 +49,7 @@ Do not let three AI sessions invent different versions.
 |---|---|---|
 | Combat | Hunters normally eliminate runners by contact; runner-only pickup reverses the outcome for vulnerable hunters. Shields override elimination as documented. | All |
 | Round ending | Opposing-team elimination wins; simultaneous team wipe draws; runners win at 180 seconds if both sides survive. Resolve deadline collisions first. | All |
-| Minimum players/start | Balanced 1v1/2v2; host starts a 3-second countdown; cancel on lost balance; no mid-round joins. | B + C |
+| Minimum players/start | Any roster with ≥1 hunter and ≥1 runner; unbalanced rosters warn but do not block; host starts a 3-second countdown; cancel on lost balance; no mid-round joins. | B + C |
 | Disconnects | Remove disconnected players; empty side loses, both empty sides abandon; transfer lobby host; delete empty rooms. No seamless reconnect. | B |
 | Pickups | Three pickups, server-timed. Use D012/D019/D033-D038 for effects, safe random placement, and respawn rules. | A + B |
 | Touch input | Four-direction buffered turns approved. D-pad versus swipe remains a phone-prototype decision. | A |

@@ -32,10 +32,12 @@ is occupied rather than silently selecting a different URL.
    The lobby shows the room code; **Copy** puts it on the clipboard (if the
    browser blocks clipboard access, the code is shown to share manually).
 3. **Window B:** enter a name, paste the code, and choose **Join**.
-4. Each player picks **Hunters** or **Runners** (at most two per team).
+4. Each player picks **Hunters** or **Runners** (teams have no per-player cap;
+   any size up to the four-player room is allowed).
 5. The host (the room creator, marked in the player list) sees **Start match**
-   and presses it once every player has a team and the teams are balanced (1v1
-   or 2v2). The round starts immediately (no countdown yet).
+   and presses it once every player has picked a team and each team has at least
+   one player. Rosters may be unbalanced (e.g. 3v1) and show a warning only; the
+   round starts immediately (no countdown yet).
 6. Steer with the D-pad, a touch swipe on the play area, or arrow keys/WASD
    (mouse drags do not steer). Both
    windows show every player as a team-colored circle; your own player has a
@@ -53,9 +55,11 @@ Errors are shown on the page, and the UI returns to a usable state:
 - Join: empty or invalid name, missing code, unknown or malformed code
   (`ROOM_NOT_FOUND`), room already has four players (`ROOM_FULL`), match already
   started (`JOIN_CLOSED`), outdated client (`PROTOCOL_MISMATCH`).
-- Lobby: team already has two players (`TEAM_FULL`), unbalanced or unassigned
-  teams (`TEAMS_UNBALANCED`), or no server reply in time. (The server also
-  enforces `HOST_REQUIRED`; non-hosts do not see the Start button.)
+- Lobby: until every player has picked a team and each team has at least one
+  player, the host sees a notice and Start stays disabled. An unbalanced roster
+  (e.g. 3v1) warns but does not block start. Rejections and the "needs one per
+  team"/"every player must pick" messages surface to the player. (The server
+  also enforces `HOST_REQUIRED`; non-hosts do not see the Start button.)
 - Disconnects: a dropped connection or server restart shows a message and returns
   to the join screen. There is no automatic reconnect.
 
@@ -74,8 +78,9 @@ diagnostic room. Integration tests exercise it with real Colyseus SDK clients.
   (not listed for matchmaking), hold up to four players, and admit joins only in
   the lobby phase. A started room that already has four players reports
   `ROOM_FULL`; otherwise a started room reports `JOIN_CLOSED`.
-- **Lobby:** `chooseTeam` allows at most two per team; `startMatch` requires the
-  host and balanced teams with no unassigned players. Replies are `actionResult`
+- **Lobby:** `chooseTeam` has no per-team cap; `startMatch` requires the host,
+  every player assigned to a team, and at least one hunter and one runner
+  (unbalanced rosters are allowed and warn only). Replies are `actionResult`
   messages correlated by `requestId`. A malformed request whose `requestId`
   cannot be read gets an uncorrelated `inputRejected` instead.
 - **Play:** on start the server picks a new maze seed and round ID, syncs them to
@@ -171,7 +176,8 @@ ephemeral local port. They verify shared tuning, protocol guards and validators
 (display names, join options, room messages, error-code mapping), spawn-cell
 placement across many maze seeds, health, state synchronization, and
 incompatible-version rejection. Game-room integration tests (`game-room.test.ts`)
-cover private-room join/failure codes, team selection, host-only balanced start,
+cover private-room join/failure codes, team selection, host-only start with every
+player assigned (unbalanced rosters allowed),
 synchronized movement, input rejection and rate limiting, flood disconnect, and
 host transfer/room disposal. Client unit tests (`apps/client/src/*.test.ts`)
 cover the session model: input dedupe/sequencing/rate budgeting, pending-action
