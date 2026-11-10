@@ -41,13 +41,28 @@
         <p id="lobby-hint"></p>
         <div class="row">
           <button id="start-match" type="button" hidden>Start match</button>
-          <button id="return-lobby" type="button" hidden>Back to lobby</button>
           <button type="button" data-leave>Leave</button>
         </div>
       </section>
 
       <section id="game-panel" aria-label="Match" hidden>
         <div id="game" aria-label="Maze. Steer with the D-pad below, a swipe, or arrow keys / WASD."></div>
+        <div id="hud" class="hud">
+          <span id="hud-phase" class="chip" role="status" aria-live="polite"></span>
+          <span id="hud-timer"></span>
+          <span id="hud-alive">Hunters: <span id="hud-hunters">0</span> · Runners: <span id="hud-runners">0</span></span>
+          <span id="hud-status"></span>
+        </div>
+        <div id="spectator-overlay" class="overlay" role="status" aria-live="polite" hidden>
+          <p id="spectator-text"></p>
+        </div>
+        <div id="results-overlay" class="overlay" role="status" aria-live="assertive" hidden>
+          <p id="results-line"></p>
+          <p id="results-local"></p>
+          <div class="row">
+            <button id="return-lobby" type="button" hidden>Back to lobby</button>
+          </div>
+        </div>
         <div id="dpad" aria-label="On-screen direction pad" role="group">
           <button type="button" data-direction="up" aria-label="Move up"><span aria-hidden="true">▲</span></button>
           <button type="button" data-direction="left" aria-label="Move left"><span aria-hidden="true">◀</span></button>
@@ -55,7 +70,6 @@
           <button type="button" data-direction="down" aria-label="Move down"><span aria-hidden="true">▼</span></button>
         </div>
         <div class="row">
-          <p id="game-status" role="status" aria-live="polite"></p>
           <button type="button" data-leave>Leave</button>
         </div>
       </section>

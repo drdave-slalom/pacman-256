@@ -5,6 +5,7 @@ import {
   CLIENT_MESSAGES,
   CONNECTION_ROOM,
   GAME_ROOM,
+  GAME_RULES,
   MAZE_HEIGHT,
   MAZE_WIDTH,
   MAX_DISPLAY_NAME_LENGTH,
@@ -34,12 +35,19 @@ import {
   DirectionSender,
   PendingAction,
   isPlausibleRoomCode,
-  isRoundActive,
   leaveMessage,
   playerViews,
-  resultSummary,
 } from "./session-model.ts";
 import type { ActionOutcome } from "./session-model.ts";
+import {
+  aliveCounts,
+  canSteer,
+  formatClock,
+  isLocalEliminated,
+  isMazePhase,
+  resultView,
+  roundTimeRemaining,
+} from "./hud-view.ts";
 import { parseAppRoute, serializeAppRoute } from "@maze/shared";
 import type { AppRoute } from "@maze/shared";
 import "./style.css";
@@ -100,7 +108,16 @@ const ui = {
   lobbyNotice: element<HTMLElement>("#lobby-notice"),
   gamePanel: element<HTMLElement>("#game-panel"),
   gameMount: element<HTMLElement>("#game"),
-  gameStatus: element<HTMLElement>("#game-status"),
+  hudPhase: element<HTMLElement>("#hud-phase"),
+  hudTimer: element<HTMLElement>("#hud-timer"),
+  hudHunters: element<HTMLElement>("#hud-hunters"),
+  hudRunners: element<HTMLElement>("#hud-runners"),
+  hudStatus: element<HTMLElement>("#hud-status"),
+  spectatorOverlay: element<HTMLElement>("#spectator-overlay"),
+  spectatorText: element<HTMLElement>("#spectator-text"),
+  resultsOverlay: element<HTMLElement>("#results-overlay"),
+  resultsLine: element<HTMLElement>("#results-line"),
+  resultsLocal: element<HTMLElement>("#results-local"),
   dpadButtons: document.querySelectorAll<HTMLButtonElement>("#dpad button[data-direction]"),
   leaveButtons: document.querySelectorAll<HTMLButtonElement>("[data-leave]"),
   message: element<HTMLElement>("#message"),
@@ -134,6 +151,8 @@ let directionSender = new DirectionSender();
 let heldDirectionTimer: number | undefined;
 let game: Phaser.Game | null = null;
 let renderedLobbyKey = "";
+let renderedHudKey = "";
+let renderedResultsKey = "";
 let messageTimer: number | undefined;
 
 /** Alert-style message for failures; `transient` ones clear themselves. */
@@ -195,7 +214,7 @@ function stopRenderer(): void {
  * budgets it.
  */
 function sendDirection(direction: Direction): void {
-  if (!room || !snapshot || !isRoundActive(snapshot) || !snapshot.players[room.sessionId]?.alive) {
+  if (!room || !snapshot || !canSteer(snapshot, room.sessionId)) {
     return;
   }
   const message = directionSender.next(snapshot.roundId, direction, performance.now());
@@ -212,7 +231,7 @@ function scheduleHeldDirection(): void {
   }
   heldDirectionTimer = window.setTimeout(() => {
     heldDirectionTimer = undefined;
-    if (!room || !snapshot || !isRoundActive(snapshot) || !snapshot.players[room.sessionId]?.alive) {
+    if (!room || !snapshot || !canSteer(snapshot, room.sessionId)) {
       return;
     }
     const message = directionSender.flush(snapshot.roundId, performance.now());
@@ -433,27 +452,30 @@ function setLobbyBusy(busy: boolean): void {
 
 const TEAM_LABELS = { hunter: "Hunters", runner: "Runners", unassigned: "no team yet" } as const;
 
+/** Spectator notice, set only when the overlay is revealed so the polite live region announces it. */
+const SPECTATOR_TEXT = "You were eliminated. Spectating until the round ends.";
+
 function render(): void {
   if (!room || !snapshot) {
     return;
   }
   const localId = room.sessionId;
-  const players = playerViews(snapshot, localId);
-  const local = players.find((player) => player.isLocal);
-  if (isRoundActive(snapshot)) {
+  if (isMazePhase(snapshot)) {
     showView("game");
-    const status =
-      `Room ${snapshot.roomCode} · ${players.length} players · team: ${local ? TEAM_LABELS[local.team] : "not in round"} · you: pulsing white ring`;
-    // A live region: rewriting identical text at patch rate would re-announce it.
-    if (ui.gameStatus.textContent !== status) {
-      ui.gameStatus.textContent = status;
-    }
+    renderGame(snapshot, localId);
     return;
   }
   showView("lobby");
+  renderLobby(snapshot, localId);
+}
+
+function renderLobby(snapshot: GameRoomSnapshot, localId: string): void {
+  renderedHudKey = "";
+  renderedResultsKey = "";
+  const players = playerViews(snapshot, localId);
   const isHost = snapshot.hostPlayerId === localId;
   // Patches arrive ~20 Hz even in the lobby; only touch the DOM when the roster changes.
-  const lobbyKey = JSON.stringify([snapshot.roomCode, snapshot.phase, snapshot.resultWinner, snapshot.resultReason, isHost, players.map((p) => [p.id, p.displayName, p.team, p.isHost])]);
+  const lobbyKey = JSON.stringify([snapshot.roomCode, snapshot.phase, isHost, players.map((p) => [p.id, p.displayName, p.team, p.isHost])]);
   if (lobbyKey === renderedLobbyKey) {
     return;
   }
@@ -468,13 +490,12 @@ function render(): void {
       return item;
     }),
   );
-  const inLobby = snapshot.phase === "lobby";
-  const summary = resultSummary(snapshot);
-  // Teams are locked outside the lobby phase (countdown, results).
-  ui.hunterButton.hidden = !inLobby;
-  ui.runnerButton.hidden = !inLobby;
-  ui.startButton.hidden = !isHost || !inLobby;
-  ui.returnLobbyButton.hidden = !isHost || summary === null;
+  // Lobby-only controls (this function runs only while phase === "lobby").
+  ui.hunterButton.hidden = false;
+  ui.runnerButton.hidden = false;
+  ui.startButton.hidden = !isHost;
+  // Return-to-lobby lives in the results overlay during the results phase.
+  ui.returnLobbyButton.hidden = true;
   const hunters = players.filter((player) => player.team === "hunter").length;
   const runners = players.filter((player) => player.team === "runner").length;
   const unassigned = players.length - hunters - runners;
@@ -482,16 +503,7 @@ function render(): void {
   // Start requires every connected player to have picked and at least one per team.
   const canStart = unassigned === 0 && hunters >= 1 && runners >= 1;
   ui.startButton.disabled = pending.busy || !canStart;
-  if (summary !== null) {
-    // Results phase: the result line owns the hint; no D054 roster warning.
-    ui.lobbyHint.textContent = isHost
-      ? summary
-      : `${summary} Waiting for the host to return to the lobby.`;
-    showNotice("");
-  } else if (!inLobby) {
-    ui.lobbyHint.textContent = `Room phase: ${snapshot.phase}.`;
-    showNotice("");
-  } else if (unassigned > 0) {
+  if (unassigned > 0) {
     ui.lobbyHint.textContent = counterText;
     showNotice(`${unassigned} player${unassigned === 1 ? " hasn't" : "s haven't"} picked a team yet.`);
   } else if (hunters < 1 || runners < 1) {
@@ -503,6 +515,69 @@ function render(): void {
   } else {
     ui.lobbyHint.textContent = counterText;
     showNotice("");
+  }
+}
+
+function renderGame(snapshot: GameRoomSnapshot, localId: string): void {
+  const phase = snapshot.phase;
+  const counts = aliveCounts(snapshot);
+  // One prominent countdown readout lives in the scene (Phaser numeral) while
+  // the HUD timer shows the round clock: its length during countdown, then the
+  // time remaining while playing.
+  const timer =
+    phase === "playing"
+      ? formatClock(roundTimeRemaining(snapshot))
+      : phase === "countdown"
+        ? formatClock(GAME_RULES.roundDurationMs)
+        : "";
+  // The local client always has a roster entry while a maze phase renders; the
+  // server keeps one player record per connected client.
+  const local = snapshot.players[localId]!;
+  const statusText = local.alive
+    ? `you: ${TEAM_LABELS[local.team]}`
+    : "you: eliminated — spectating";
+  // Patch-rate safe: rewrite the HUD only when a derived string changed.
+  const hudKey = JSON.stringify([phase, timer, counts, statusText]);
+  if (hudKey !== renderedHudKey) {
+    renderedHudKey = hudKey;
+    ui.hudPhase.textContent = phase === "countdown" ? "Countdown" : phase === "playing" ? "Playing" : "Results";
+    ui.hudPhase.dataset.phase = phase;
+    ui.hudTimer.textContent = timer;
+    ui.hudHunters.textContent = String(counts.hunter);
+    ui.hudRunners.textContent = String(counts.runner);
+    ui.hudStatus.textContent = statusText;
+  }
+  // Spectator overlay: shown while the local player is eliminated during play.
+  // The notice is set only at reveal so its polite live region announces the
+  // elimination instead of riding on the HUD status.
+  const spectating = phase === "playing" && isLocalEliminated(snapshot, localId);
+  if (spectating) {
+    if (ui.spectatorOverlay.hidden) {
+      ui.spectatorText.textContent = SPECTATOR_TEXT;
+    }
+  } else if (ui.spectatorText.textContent !== "") {
+    ui.spectatorText.textContent = "";
+  }
+  ui.spectatorOverlay.hidden = !spectating;
+  // Results overlay: exactly the server-declared line; host returns to lobby.
+  const result = resultView(snapshot);
+  const isHost = snapshot.hostPlayerId === localId;
+  if (result !== null) {
+    const localEliminated = isLocalEliminated(snapshot, localId);
+    const resultsKey = JSON.stringify([result.line, isHost, localEliminated]);
+    if (resultsKey !== renderedResultsKey) {
+      renderedResultsKey = resultsKey;
+      ui.resultsLine.textContent = result.line + (isHost ? "" : " Waiting for the host to return to the lobby.");
+      ui.resultsLocal.textContent = localEliminated ? "You were eliminated." : "";
+      ui.returnLobbyButton.hidden = !isHost;
+    }
+  } else {
+    renderedResultsKey = "";
+  }
+  ui.resultsOverlay.hidden = result === null;
+  const steerable = canSteer(snapshot, localId);
+  for (const button of ui.dpadButtons) {
+    button.disabled = !steerable;
   }
 }
 

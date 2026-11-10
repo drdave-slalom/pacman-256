@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { MAZE_HEIGHT, MAZE_WIDTH, generateMaze, isWalkableIn } from "@maze/shared";
 import type { Direction, GameRoomSnapshot, PlayerTeam } from "@maze/shared";
+import { countdownRemaining } from "./hud-view.ts";
 import { Interpolator, mazeKey, playerViews } from "./session-model.ts";
 
 export const TILE_SIZE = 32;
@@ -131,6 +132,7 @@ export class MazeScene extends Phaser.Scene {
   private readonly interpolator = new Interpolator();
   private readonly mascots = new Map<string, Mascot>();
   private localRing!: Phaser.GameObjects.Arc;
+  private countdownText!: Phaser.GameObjects.Text;
   private dragPointerId: number | null = null;
   private dragAccum = { x: 0, y: 0 };
   private dragLast = { x: 0, y: 0 };
@@ -156,6 +158,18 @@ export class MazeScene extends Phaser.Scene {
       yoyo: true,
       repeat: -1,
     });
+    this.countdownText = this.add
+      .text(0, 0, "", {
+        fontFamily: "system-ui, sans-serif",
+        fontSize: "72px",
+        color: "#eef4ff",
+        stroke: "#05060a",
+        strokeThickness: 8,
+      })
+      .setOrigin(0.5)
+      .setDepth(20)
+      .setVisible(false);
+    this.countdownText.setPosition((MAZE_WIDTH * TILE_SIZE) / 2, (MAZE_HEIGHT * TILE_SIZE) / 2);
     this.setupSwipeSteering();
     this.setupKeyboardSteering();
   }
@@ -196,12 +210,19 @@ export class MazeScene extends Phaser.Scene {
       const y = position.y * TILE_SIZE;
       this.updateFacing(mascot, x, y);
       mascot.container.setPosition(x, y);
+      // Eliminated players keep rendering but dimmed (spectator view).
+      mascot.container.setAlpha(view.alive ? 1 : 0.35);
       if (view.isLocal) {
         this.localRing.setPosition(x, y);
-        localShown = true;
+        localShown = view.alive;
       }
     }
     this.localRing.setVisible(localShown);
+    if (snapshot.phase === "countdown") {
+      this.countdownText.setText(String(countdownRemaining(snapshot))).setVisible(true);
+    } else {
+      this.countdownText.setVisible(false);
+    }
     for (const [id, mascot] of this.mascots) {
       if (!present.has(id)) {
         mascot.container.destroy();

@@ -193,6 +193,80 @@ input {
   margin: 0 0 0.5rem;
 }
 
+.hud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+  margin: 0.5rem 0;
+  font-size: 0.95rem;
+}
+
+.chip {
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid #7be6d6;
+  color: #7be6d6;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.8rem;
+}
+
+#hud-phase[data-phase="countdown"] {
+  border-color: #ffd23f;
+  color: #ffd23f;
+}
+
+#hud-phase[data-phase="playing"] {
+  border-color: #7be6d6;
+  color: #7be6d6;
+}
+
+#hud-phase[data-phase="results"] {
+  border-color: #c084fc;
+  color: #c084fc;
+}
+
+#hud-timer {
+  font-family: ui-monospace, monospace;
+  font-size: 1.1rem;
+}
+
+.overlay {
+  margin: 0.5rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid #22304f;
+  border-radius: 0.75rem;
+  background: #0b1224;
+}
+
+.overlay p {
+  margin: 0;
+}
+
+#spectator-overlay {
+  border-color: #7fe9ff;
+}
+
+#results-overlay {
+  border-color: #ffd23f;
+}
+
+#results-local {
+  color: #9aa3b5;
+}
+
+#dpad button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: #1c2740;
+  border-color: #33415f;
+}
+
+#dpad button:disabled:active {
+  background: #1c2740;
+}
+
 #game-panel #dpad {
   margin: 0.5rem 0 1rem;
 }
