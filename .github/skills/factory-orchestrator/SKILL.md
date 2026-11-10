@@ -53,7 +53,11 @@ Ticket / spec / ask
    `SPEC/<task-id>-<slug>.md`, each covering goal, scope, out-of-scope,
    assumptions, acceptance criteria, and validation. If the ask is
    underspecified, propose acceptance criteria and confirm before delegating.
-   Each spec is handed to the matching role agent. Do not skip this.
+   Each spec is handed to the matching role agent. Before delegating, ensure
+   the spec exists at its stated path inside each assigned worktree: create
+   the worktree from a base commit containing the spec, or copy the uncommitted
+   spec from the Lead's checkout into the worktree after creation. Do not skip
+   this.
 2. **Break down.** Slice into bounded units, each with: objective/scope,
    required inputs and paths, acceptance criteria, validation commands,
    expected handoff, and an escalation boundary. One unit = one file-surface
