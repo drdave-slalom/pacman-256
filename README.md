@@ -5,8 +5,10 @@ Original mobile-web maze-chase workshop project. T1 shipped a runnable skeleton
 T2 adds the first gameplay slice in the client: a neon-styled maze generated at
 the start of every game (seeded, deterministic), continuous movement with
 buffered turns and wall collisions, and D-pad / swipe / keyboard steering.
-Private rooms, synchronized multiplayer movement, and combat remain later tasks
-(T3+).
+T3 groundwork in `packages/shared` adds the private-room wire protocol
+validators and deterministic team spawn cells; the server room and client
+integration are not part of this README's runnable flow yet. Synchronized
+multiplayer movement and combat remain later tasks.
 
 ## Requirements and quick start
 
@@ -86,8 +88,10 @@ npm run check
 ```
 
 Tests use Node's built-in runner and real HTTP/WebSocket connections on an
-ephemeral local port. They verify shared tuning, protocol guards, health, state
-synchronization, and incompatible-version rejection. `npm test` also runs the
+ephemeral local port. They verify shared tuning, protocol guards and validators
+(display names, join options, room messages, error-code mapping), spawn-cell
+placement across many maze seeds, health, state synchronization, and
+incompatible-version rejection. `npm test` also runs the
 tests for the staged-documentation update script
 (`scripts/update-staged-docs.test.mjs`) and the software-factory smoke tests
 (`scripts/factory-smoke.test.mjs`). No cloud account is required.
@@ -135,7 +139,7 @@ in GitHub branch protection/rulesets; the workflow alone does not enforce that.
 |---|---|
 | [apps/client](./apps/client/) | Phaser/Vite browser client and local proxy |
 | [apps/server](./apps/server/) | Colyseus server, diagnostic room, and integration tests |
-| [packages/shared](./packages/shared/) | Browser/server protocol, types, and approved tuning |
+| [packages/shared](./packages/shared/) | Browser/server protocol (room messages, validators, error codes), types, maze/spawn logic, and approved tuning |
 | [Game contract](./docs/GAME-CONTRACT.md) | Approved behavior and interface baseline |
 | [Decision log](./docs/DECISIONS.md) | Durable team decisions and implementation context |
 | [Delivery plan](./DELIVERY-PLAN.md) | Task boundaries and milestones |
