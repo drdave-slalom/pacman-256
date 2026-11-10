@@ -5,6 +5,9 @@ for pacman-256. It defines how we break work into bounded units and distribute
 it across role-specific subagents running locally in **Herdr** (Pi Herdsman),
 with a human Lead owning acceptance and integration.
 
+**Lead sessions should load the `factory-orchestrator` skill** (`.agents/skills/factory-orchestrator/SKILL.md`)
+to run this workflow; it is the executable form of this guide.
+
 The factory is a *process*, not a machine: agents are proposals that produce
 evidence and handoffs; people stay responsible. It complements the GitHub
 Actions CI (which validates pushed code) by doing the per-task work locally:
