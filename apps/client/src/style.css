@@ -46,3 +46,49 @@ button {
 #status {
   overflow-wrap: anywhere;
 }
+
+#dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 56px);
+  grid-template-rows: repeat(3, 56px);
+  gap: 0.5rem;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+#dpad button[data-direction="up"] {
+  grid-area: 1 / 2;
+}
+
+#dpad button[data-direction="left"] {
+  grid-area: 2 / 1;
+}
+
+#dpad button[data-direction="right"] {
+  grid-area: 2 / 3;
+}
+
+#dpad button[data-direction="down"] {
+  grid-area: 2 / 2;
+}
+
+#dpad button {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 12px;
+  border: 2px solid #7be6d6;
+  background: #2c4672;
+  color: #eef4ff;
+  font-size: 22px;
+  line-height: 1;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+}
+
+#dpad button:active {
+  background: #3d5a94;
+}

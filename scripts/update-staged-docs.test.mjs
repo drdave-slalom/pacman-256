@@ -3,6 +3,7 @@ import test from "node:test";
 import {
     applyTaskStatusUpdates,
     containsLikelySecret,
+    detectDocsBackend,
     getDocumentationPlan,
     parseCopilotResponse,
     readTaskStatuses,
@@ -115,4 +116,38 @@ test("Project Brief updates are confined to the managed status block", () => {
         updates: [{ path: "PROJECT-BRIEF.md", content: "<!-- auto-doc-status:start -->\n- T1: Done.\n<!-- auto-doc-status:end -->\n" }],
     }, ["PROJECT-BRIEF.md"], { "PROJECT-BRIEF.md": original }), /without boundary markers/);
     assert.throws(() => replaceManagedStatusBlock(original, ""), /empty or contains boundary markers/);
+});
+
+test("docs backend selection honors Pi session environment and DOCS_LLM override", () => {
+    const saved = {
+        DOCS_LLM: process.env.DOCS_LLM,
+        PI_CODING_AGENT: process.env.PI_CODING_AGENT,
+        HERDR_BIN_PATH: process.env.HERDR_BIN_PATH,
+    };
+    try {
+        delete process.env.DOCS_LLM;
+        delete process.env.PI_CODING_AGENT;
+        delete process.env.HERDR_BIN_PATH;
+        assert.equal(detectDocsBackend(), "copilot");
+        process.env.PI_CODING_AGENT = "1";
+        assert.equal(detectDocsBackend(), "pi");
+        delete process.env.PI_CODING_AGENT;
+        process.env.HERDR_BIN_PATH = "/tmp/herdr";
+        assert.equal(detectDocsBackend(), "pi");
+        delete process.env.HERDR_BIN_PATH;
+        process.env.DOCS_LLM = "copilot";
+        assert.equal(detectDocsBackend(), "copilot");
+        process.env.DOCS_LLM = "PI";
+        assert.equal(detectDocsBackend(), "pi");
+        process.env.DOCS_LLM = "anthropic";
+        assert.throws(() => detectDocsBackend(), /Unknown DOCS_LLM backend/);
+    } finally {
+        for (const [key, value] of Object.entries(saved)) {
+            if (value === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = value;
+            }
+        }
+    }
 });
