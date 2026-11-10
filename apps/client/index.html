@@ -7,26 +7,90 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     />
     <meta name="theme-color" content="#10172b" />
-    <title>Maze Workshop - Maze + Touch Prototype</title>
+    <meta
+      name="description"
+      content="Maze Workshop — mobile lobby and maze-chase touch prototype."
+    />
+    <title>Maze Workshop — Mobile Lobby</title>
   </head>
   <body>
     <main>
-      <h1>Maze Workshop</h1>
-      <p>
-        T2 prototype: a new maze is generated every game. Steer with the
-        on-screen D-pad or swipe on the maze. Arrow keys / WASD also work.
-        The connection check is below.
-      </p>
-      <div id="game" aria-label="Maze movement prototype"></div>
-      <div id="dpad" aria-label="On-screen direction pad" role="group">
-        <button type="button" data-direction="up" aria-label="Move up"><span aria-hidden="true">▲</span></button>
-        <button type="button" data-direction="left" aria-label="Move left"><span aria-hidden="true">◀</span></button>
-        <button type="button" data-direction="right" aria-label="Move right"><span aria-hidden="true">▶</span></button>
-        <button type="button" data-direction="down" aria-label="Move down"><span aria-hidden="true">▼</span></button>
-      </div>
-      <p id="seed" role="status" aria-live="polite"></p>
-      <button id="connect" type="button">Check server connection</button>
-      <p id="status" role="status" aria-live="polite">Ready to connect.</p>
+      <header class="brand">
+        <h1>Maze Workshop</h1>
+        <p class="tagline">
+          Original mobile maze-chase prototype. Create a private room or join by
+          code; until the multiplayer room lands (T3), use the local maze demo.
+        </p>
+      </header>
+
+      <section id="lobby" aria-label="Lobby" class="panel">
+        <label class="field">
+          <span>Display name</span>
+          <!-- maxlength mirrors DISPLAY_NAME_MAX_LENGTH in
+               packages/shared/src/index.ts; lobby.ts also derives it at runtime. -->
+          <input
+            id="display-name"
+            type="text"
+            autocomplete="nickname"
+            maxlength="16"
+            placeholder="Your name"
+            spellcheck="false"
+          />
+        </label>
+
+        <div class="actions">
+          <button id="create-room" type="button">Create Room</button>
+        </div>
+
+        <div class="actions join">
+          <input
+            id="room-code"
+            type="text"
+            inputmode="text"
+            autocapitalize="characters"
+            autocomplete="off"
+            maxlength="24"
+            placeholder="Room code"
+            aria-label="Room code"
+          />
+          <button id="join-room" type="button">Join</button>
+        </div>
+
+        <div class="actions">
+          <button id="local-play" type="button" class="secondary">
+            Enter prototype maze
+          </button>
+        </div>
+
+        <p id="lobby-status" class="status" role="status" aria-live="polite"></p>
+
+        <section class="connection-note" aria-label="Server connection check">
+          <div class="actions">
+            <button id="connect" type="button" class="secondary">
+              Check server connection
+            </button>
+          </div>
+          <p id="status" class="status" role="status" aria-live="polite">
+            Ready to connect.
+          </p>
+        </section>
+      </section>
+
+      <section id="game-area" aria-label="Game area" hidden>
+        <div id="game" aria-label="Maze movement prototype"></div>
+        <p id="seed" class="status" role="status" aria-live="polite"></p>
+        <div id="dpad" aria-label="On-screen direction pad" role="group">
+          <button type="button" data-direction="up" aria-label="Move up"><span aria-hidden="true">▲</span></button>
+          <button type="button" data-direction="left" aria-label="Move left"><span aria-hidden="true">◀</span></button>
+          <button type="button" data-direction="right" aria-label="Move right"><span aria-hidden="true">▶</span></button>
+          <button type="button" data-direction="down" aria-label="Move down"><span aria-hidden="true">▼</span></button>
+        </div>
+        <div class="actions">
+          <button id="leave-game" type="button" class="secondary">
+            Back to lobby
+          </button>
+        </div>
+      </section>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

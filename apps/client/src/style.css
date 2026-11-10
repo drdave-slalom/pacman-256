@@ -92,3 +92,108 @@ button {
 #dpad button:active {
   background: #3d5a94;
 }
+
+/* Lobby-first UI (T4). The lobby and the game area are shown/hidden together;
+ * both stay within the same dark neon theme as the maze. */
+
+.brand h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  letter-spacing: 0.04em;
+}
+
+.brand .tagline {
+  color: #9fb2d9;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  margin: 0.5rem 0 0;
+}
+
+.panel {
+  background: rgba(16, 23, 43, 0.6);
+  border: 1px solid #223356;
+  border-radius: 16px;
+  padding: 1.25rem;
+  margin-top: 1.25rem;
+}
+
+.field {
+  display: block;
+}
+
+.field span {
+  display: block;
+  margin-bottom: 0.4rem;
+  color: #9fb2d9;
+  font-size: 0.9rem;
+}
+
+input[type="text"] {
+  width: 100%;
+  min-height: 48px;
+  box-sizing: border-box;
+  padding: 0.7rem 0.9rem;
+  font: inherit;
+  color: #eef4ff;
+  background: #0b1224;
+  border: 1px solid #2c4672;
+  border-radius: 10px;
+  outline: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+input[type="text"]:focus {
+  border-color: #7be6d6;
+}
+
+input[type="text"]::placeholder {
+  color: #5b6f96;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.actions button {
+  flex: 1 1 8rem;
+}
+
+.actions.join input {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+button.secondary {
+  background: #16233f;
+  border: 1px solid #2c4672;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.status {
+  overflow-wrap: anywhere;
+  font-size: 0.95rem;
+  color: #cfdcf5;
+}
+
+#lobby-status {
+  min-height: 1.2em;
+  margin: 1rem 0 0;
+}
+
+.connection-note {
+  margin-top: 1.25rem;
+  border-top: 1px solid #223356;
+  padding-top: 1rem;
+}
+
+#game-area {
+  margin-top: 1.5rem;
+}

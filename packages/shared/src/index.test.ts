@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  DISPLAY_NAME_MAX_LENGTH,
+  GAME_ROOM,
   GAME_RULES,
+  JOIN_ERROR_CODES,
   PROTOCOL_VERSION,
+  describeJoinError,
   isConnectionState,
+  isJoinErrorCode,
   isProtocolCompatible,
+  isValidDisplayName,
 } from "./index.ts";
 
 test("protocol compatibility requires an exact numeric version", () => {
@@ -27,6 +33,86 @@ test("connection state requires a compatible server lobby snapshot", () => {
   ]) {
     assert.equal(isConnectionState(value), false);
   }
+});
+
+test("lobby room name targets the shared game room contract", () => {
+  assert.equal(GAME_ROOM, "game-room");
+});
+
+test("display name validation accepts trimmed bounded names without control chars", () => {
+  assert.equal(isValidDisplayName("Alice"), true);
+  assert.equal(isValidDisplayName("  Alice  "), true);
+  assert.equal(isValidDisplayName("A".repeat(DISPLAY_NAME_MAX_LENGTH)), true);
+  assert.equal(isValidDisplayName("🔥"), true);
+  assert.equal(isValidDisplayName(""), false);
+  assert.equal(isValidDisplayName("   "), false);
+  assert.equal(
+    isValidDisplayName("A".repeat(DISPLAY_NAME_MAX_LENGTH + 1)),
+    false,
+  );
+  assert.equal(isValidDisplayName("Ali\tce"), false);
+  assert.equal(isValidDisplayName("Ali\nce"), false);
+  assert.equal(isValidDisplayName("Ali\u0000ce"), false);
+  assert.equal(isValidDisplayName("Ali\u007fce"), false);
+  assert.equal(isValidDisplayName("Ali\u0085ce"), false);
+  assert.equal(isValidDisplayName(42), false);
+  assert.equal(isValidDisplayName(null), false);
+  assert.equal(isValidDisplayName(undefined), false);
+});
+
+test("join error code set covers the contract's visible join/login codes", () => {
+  for (const code of Object.values(JOIN_ERROR_CODES)) {
+    assert.equal(isJoinErrorCode(code), true);
+  }
+  assert.equal(isJoinErrorCode("NOT_A_CODE"), false);
+  assert.equal(isJoinErrorCode(520), false);
+  assert.equal(isJoinErrorCode(undefined), false);
+});
+
+test("describeJoinError maps contract codes and matchmaking numbers", () => {
+  assert.match(describeJoinError(JOIN_ERROR_CODES.ROOM_NOT_FOUND), /not found/i);
+  assert.match(describeJoinError(JOIN_ERROR_CODES.ROOM_FULL), /full/i);
+  assert.match(
+    describeJoinError(JOIN_ERROR_CODES.PROTOCOL_MISMATCH),
+    /protocol/i,
+  );
+  assert.match(describeJoinError(JOIN_ERROR_CODES.RATE_LIMITED), /too many/i);
+
+  // Numeric Colyseus matchmaking codes (neutral copy that stays accurate after
+  // T3 lands).
+  const matchmakeTable: Array<[number, RegExp]> = [
+    [520, /room service not available/i],
+    [521, /no matching room/i],
+    [522, /room not found on the server/i],
+    [523, /could not handle/i],
+    [524, /expired/i],
+    [525, /credentials/i],
+    [526, /application error/i],
+    [4217, /payload/i],
+  ];
+  for (const [code, pattern] of matchmakeTable) {
+    assert.match(describeJoinError(code), pattern, `code ${code}`);
+  }
+  assert.match(describeJoinError("520"), /room service not available/i);
+  assert.match(describeJoinError("522"), /room not found on the server/i);
+
+  // A known numeric code takes precedence over a message that embeds a
+  // different contract code (numeric mapping is consulted before the message
+  // scan).
+  assert.match(
+    describeJoinError(522, "ROOM_FULL: try another room"),
+    /room not found on the server/i,
+  );
+
+  // Message-embedded contract codes are recognized (e.g. connection-room's
+  // "PROTOCOL_MISMATCH: reload with a compatible client.").
+  assert.match(
+    describeJoinError(400, "PROTOCOL_MISMATCH: reload with a compatible client."),
+    /protocol/i,
+  );
+
+  assert.match(describeJoinError("WAT"), /could not join/i);
+  assert.equal(describeJoinError(), "Could not join the room. Try again.");
 });
 
 test("shared tuning matches the approved initial timing", () => {

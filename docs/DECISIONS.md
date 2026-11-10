@@ -225,3 +225,37 @@ T1 subsequently received go-ahead in D045; later tasks remain separate.
 - Before implementation, agree the shared game-state/message contract and acceptance checks.
 - These files are local until committed and pushed through the team's normal review process.
   Do not assume other teammates have received an uncommitted update.
+
+## T4 implementation context (not new gameplay decisions)
+
+- Scope confirmed 2026-11-10: T4 is the client-side mobile lobby and local-network
+  phone access unit; the server room + movement sync is T3 (separate unit) and
+  is intentionally not implemented here. T4 deliverables landed on a lobby-first
+  screen: display name, create room, join by code, a clearly labeled local
+  prototype-maze fallback, and the existing diagnostic connection check.
+- Shared protocol additions in `packages/shared/src/index.ts`: `GAME_ROOM =
+  "game-room"` (the room name T3's server must register), `DISPLAY_NAME_MAX_LENGTH`
+  (16), `JOIN_ERROR_CODES` (the eleven contract section-7 codes), `isJoinErrorCode`,
+  `isValidDisplayName`, and `describeJoinError` (maps contract codes, Colyseus
+  matchmaking numeric codes 520-526/4217, and embedded-code messages).
+- T3 integration seam: the client always creates/joins `GAME_ROOM` with the
+  contract payload (`protocolVersion` + `displayName`; join via
+  `client.joinById(code, …)`). Failures render through `describeJoinError`;
+  a successful create/join transitions to the game area (`enterRoom` →
+  `onEnterGame`). Nothing is faked; today's missing server room surfaces the
+  visible "room service not available yet" copy.
+- Validation: `npm run check` green (42 shared/server tests + 13 docs/factory
+  tests + builds). QA ran a two-client LAN simulation against the dev stack
+  (`ws://10.4.48.184:5173/multiplayer`): both clients synced the diagnostic
+  room; create/join rejections were observed (520/522) and mapped to the UI
+  copy. Physical-phone rendering/steering verification remains pending (no
+  device in-environment). Independent pr-reviewer review completed with fixes
+  applied: keyboard capture no longer interferes with lobby inputs, neutral
+  matchmaking error copy, local-play race guard, focus handling, single-sourced
+  name limit, extended error-mapping tests, pause/resume of the hidden maze
+  scene.
+- Pre-commit docs-hook note: the hook's LLM backends were unavailable in the
+  delivery environment (Copilot CLI quota exhausted; headless `pi` docs agent
+  timed out). The plan/brief status sync and this entry were recorded manually;
+  a future commit in an environment with a working docs backend can reconcile
+  the brief block automatically.

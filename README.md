@@ -2,11 +2,12 @@
 
 Original mobile-web maze-chase workshop project. T1 shipped a runnable skeleton
 (Phaser rendering, a Colyseus connection check, shared protocol/rule constants).
-T2 adds the first gameplay slice in the client: a neon-styled maze generated at
+T2 added the first gameplay slice in the client: a neon-styled maze generated at
 the start of every game (seeded, deterministic), continuous movement with
 buffered turns and wall collisions, and D-pad / swipe / keyboard steering.
-Private rooms, synchronized multiplayer movement, and combat remain later tasks
-(T3+).
+T4 adds the mobile-first lobby: display name, create/join private rooms by code,
+and a clearly labeled prototype-maze fallback. Private rooms, synchronized
+multiplayer movement, and combat remain later tasks (T3+/T5).
 
 ## Requirements and quick start
 
@@ -20,12 +21,15 @@ npm ci
 npm run dev
 ```
 
-Open **http://localhost:5173**. You should see a newly generated neon maze with
-a player blob you can steer (D-pad, swipe, or arrow keys/WASD; a maze seed is
-shown for reproducibility). A **Check server connection** button remains below:
-clicking it must report `Connected: shared protocol v1, authoritative lobby
-state received.` The check creates a disposable diagnostic room and leaves it;
-it does not create a playable private match.
+Open **http://localhost:5173**. The page opens on the lobby: enter a display
+name, then create a room, join by code, or tap **Enter prototype maze** for the
+local maze demo (D-pad, swipe, or arrow keys/WASD; a maze seed is shown for
+reproducibility). Because the server room lands with T3, create/join currently
+report a visible "not available yet (T3 integration pending)" message — they
+are never faked. A **Check server connection** button remains below: clicking it
+must report `Connected: shared protocol v1, authoritative lobby state received.`
+The check creates a disposable diagnostic room and leaves it; it does not create
+a playable private match.
 
 One command starts shared-package compilation in watch mode, the server, and Vite.
 Press Ctrl+C to stop all three. The client port is strict: startup fails if 5173
@@ -54,14 +58,25 @@ committing implementation changes. `npm ci` installs the hook in a local clone
 staged changes. If Copilot fails or returns an invalid update, the commit is
 stopped. Review generated documentation before completing the commit.
 
-## Phone access over the local network
+## Two-phone verification over the local network (T4)
 
-1. Connect the development machine and phones to the same trusted Wi-Fi.
+The demo target is two phones on the same trusted Wi-Fi, coordinated by a single
+server running on one machine. Until the multiplayer room ships (T3), verify the
+lobby UI and the local prototype maze on both phones; create/join will surface the
+visible "not available yet" message rather than complete.
+
+Two-phone steps:
+
+1. Start the dev server on the machine (`npm run dev`).
 2. Find the machine's LAN address in network settings, or use the Network URL
    printed by Vite.
-3. Open `http://<machine-LAN-IP>:5173` on the phone and run the connection check.
-   Do **not** use `localhost` on a phone; that addresses the phone itself.
-4. Repeat on each target browser. This skeleton has not yet been verified on
+3. Connect both phones to the **same trusted Wi-Fi** as the machine.
+4. On each phone open `http://<machine-LAN-IP>:5173`. Do **not** use
+   `localhost` on a phone; that addresses the phone itself.
+5. On each phone: enter a display name and tap **Enter prototype maze** to verify
+   the maze and touch controls. Tap **Check server connection**; it must report
+   `Connected: shared protocol v1, authoritative lobby state received.`
+6. Repeat on each target browser. This skeleton has not yet been verified on
    physical iOS/Android devices.
 
 Vite listens on `0.0.0.0`. It proxies `/multiplayer` HTTP and WebSocket traffic to
@@ -70,10 +85,39 @@ browser-origin URL avoids hardcoded hostnames and mixed-content WebSockets.
 `PORT=2568 npm run dev` changes the backend port and the proxy target together.
 
 Allow inbound traffic for the development server if prompted by the OS firewall.
-Guest/workshop Wi-Fi may isolate devices: use a permitted shared network/hotspot
-if phones cannot reach the machine. Do not disable your firewall or expose this
-development server to the public internet. HTTP/LAN access is for local testing,
-not production hosting or validation of HTTPS-only browser features.
+Guest/workshop Wi-Fi often isolates devices: use a permitted shared network/
+hotspot if phones cannot reach the machine. Do not disable your firewall or
+expose this development server to the public internet. HTTP/LAN access is for
+local testing, not production hosting or validation of HTTPS-only browser
+features.
+
+## Coordination model
+
+The deployment target is a single server with a public endpoint: clients connect
+to that server, which owns private rooms and gameplay truth. The server is the
+single source of coordination; there is no peer-to-peer path. Local LAN simulation
+is the development stand-in — one machine runs the server and phones reach it via
+the LAN IP above. These documented LAN steps suffice for now; cloud hosting choice
+remains deferred (D031).
+
+## T3 integration note
+
+T4's lobby already targets the shared room contract so the multiplayer room can
+land without client rework:
+
+- The client creates/joins the shared room name `GAME_ROOM` (`"game-room"`) with
+  payload `{ protocolVersion: PROTOCOL_VERSION, displayName }`; join sends the
+  room code through `client.joinById(code, ...)`.
+- Failures are mapped through the shared `describeJoinError` helper to the
+  contract's visible error codes (see `docs/GAME-CONTRACT.md` section 7) and to
+  Colyseus matchmaking codes until T3 exists.
+- Until the server hosts `GAME_ROOM`, create/join show a visible "not available
+  yet (T3 integration pending)" message, and the prototype maze remains playable
+  via **Enter prototype maze**.
+- T3 must register a server room named `GAME_ROOM` that accepts create/join with
+  `protocolVersion` + `displayName`, validates them, and publishes the contract
+  state; the client's entry branch (transition to the game area) is already in
+  place.
 
 ## Validation
 
