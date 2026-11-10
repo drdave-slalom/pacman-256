@@ -174,7 +174,16 @@ class MazeScene extends Phaser.Scene {
   }
 
   private setupSwipeSteering(): void {
+    const isTouch = (pointer: Phaser.Input.Pointer): boolean => {
+      const event = pointer.event as Partial<PointerEvent>;
+      return event.pointerType === "touch" || event.type?.startsWith("touch") === true;
+    };
+
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      // Swipe steering is touch-only; the mouse never steers the player.
+      if (!isTouch(pointer)) {
+        return;
+      }
       const overPad = this.input
         .hitTestPointer(pointer)
         .some((target) => target.getData("dpad") === true);
