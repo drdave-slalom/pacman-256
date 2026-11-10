@@ -89,7 +89,7 @@ Per-unit tracking lives in GitHub Issues (scoping profile tracker: `github`, D05
 | T3 | Complete | — | Private rooms and synchronized movement / B | 2–3 h | T1 | Two clients join one room and see each other move; invalid/full room errors are visible; server rejects invalid input. Manually verified complete (PR #19, two-client LAN). |
 | T4 | Complete | — | Mobile lobby and local-network phone access / C lane | 2 h | T1 | Create/join UI reaches the local server from two phones on the same network; document startup, address and firewall/network requirements. Integrate with T3 when ready. Hosting/CI follow later. Manually verified complete (PR #21, LAN rejoin smoke). |
 | T5 | Implemented; validation pending | [#28](https://github.com/drdave-slalom/pacman-256/issues/28) | Countdown, baseline contact elimination, and team round end / B lane | 3–4 h | T0, T3 | Authoritative rules complete a round; eliminated players cannot act; timeout, simultaneous team elimination, and disconnect outcomes have tests. T7 adds vulnerability reversal. Spec: [SPEC/T5](./SPEC/T5-countdown-contact-round-end.md). |
-| T6 | Not started | [#29](https://github.com/drdave-slalom/pacman-256/issues/29) | Match HUD, spectating, and results / A | 2–3 h | T2, T3 | UI reflects server round state, time, alive players, elimination, and results; it never guesses the winner. Integrate with T5. Includes T5 results follow-ups (wording, screen-reader announcement, disconnect-win wording); see [SPEC/T5 follow-ups](./SPEC/T5-countdown-contact-round-end.md#follow-ups-open-after-t5-review-and-qa). |
+| T6 | Complete | [#29](https://github.com/drdave-slalom/pacman-256/issues/29) | Match HUD, spectating, and results / A | 2–3 h | T2, T3 | UI reflects server round state, time, alive players, elimination, and results; it never guesses the winner. Integrate with T5. Includes T5 results follow-ups (wording, screen-reader announcement, disconnect-win wording); see [SPEC/T5 follow-ups](./SPEC/T5-countdown-contact-round-end.md#follow-ups-open-after-t5-review-and-qa). |
 | T7 | Not started | [#30](https://github.com/drdave-slalom/pacman-256/issues/30) | Three pickups and conditional contact combat / A + B lanes | Re-estimate before starting; original 1–2 h each covered only two effects | T5, T6 | Speed, shield, and runner-only vulnerability can be acquired and displayed; server controls effects. Tests cover vulnerability reversal, hunter shield override/expiry, runner protection, post-window respawn, and team victory. |
 | T8 | Not started | [#31](https://github.com/drdave-slalom/pacman-256/issues/31) | Four-player integration and failure checks / C, all playtest | 2–3 h | T4, T5, T6, T7 | Four devices finish repeated rounds; invalid joins, room cleanup, disconnects, and orientation changes have recorded outcomes. |
 | T9 | Not started | [#32](https://github.com/drdave-slalom/pacman-256/issues/32) | Mobile feel and restrained visual polish / A | 2 h | T8 | Agreed phone/browser matrix passes; controls stay usable; original visuals remain readable; optional depth effects do not hurt play. |
@@ -179,9 +179,12 @@ verification; it mirrors the view in the URL hash (`#room=<code>` reopens the
 room with the saved display name), documents the coordination model and
 firewall/network requirements, and drops the pre-T3 offline prototype fallback.
 T2-T4 were manually verified complete on 2026-11-10 (D053). T5 (countdown,
-baseline contact elimination, team round end) is implemented against
-[SPEC/T5](./SPEC/T5-countdown-contact-round-end.md) and awaits PR review and
-David's spec approval; its results/return UI is T6. T6-T11 remain not started. Run the
+baseline contact elimination, team round end) merged in PR #26. T6 (match
+HUD, spectating, and results, [SPEC/T6](./SPEC/T6-match-hud-spectate-results.md))
+is complete in PR #27: the client reflects server round state, time, alive
+players, elimination, and results, and never guesses the winner; automated
+unit + fast-clock integration tests cover countdown→playing→results. T7-T11
+remain not started. Run the
 [README two-browser walkthrough](./README.md#two-browser-walkthrough) to review T3/T4.
 David coordinates contract changes; Chase reviews.
 Local-server validation precedes cloud work. Confirm actual test devices and

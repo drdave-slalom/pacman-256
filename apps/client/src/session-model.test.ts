@@ -255,7 +255,7 @@ test("result summary reports the server winner and reason", () => {
     ["runner", "teamEliminated", "Round over: Runners win: all hunters eliminated."],
     ["runner", "timeout", "Round over: Runners win: survived to the deadline."],
     ["none", "simultaneousWipe", "Round over: Draw: both teams eliminated at once."],
-    ["none", "abandoned", "Round over: no winner: all players left."],
+    ["none", "abandoned", "Round over: No winner: all players left."],
   ] as const;
   for (const [resultWinner, resultReason, expected] of cases) {
     assert.equal(resultSummary(snapshot({ phase: "results", resultWinner, resultReason })), expected);
