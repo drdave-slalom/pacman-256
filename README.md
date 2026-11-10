@@ -53,17 +53,14 @@ is occupied rather than silently selecting a different URL.
    updates. A hunter touching a runner
    eliminates the runner; eliminated players stop moving and their input is
    ignored. The round ends when a team is eliminated or at the 180-second deadline
-   (runners win). During countdown/playing/results the game view shows the match
-   HUD (phase chip, round timer, alive hunter/runner counts, your team or
-   eliminated status) and a large countdown numeral over the maze during the
-   countdown. The D-pad is disabled whenever you cannot steer (countdown, results,
-   or eliminated). An eliminated local player is dimmed and sees a spectator
-   overlay while the round continues. In the results phase the maze stays visible
-   and a results overlay shows a one-line result taken from the server's
-   `resultWinner`/`resultReason` (never inferred locally); the host gets a
-   **Back to lobby** button that sends `returnToLobby` (teams kept), and non-hosts
-   see the result and wait for the host. Team buttons and Start are shown only in
-   the lobby phase.
+   (runners win). In the results phase the lobby panel shows a one-line result
+   taken from the server's `resultWinner`/`resultReason` (never inferred locally),
+   and the host gets a **Back to lobby** button that sends `returnToLobby` (teams
+   kept); non-hosts see the result and wait for the host. Team buttons and Start
+   are hidden outside the lobby phase. During countdown/playing/results, the
+   game view shows the match HUD (timer, alive counts) and, for an eliminated
+   local player, a spectator overlay; the results overlay (T6) shows the server
+   result line with the host's **Back to lobby** control.
 7. **Leave** returns to the join screen. When the host leaves, the
    earliest-joined remaining player becomes host. If a leave during the
    countdown empties a side (no hunters or no runners left), the room cancels
@@ -159,30 +156,21 @@ diagnostic room. Integration tests exercise it with real Colyseus SDK clients.
   options (alongside `mazeSeedSource`) so tests can drive phase deadlines and
   force contacts. Production rooms use `Date.now` and default spawns.
 
-## Client (T3, extended by T6)
+## Client (T3)
 
 - `apps/client/src/main.ts` owns the DOM flow (join, lobby, game panels), the
   Colyseus connection, URL-hash view restore (via shared `parseAppRoute` /
   `serializeAppRoute`), the remembered display name (`localStorage`), and the
   single direction-request path shared by D-pad, swipe, and keyboard. Input
-  outside the playing phase, or from a player who is not alive (spectating), is
-  dropped (`canSteer`). The Phaser game exists only during maze phases, so key
-  capture never blocks typing in forms. The game panel renders the HUD, the
-  spectator overlay, and the results overlay from the server snapshot, rewriting
-  the DOM only when a derived string changes.
+  outside an active round, or from a player who is not alive (spectating), is
+  dropped. The Phaser game exists only during a round, so key capture never
+  blocks typing in forms.
 - `apps/client/src/maze-scene.ts` renders the server-seeded maze and interpolated
   players as ghost mascots (domed body, scalloped feet, eyes that glance along
-  the direction of travel); it never moves players itself. Eliminated players are
-  dimmed, and a countdown numeral is drawn at the maze center during `countdown`.
-- `apps/client/src/hud-view.ts` holds the pure, unit-tested T6 view model (no
-  DOM/Phaser), derived only from the server snapshot: `isMazePhase`,
-  `formatClock`, `countdownRemaining`, `roundTimeRemaining` (display only),
-  `aliveCounts`, `canSteer`, `isLocalEliminated`, and `resultView` (server
-  winner/reason labels and the `Round over: …` line; `null` outside `results`,
-  and a generic `Round over.` line for unknown pairs).
+  the direction of travel); it never moves players itself.
 - `apps/client/src/session-model.ts` holds pure, unit-tested helpers (no
-  DOM/Phaser): round detection and snapshot mapping; `resultSummary` (delegates to
-  `resultView`; `null` outside `results`);
+  DOM/Phaser): round detection and snapshot mapping; `resultSummary` (one-line
+  round result from the server's winner/reason, `null` outside `results`);
   `DirectionSender` (sends
   only direction changes, sequences from 0 per round, and stays within a
   16-per-second budget below the server limit, holding the latest change while
@@ -268,13 +256,9 @@ cover simulation catch-up: `planSimulationSteps` unit cases (full-step catch-up,
 carried leftovers, no step beyond the deadline), a delayed tick simulating all
 elapsed time, and a catch resolved in the final 100 ms across a delayed deadline
 tick. Client unit tests (`apps/client/src/*.test.ts`)
-cover the session model (input dedupe/sequencing/rate budgeting, pending-action
-resolution, room-code validation, interpolation, leave messages, result-summary
-lines) and the T6 HUD view model (`hud-view.test.ts`: clocks, countdown/round
-time, alive counts, steering gate, spectating, result lines).
-`hud-view.integration.test.ts` drives a real server with fake-clock Colyseus SDK
-clients through countdown, playing, contact-elimination results, and timeout
-results, asserting the HUD helpers against authoritative snapshots. The DOM and
+cover the session model: input dedupe/sequencing/rate budgeting, pending-action
+resolution, room-code validation, interpolation, leave messages, and the
+result-summary lines. The DOM and
 Phaser wiring in `main.ts`/`maze-scene.ts` has no automated tests. `npm test`
 also runs the tests for the staged-documentation update script
 (`scripts/update-staged-docs.test.mjs`), the software-factory smoke tests
@@ -322,7 +306,7 @@ in GitHub branch protection/rulesets; the workflow alone does not enforce that.
 
 | Location | Responsibility |
 |---|---|
-| [apps/client](./apps/client/) | Phaser/Vite browser client (join/lobby/game UI, maze scene), session model, HUD view model, and local proxy |
+| [apps/client](./apps/client/) | Phaser/Vite browser client (join/lobby/game UI, maze scene), session model, and local proxy |
 | [apps/server](./apps/server/) | Colyseus server, diagnostic room, private game room, and integration tests |
 | [packages/shared](./packages/shared/) | Browser/server protocol (room messages, validators, error codes), app-route hash helpers, types, maze/spawn logic, contact/round-outcome rules, and approved tuning |
 | [Game contract](./docs/GAME-CONTRACT.md) | Approved behavior and interface baseline |
