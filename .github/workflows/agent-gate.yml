@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       pr_number:
-        description: Pull request number to re-evaluate (for example after a late Copilot code review)
+        description: Pull request number to re-evaluate (for example after a late Copilot code review or a finished Copilot session)
         required: true
         type: number
 
@@ -39,7 +39,7 @@ jobs:
       issues: write
       pull-requests: write
     concurrency:
-      group: agent-gate-approve-${{ github.event.issue.number }}
+      group: agent-gate-pr-${{ github.event.issue.number }}
       cancel-in-progress: false
     steps:
       - name: Check out pipeline scripts from the default branch
@@ -57,6 +57,42 @@ jobs:
           script: |
             const { handleApproveSpec } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/agent-gate.mjs`);
             await handleApproveSpec({ github, context, core, env: process.env });
+
+  # Copilot cannot edit PR titles, so the gate detects the end of a Copilot
+  # session (Copilot replies on the PR when a comment-triggered session ends)
+  # through the agent tasks API, strips `[WIP]`, and marks a finished build ready.
+  copilot-session-end:
+    if: >-
+      vars.AGENT_PIPELINE_ENABLED == 'true' &&
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      github.event.comment.user.type == 'Bot' &&
+      (github.event.comment.user.login == 'Copilot' || github.event.comment.user.login == 'copilot-swe-agent[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    concurrency:
+      group: agent-gate-pr-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    steps:
+      - name: Check out pipeline scripts from the default branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Finish the PR when the Copilot session has ended
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        env:
+          COPILOT_ASSIGN_TOKEN: ${{ secrets.COPILOT_ASSIGN_TOKEN }}
+        with:
+          script: |
+            const { handleCopilotComment } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/agent-gate.mjs`);
+            await handleCopilotComment({ github, context, core, env: process.env });
 
   pull-request:
     if: >-

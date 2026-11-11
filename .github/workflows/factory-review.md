@@ -18,7 +18,7 @@ timeout-minutes: 20
 tools:
   github:
     toolsets: [repos, issues, pull_requests]
-  bash: ["cat", "ls", "grep", "head", "tail", "wc", "git diff:*", "git log:*", "git show:*"]
+  bash: ["cat", "ls", "grep", "head", "tail", "wc", "git diff:*", "git log:*", "git show:*", "git fetch:*", "git rev-parse:*"]
 safe-outputs:
   submit-pull-request-review:
     max: 1
@@ -55,6 +55,17 @@ wrote it from a spec under `SPEC/` that a human approved.
      problem, a security issue, a regression, or failing CI.
    - `[should]`: a real problem that can become a follow-up.
    - `[nit]`: style or wording.
+5. Verify every `[blocker]` that claims something is missing, unchanged, or
+   still wrong against the head commit itself, not only against a tool's diff
+   view. Instruction files such as `AGENTS.md`, `.github/copilot-instructions.md`,
+   and `.github/agents/*` may be hidden from tool diffs, so always check them
+   with git. Fetch what you need first (for example
+   `git fetch --no-tags --depth=50 origin ${{ github.event.pull_request.head.sha }} ${{ github.event.pull_request.base.sha }}`),
+   then run `git show ${{ github.event.pull_request.head.sha }}:<path>` or
+   `git diff ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }} -- <path>`.
+   If git cannot reach the commit, read the file with the GitHub tools at
+   `ref` = the head SHA. Quote the exact head line (with its line number) in
+   the blocker. Drop any finding the head commit contradicts.
 
 ## Output
 

@@ -14,8 +14,9 @@ Humans keep two gates: spec approval and (for features/playtest work) merge.
   triaged by `factory-orchestrator`, and every unit's spec names the role agent(s)
   that do the work. Humans do not pick the build agent; `role:*` labels mirror the
   orchestrator's decision. After `/approve-spec` the gate posts one `@copilot` comment telling
-  Copilot to work through the Delegation steps in order, acting as (or delegating to)
-  each named `.github/agents` profile. Per-step re-assignment was not built because
+  Copilot to work through the Delegation steps in order, in its own session, acting as
+  each named profile (reading `.github/agents/<profile>.agent.md` and
+  `.github/skills/<profile>/SKILL.md`; no subagents). Per-step re-assignment was not built because
   re-assigning an issue opens a new PR.
 - **Build (writer):** Copilot cloud agent, assigned through the issues API with
   `agent_assignment.custom_agent` set to the profile the orchestrator chose.
@@ -31,11 +32,11 @@ Humans keep two gates: spec approval and (for features/playtest work) merge.
 | Step | Trigger | Actor | Result |
 |---|---|---|---|
 | 0. Triage | Issue `opened` / `reopened` by a triage+ collaborator (any template; others are not triaged, to protect the premium-request budget on this public repo) | `factory-triage.md` (gh-aw, orchestrator profile, read-only) | Classifies type, lane, and the role agent(s) needed; checks readiness (AC, validation, duplicates, conflicts with `docs/DECISIONS.md`); suggests a split into sub-issues when one unit spans roles that can't share a PR. Safe outputs: `type:*`/`lane:*`/`role:*` labels and one triage comment with the plan and any gaps. Labels `status:spec` (ready) or `agent:needs-human` (gaps/rule questions). Never starts work. |
-| 1. Queue | Human adds `agent:go` to an issue | `agent-dispatch.yml` | Verifies labeler has triage+, the issue is open, not assigned to Copilot, and lacks `agent:active`/`agent:needs-human` (triage is not required; label untriaged issues by hand first); max `AGENT_MAX_ACTIVE` (default 3) active; assigns Copilot with `custom_agent: factory-orchestrator` and instructions "spec only: write `SPEC/<id>-<slug>.md` including a **Delegation** section (ordered role agent per step, QA depth fast/slow), open a draft PR with `Closes #N`, stop". Labels: `agent:go` → `status:spec`, `agent:active`. |
-| 2. Spec gate | Human comments `/approve-spec` on the PR | `agent-gate.yml` | Verifies commenter has write+; adds `status:ready`; comments `@copilot` build instructions naming the role agent. |
-| 3. Build | `/approve-spec` | Copilot cloud agent | On approval the gate re-adds `[WIP] ` to the PR title, mirrors Delegation to `role:*` labels, and posts one `@copilot` comment: implement per Delegation acting as each named profile in order, run `npm run check`, fill the PR template, remove `[WIP]` last. Unknown or missing role → `agent:needs-human`, no default. When the title loses `[WIP]` the gate marks the PR ready → `status:review`. |
+| 1. Queue | Human adds `agent:go` to an issue | `agent-dispatch.yml` | Verifies labeler has triage+, the issue is open, not assigned to Copilot, and lacks `agent:active`/`agent:needs-human` (triage is not required; label untriaged issues by hand first); max `AGENT_MAX_ACTIVE` (default 3) active; assigns Copilot with `custom_agent: factory-orchestrator` and instructions "spec only: write `SPEC/<id>-<slug>.md` including a **Delegation** section (ordered role agent per step, QA depth fast/slow), open a draft PR, stop"; the instructions forbid subagents and ask for a final PR comment summarising the spec (Copilot cannot edit PR titles or bodies). Labels: `agent:go` → `status:spec`, `agent:active`. |
+| 2. Spec gate | Human comments `/approve-spec` on the PR | `agent-gate.yml` | Verifies commenter has write+; refuses while the Copilot agent tasks API shows a session in progress or queued for the PR (falls back to refusing a `[WIP]` title if that API fails); strips `[WIP]`; fills `Closes #N` under "Linked issue" when missing; adds `status:ready`; comments `@copilot` build instructions naming the role agent. |
+| 3. Build | `/approve-spec` | Copilot cloud agent | On approval the gate re-adds `[WIP] ` to the PR title, mirrors Delegation to `role:*` labels, and posts one `@copilot` comment: implement per Delegation acting as each named profile in order, run `npm run check`, end with a PR comment summarising changes and validation. Unknown or missing role → `agent:needs-human`, no default. When Copilot's reply comment arrives and the tasks API shows no session in progress or queued, the gate strips `[WIP]` and marks the PR ready → `status:review`. |
 | 4. Review + QA | PR `ready_for_review` / new push after a fix | `factory-review.md`, `factory-qa.md` (gh-aw, parallel) | Reviewer submits a PR review (approve / request changes) against the spec with `[blocker]/[should]/[nit]`. QA runs `npm ci && npm run check` plus focused tests and posts a results comment with a pass/fail marker. Label `status:review`. |
-| 5. Fix loop | Review requests changes or QA fails | `agent-gate.yml` | Adds `cycle:1`, then `cycle:2` (D050). Routes each blocker to the role that owns the affected files per the Delegation section, via `@copilot` comment. A fix request converts the PR to draft, re-adds `[WIP]`, and sets `status:ready`, so one re-review runs when Copilot removes `[WIP]`. When blockers remain after `cycle:2`, the gate adds `agent:needs-human` and stops (a human decides). |
+| 5. Fix loop | Review requests changes or QA fails | `agent-gate.yml` | Adds `cycle:1`, then `cycle:2` (D050). Routes each blocker to the role that owns the affected files per the Delegation section, via `@copilot` comment. A fix request converts the PR to draft, re-adds `[WIP]`, and sets `status:ready`, so one re-review runs when the gate detects that Copilot's fix session ended. Blockers raised again on a head that already had a fix request (session ended without new commits) stop at `agent:needs-human` as a possible false positive. When blockers remain after `cycle:2`, the gate adds `agent:needs-human` and stops (a human decides). |
 | 6. Merge | All gates green | `agent-gate.yml` | Never if the PR touches a sensitive path (Phase 0 item 4; `Dockerfile`/`package*.json` at any depth). Eligible if the issue has `type:docs`, `type:chore`, or `follow-up` **and not** `type:feature`/`type:bug`/`playtest`: enable squash auto-merge with `COPILOT_ASSIGN_TOKEN` (so the merge triggers CI/deploy/close-out), or merge directly if GitHub reports the PR already clean. Otherwise label `agent:needs-human` and request David's review. |
 | 7. Close-out | PR merged | existing GitHub + `agent-gate.yml` | `Closes #N` closes the issue; Follow-ups section items become `follow-up` issues; remove `agent:active`. |
 
@@ -86,7 +87,42 @@ Report results; adjust this spec before Phase 1.
    `package*.json`, `factory-control/server/`) get `agent:needs-human` and never auto-merge.
    The gate workflow marks the PR ready (the agent leaves it as a draft), which triggers
    Copilot code review.
-5. **Orchestrator delegation in-session: not yet tested.**
+5. **Orchestrator delegation in-session: attempted, fails (2026-11-11, issue #48 → PR #58).**
+   Copilot running `factory-orchestrator` (model `auto` → gpt-6-luna) followed the build
+   comment and used the `task` tool to start the `docs-writer` subagent. The subagent used
+   its profile's pinned `model: Claude Haiku 5.5` and the session died with
+   `CAPIError: 400 "thinking.type.enabled" is not supported for this model`. In-session
+   delegation fails for profiles that pin a model, so cloud mode now forbids subagents:
+   the gate's build/fix comments tell Copilot to act as each profile itself (reading
+   `.github/agents/<profile>.agent.md` and `.github/skills/<profile>/SKILL.md`). Profile
+   `model:` frontmatter stays unchanged (local defaults, PR #25).
+   Same run: Copilot left `[WIP]` on the spec PR title after finishing, so `/approve-spec`
+   was refused until a human removed it. Dispatch instructions now ask Copilot to remove
+   `[WIP]` last; the refusal comment tells the approver to remove it and re-comment if
+   Copilot has finished.
+   **`copilot` environment:** the cloud agent job runs in the repo's `copilot` environment,
+   whose deployment branch policy allowed only `main`, so the job was rejected
+   (`deployment_rejected`). The Lead added `copilot/*` to the policy; it is now a setup
+   prerequisite in `docs/FACTORY.md`.
+   **`[WIP]` and PR body (resolved by gate-owned completion detection):** on PR #58 `[WIP]`
+   stayed after the spec, build, and fix sessions, and Copilot said it cannot edit the PR
+   title or body with its GitHub tools, so `[WIP]` is not a completion signal and instructions
+   to fill the PR template never work. Copilot does post a reply comment (as `Copilot`, a Bot)
+   when a comment-triggered session ends, and the agent tasks API works with the PAT
+   (`GET /agents/repos/{owner}/{repo}/tasks` lists tasks with `pull`/`branch` artifacts;
+   `GET .../tasks/{id}` adds `sessions[].state`). The gate now: on a Copilot comment (and on a
+   manual `agent-gate.yml` run) strips `[WIP]` and, at `status:ready`, marks the PR ready when
+   no session is in progress or queued (API errors: log, do nothing); gates `/approve-spec`
+   on the same check (fallback: `[WIP]` refusal); and fills `Closes #N` under "Linked issue"
+   at `/approve-spec`. Instructions ask for a final PR comment summarising changes and
+   validation instead of title/body edits.
+   **False review blocker:** the factory reviewer twice raised "AGENTS.md:38 unchanged"
+   although the head commit had the change (`AGENTS.md` seemingly missing from its diff view),
+   and the ruleset blocked merge on the `CHANGES_REQUESTED` review until it was dismissed; with
+   a fix already requested for that head, the gate then waited silently. The reviewer prompt
+   now requires verifying such blockers with `git show <head>:<path>` / `git diff
+   <base>...<head> -- <path>` and quoting the head line, and a blocker repeated on an unchanged
+   head stops at `agent:needs-human`.
 
 **Phase 1: build the chain** (files below). **Phase 2: docs + D057.**
 
@@ -104,7 +140,7 @@ Report results; adjust this spec before Phase 1.
 
 - Only triage+ can trigger `agent:go`; only write+ can `/approve-spec`. Workflows recheck permissions via API and ignore other actors.
 - Issue/PR text is untrusted input: no `${{ }}` interpolation of user text into `run:`; gh-aw jobs stay read-only with safe outputs; no `pull_request_target` checkout of PR code.
-- Glue workflows use least-privilege `permissions:`; the PAT is used only for assignment, `@copilot` comments, marking PRs ready, and enabling auto-merge/merging eligible PRs.
+- Glue workflows use least-privilege `permissions:`; the PAT is used only for assignment, `@copilot` comments, reading Copilot session state from the agent tasks API, marking PRs ready, and enabling auto-merge/merging eligible PRs.
 - Sensitive-path rule (see Phase 0 item 4) gates both CI re-runs and auto-merge.
 - Concurrency: one active agent run per issue (`agent:active`); max open agent PRs configurable (default 3).
 - Kill switch: repo variable `AGENT_PIPELINE_ENABLED` must be `true`.
