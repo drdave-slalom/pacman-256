@@ -1,10 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import type { Unit } from "@maze/factory-control-shared";
 import { fixtureSnapshot } from "./fixtures.ts";
 import { buildBoard, flattenUnits } from "./selectors.ts";
 import {
   plainStyle,
   renderActionMenu,
+  type LineStyle,
+
   renderActionPlan,
   renderActionResult,
   renderAgentsView,
@@ -12,6 +15,7 @@ import {
   renderDetail,
   renderHeader,
   renderOfflineBanner,
+  renderPipelineStrip,
 } from "./render.ts";
 import { visibleWidth } from "./width.ts";
 
@@ -36,6 +40,120 @@ test("renderOfflineBanner shows retry/start hints", () => {
   assert.ok(joined.includes("[r] retry"));
   assert.ok(joined.includes("[s] start server"));
   assertLinesFit(lines, 80);
+});
+
+const FIXTURE_STRIP = [
+  "┌──────┐ → ┌──────────┐ → ┌─────────┐ → ┌────────┐ → ┌─────┐ → ┌───────────┐ → ┌─────┐ → ┌──────┐",
+  "│ Spec │ → │ Dispatch │ → │ Execute │ → │ Review │ → │ QA  │ → │ Integrate │ → │ CI  │ → │ Done │",
+  "│ (1)  │ → │   (0)    │ → │   (1)   │ → │  (1)   │ → │ (0) │ → │    (0)    │ → │ (0) │ → │ (1)  │",
+  "└──────┘ → └──────────┘ → └─────────┘ → └────────┘ → └─────┘ → └───────────┘ → └─────┘ → └──────┘",
+];
+// A LineStyle that injects ANSI SGR prefixes the way the theme-backed screen
+// style does. This forces the wrap logic to measure display width, not byte
+// length (regression test for the plainStyle-hidden wrap bug).
+const ANSI_STYLE: LineStyle = {
+  dim: (s) => `[2m${s}[0m`,
+  muted: (s) => `[2m${s}[0m`,
+  accent: (s) => `[36m${s}[0m`,
+  warn: (s) => `[33m${s}[0m`,
+  success: (s) => `[32m${s}[0m`,
+  error: (s) => `[31m${s}[0m`,
+  bold: (s) => `[1m${s}[0m`,
+};
+
+function stripAnsi(text: string): string {
+  return text.replace(/[[0-9;]*m/g, "");
+}
+
+function boxesOnRow(line: string): number {
+  return (line.match(/┌/g) ?? []).length;
+}
+
+test("renderPipelineStrip renders the eight stages in order with live counts", () => {
+  const model = buildBoard(fixtureSnapshot());
+  const lines = renderPipelineStrip(model, plainStyle, 100);
+  assert.deepEqual(lines, FIXTURE_STRIP);
+  assertLinesFit(lines, 100);
+});
+
+test("renderPipelineStrip wraps onto further rows on a narrow width", () => {
+  const model = buildBoard(fixtureSnapshot());
+  const lines = renderPipelineStrip(model, plainStyle, 80);
+  assert.deepEqual(lines, [
+    "┌──────┐ → ┌──────────┐ → ┌─────────┐ → ┌────────┐ → ┌─────┐ → ┌───────────┐",
+    "│ Spec │ → │ Dispatch │ → │ Execute │ → │ Review │ → │ QA  │ → │ Integrate │",
+    "│ (1)  │ → │   (0)    │ → │   (1)   │ → │  (1)   │ → │ (0) │ → │    (0)    │",
+    "└──────┘ → └──────────┘ → └─────────┘ → └────────┘ → └─────┘ → └───────────┘",
+    "┌─────┐ → ┌──────┐",
+    "│ CI  │ → │ Done │",
+    "│ (0) │ → │ (1)  │",
+    "└─────┘ → └──────┘",
+  ]);
+  assertLinesFit(lines, 80);
+});
+
+test("renderPipelineStrip lays out by visible width under an ANSI-styled theme", () => {
+  const model = buildBoard(fixtureSnapshot());
+  // Width 100 fits all eight boxes on a single row (AC#2 under real styling).
+  const wide = renderPipelineStrip(model, ANSI_STYLE, 100);
+  assert.equal(wide.length, 4);
+  assert.equal(boxesOnRow(wide[0]!), 8);
+  for (const line of wide) {
+    assert.ok(visibleWidth(stripAnsi(line)) <= 100, `line exceeds 100: ${JSON.stringify(line)}`);
+  }
+  // Width 80 wraps to two rows (6 + 2); every line still fits.
+  const narrow = renderPipelineStrip(model, ANSI_STYLE, 80);
+  assert.equal(narrow.length, 8);
+  assert.deepEqual(narrow.filter((l) => l.includes("┌")).map(boxesOnRow), [6, 2]);
+  for (const line of narrow) {
+    assert.ok(visibleWidth(stripAnsi(line)) <= 80, `line exceeds 80: ${JSON.stringify(line)}`);
+  }
+});
+test("renderPipelineStrip shows a single dim no-units line for an empty board", () => {
+  const model = buildBoard(fixtureSnapshot({ units: [] }));
+  assert.deepEqual(renderPipelineStrip(model, plainStyle, 100), ["no units"]);
+});
+
+test("renderPipelineStrip excludes Unknown/Orphaned stages", () => {
+  const unknownUnit: Unit = {
+    id: "U-unknown",
+    stage: "unknown",
+    flags: {
+      reviewPending: false,
+      qaPending: false,
+      ciRed: false,
+      readyToMerge: false,
+      readyForCleanup: false,
+      needsDispatch: false,
+      blockedAgent: false,
+    },
+    agents: [],
+    handoffs: [],
+    attention: [],
+  };
+  const model = buildBoard(
+    fixtureSnapshot({
+      units: [...fixtureSnapshot().units, unknownUnit],
+      orphaned: {
+        branches: ["origin/factory/orphan1"],
+        worktrees: ["/tmp/wt-orphan"],
+        prs: [
+          { number: 99, title: "P", state: "OPEN", headRefName: "factory/t99", url: "u", checks: "green" },
+        ],
+        handoffs: [{ agent: "lead", source: "result" }],
+      },
+    }),
+  );
+  const lines = renderPipelineStrip(model, plainStyle, 100);
+  const joined = lines.join("\n");
+  assert.ok(!joined.includes("Unknown"));
+  assert.ok(!joined.includes("Orphaned"));
+  assert.ok(!joined.includes("U-unknown"));
+  assert.ok(!joined.includes("branch"));
+  assert.ok(!joined.includes("worktree"));
+  assert.ok(!joined.includes("handoff"));
+  // stage counts are unchanged by the unknown unit / orphaned bucket → exact strip
+  assert.deepEqual(lines, FIXTURE_STRIP);
 });
 
 test("renderBoardBody renders columns, cards, badges and dirty marker", () => {

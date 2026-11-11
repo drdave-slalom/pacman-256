@@ -18,6 +18,7 @@ import {
   formatElapsed,
   isActingState,
   LIFECYCLE_GLYPH,
+  pipelineStages,
   showBranch,
   suggestNextAction,
   type BoardModel,
@@ -97,6 +98,89 @@ export function renderOfflineBanner(state: OfflineBannerState, style: LineStyle,
   lines.push(style.dim(`${retry}   ${start}   [esc] close`));
   lines.push(rule(width));
   return lines;
+}
+
+/**
+ * Boxed pipeline flow strip: the eight stages (Spec…Done) in order, each as a
+ * 4-line box with its title and live unit count, joined by `→` arrows.
+ *
+ * Wrap rule: boxes are appended left-to-right; if the next box (plus its
+ * separator) would exceed `width`, the current row ends and the box starts a
+ * new row. Every returned line is truncated to `width` as a safety net. An
+ * empty board (no units in any stage) renders a single dim "no units" line.
+ */
+export function renderPipelineStrip(model: BoardModel, style: LineStyle, width: number): string[] {
+  const stages = pipelineStages(model);
+  if (stages.every((s) => s.count === 0)) {
+    return [truncateStyledToWidth(style.dim("no units"), width)];
+  }
+
+  const boxes = stages.map((s) => stageBox(s.title, s.count, style));
+  const rows: string[][] = [];
+  let current: string[] | null = null;
+  let currentWidth = 0;
+  for (const box of boxes) {
+    if (current === null) {
+      current = [...box.lines];
+      currentWidth = box.width;
+    } else if (currentWidth + 3 + box.width > width) {
+      rows.push(current);
+      current = [...box.lines];
+      currentWidth = box.width;
+    } else {
+      current = current.map((line, i) => line + " → " + box.lines[i]);
+      currentWidth += 3 + box.width;
+    }
+  }
+  if (current !== null) rows.push(current);
+
+  return rows.flat().map((line) => truncateStyledToWidth(line, width));
+}
+
+/**
+ * Truncate a possibly-ANSI-styled line to `maxWidth` visible columns. The
+ * strip's glyphs are all single-width, so visible width is the count of
+ * non-escape characters; SGR (color/bold) escape sequences are preserved
+ * verbatim and count as zero width.
+ */
+function truncateStyledToWidth(text: string, maxWidth: number): string {
+  if (maxWidth <= 0) return "";
+  const SGR = /\x1b\[[0-9;]*m/g;
+  let out = "";
+  let visible = 0;
+  let last = 0;
+  for (const m of text.matchAll(SGR)) {
+    const idx = m.index ?? 0;
+    const plain = text.slice(last, idx);
+    const take = Math.min(plain.length, maxWidth - visible);
+    if (take < plain.length) return out + plain.slice(0, take);
+    out += plain + m[0];
+    visible += plain.length;
+    last = idx + m[0].length;
+  }
+  return out + text.slice(last).slice(0, Math.max(0, maxWidth - visible));
+}
+
+interface StageBox {
+  lines: string[];
+  /** Display width of the box (2 borders + inner), independent of styling. */
+  width: number;
+}
+
+/** A single 4-line stage box: border / title / count / border. */
+function stageBox(title: string, count: number, style: LineStyle): StageBox {
+  const countText = "(" + count + ")";
+  const inner = Math.max(title.length, countText.length) + 2;
+  const top = style.muted("┌" + "─".repeat(inner) + "┐");
+  const bottom = style.muted("└" + "─".repeat(inner) + "┘");
+  const titlePad = Math.max(0, inner - 2 - title.length);
+  const titleLine = style.muted("│ ") + style.accent(style.bold(title)) + " ".repeat(titlePad) + style.muted(" │");
+  // Center the count between the same 1-space margins the title row uses.
+  const innerText = inner - 2;
+  const leftPad = Math.floor((innerText - countText.length) / 2);
+  const rightPad = innerText - countText.length - leftPad;
+  const countLine = style.muted("│ ") + " ".repeat(leftPad) + style.muted(countText) + " ".repeat(rightPad) + style.muted(" │");
+  return { lines: [top, titleLine, countLine, bottom], width: inner + 2 };
 }
 
 export function renderBoardBody(model: BoardModel, selectedIndex: number, style: LineStyle, width: number): string[] {
