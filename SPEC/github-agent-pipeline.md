@@ -73,18 +73,18 @@ Report results; adjust this spec before Phase 1.
    confirm on the first Phase 1 run. Each fix push re-triggers CI approval (see 4).
 3. **gh-aw can load profiles: yes (docs).** `{{#runtime-import .github/agents/<name>.agent.md}}`
    injects files under `.github/`; frontmatter fields such as `model:` are not applied.
-4. **CI approval: required by default; approve by re-run.** Runs on Copilot branches complete as
-   `action_required`. `POST .../runs/{id}/approve` returns 403 (fork-only), but `gh run rerun <id>`
-   by a write/admin user starts the run (verified on PR #37: CI and description both passed).
-   **Decision (David, 2026-11-11): keep "Require approval for workflow runs" ON and keep secrets
-   repo-level for now.** `agent-gate.yml` (using `COPILOT_ASSIGN_TOKEN`) re-runs `action_required`
-   runs on agent PRs **only when the PR changes no file under `.github/`, `deploy/`, `Dockerfile`,
-   `scripts/`, or `package*.json`**; otherwise it labels `agent:needs-human` and a human reviews
-   before clicking "Approve and run workflows". This stops agent-edited workflows from running
-   with repo secrets without human review. Accepted residual risk: a human approving a sensitive
-   PR exposes repo-level `DO_API_TOKEN`/`COPILOT_ASSIGN_TOKEN` to that PR's workflows; moving them
-   to `main`-only environments remains a tracked follow-up. The gate workflow also marks the PR
-   ready (the agent leaves it as a draft), which triggers Copilot code review.
+4. **CI approval: disabled (David, 2026-11-11).** Runs on Copilot branches complete as
+   `action_required` by default; David turned off "Require approval for workflow runs", so agent
+   PR workflows now run automatically. (Fallback if re-enabled: `gh run rerun <id>` by a write user
+   starts an `action_required` run; `POST .../approve` is fork-only and returns 403.)
+   **Accepted risk until #47:** `DO_API_TOKEN` and `COPILOT_ASSIGN_TOKEN` are repo-level, so a
+   Copilot PR that edits a `pull_request` workflow can read them. Mitigations: pipeline glue
+   workflows run on `pull_request_target`/`workflow_run`/`issues`/`issue_comment` (base-branch
+   definitions, never checking out PR code), so an agent PR cannot change the gate it is judged
+   by; PRs touching sensitive paths (`.github/`, `deploy/`, `Dockerfile`, `scripts/`,
+   `package*.json`, `factory-control/server/`) get `agent:needs-human` and never auto-merge.
+   The gate workflow marks the PR ready (the agent leaves it as a draft), which triggers
+   Copilot code review.
 5. **Orchestrator delegation in-session: not yet tested.**
 
 **Phase 1: build the chain** (files below). **Phase 2: docs + D056.**
