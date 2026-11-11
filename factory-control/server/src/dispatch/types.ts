@@ -61,3 +61,24 @@ export interface PrepareMeta {
   operator?: string;
   ip?: string;
 }
+
+/** Input for `DispatchService.enqueueStartWork` (U5 start-work tail). */
+export interface StartWorkEnqueueRequest {
+  /** The issue-card unit the start-work action targeted (snapshot sanity check). */
+  sourceUnit: string;
+  /** Derived factory unit id being created (artifact identity). */
+  unit: string;
+  specPath: string;
+  worktree: string;
+  role: string;
+  acceptance: string;
+}
+
+export type StartWorkEnqueueOutcome =
+  | { kind: "ok"; entry: DispatchEntry; prompt: string }
+  | { kind: "rejected"; reason: string };
+
+/** The minimal dispatch-enqueue surface M2 actions depend on. */
+export interface DispatchEnqueuePort {
+  enqueueStartWork(req: StartWorkEnqueueRequest): Promise<StartWorkEnqueueOutcome>;
+}

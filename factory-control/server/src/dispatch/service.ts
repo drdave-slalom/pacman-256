@@ -23,11 +23,14 @@ import type { AgentRecord, FactorySnapshot, Unit } from "../types.ts";
 import { DispatchQueue } from "./queue.ts";
 import { skillById } from "./skills.ts";
 import type {
+  DispatchEnqueuePort,
   DispatchEntry,
   DispatchPlan,
   DispatchPrepareRequest,
   DispatchStatus,
   PrepareMeta,
+  StartWorkEnqueueOutcome,
+  StartWorkEnqueueRequest,
 } from "./types.ts";
 
 const UNIT_RE = /^[a-z0-9._-]+$/i;
@@ -161,7 +164,7 @@ export function buildDelegationPrompt(entry: DispatchEntry, factoryRoot: string)
   return lines.join("\n");
 }
 
-export class DispatchService {
+export class DispatchService implements DispatchEnqueuePort {
   private readonly o: DispatchServiceOptions;
   private readonly queue: DispatchQueue;
   private readonly prepared = new Map<string, PreparedRecord>();
@@ -281,6 +284,57 @@ export class DispatchService {
     }
 
     const entry = this.queue.append(rec.entry);
+    return { kind: "ok", entry, prompt: buildDelegationPrompt(entry, this.o.factoryRoot) };
+  }
+
+  /**
+   * Tail of the `factory/start-work` action (U5): persist an M4 dispatch
+   * request for a freshly scaffolded issue-derived unit. Unlike the standard
+   * prepare→enqueue gate (which requires a spec and no branch/worktree yet),
+   * start-work intentionally creates those artifacts just before enqueueing,
+   * so this path only re-checks the source issue unit's presence, liveness,
+   * and S2 per-unit active-entry dedupe. Never spawns agents — the returned
+   * prompt is for the Lead to copy.
+   */
+  async enqueueStartWork(req: StartWorkEnqueueRequest): Promise<StartWorkEnqueueOutcome> {
+    if (typeof req.sourceUnit !== "string" || !UNIT_RE.test(req.sourceUnit) || canonicalId(req.sourceUnit) === "") {
+      return { kind: "rejected", reason: `invalid source unit: ${JSON.stringify(req.sourceUnit)}` };
+    }
+    if (typeof req.unit !== "string" || !UNIT_RE.test(req.unit) || canonicalId(req.unit) === "") {
+      return { kind: "rejected", reason: `invalid unit: ${JSON.stringify(req.unit)}` };
+    }
+    for (const [key, value] of [
+      ["specPath", req.specPath],
+      ["worktree", req.worktree],
+      ["role", req.role],
+      ["acceptance", req.acceptance],
+    ] as const) {
+      if (typeof value !== "string" || value.trim() === "") {
+        return { kind: "rejected", reason: `${key} must be a non-empty string` };
+      }
+    }
+    const snapshot = await this.o.snapshot();
+    const source = findUnit(snapshot, req.sourceUnit);
+    if (source === undefined) {
+      return { kind: "rejected", reason: `unit ${req.sourceUnit} no longer present in the snapshot` };
+    }
+    if (hasLiveAgent(source)) {
+      return { kind: "rejected", reason: "a live agent is still acting on this unit" };
+    }
+    const canon = canonicalId(req.unit);
+    if (this.queue.hasActive(source.id) || this.queue.hasActive(canon)) {
+      return { kind: "rejected", reason: `an active dispatch/skill entry already exists for unit ${source.id}` };
+    }
+    const entry = this.queue.append({
+      id: `req-${randomUUID().slice(0, 8)}`,
+      at: new Date(this.now()).toISOString(),
+      unit: req.unit,
+      specPath: req.specPath,
+      worktree: req.worktree,
+      role: req.role,
+      acceptance: req.acceptance,
+      status: "queued",
+    });
     return { kind: "ok", entry, prompt: buildDelegationPrompt(entry, this.o.factoryRoot) };
   }
 
