@@ -51,6 +51,28 @@ Source: [`SPEC/factory-control-brainstorm.md`](SPEC/factory-control-brainstorm.m
 - **State** (`factory-control/state/`): runtime state (audit log, dispatch
   queue) — gitignored.
 
+## Quickstart (run the control center)
+
+One server powers everything (snapshot API, guarded actions, web mirror).
+
+```bash
+cd <repo>
+npm install               # link workspaces (first time / after merges)
+npm run build             # build web mirror → factory-control/web/dist/
+npm run factory:control:serve   # control server on http://127.0.0.1:4780
+```
+
+- **Web UI:** open http://127.0.0.1:4780/ in a browser (kanban, detail, agents).
+- **TUI:** in a pi session in the repo, run `/factory` (board, detail, actions,
+  queue). It needs the server above (or use `s` in the offline banner to start it).
+- **CLI:** `npm run factory:control -- snapshot --json` prints the snapshot;
+  `npm run factory:control -- queue --json` lists the dispatch queue.
+- **LAN (team):** `HOST=0.0.0.0 npm run factory:control:serve`, browse to
+  http://<your-lan-ip>:4780/ (trusted-LAN only — no auth, see Web mirror).
+
+If `/` returns 404, the web build is missing — run `npm run build` first
+(`dist/` is gitignored and not committed).
+
 ## Component map
 
 | Milestone | Spec | What it delivers |
