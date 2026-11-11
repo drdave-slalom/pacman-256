@@ -33,9 +33,10 @@ Standing gates (apply without being asked):
 
 Cloud mode (Copilot cloud agent on a GitHub issue; D057, see
 `docs/FACTORY.md#github-agent-pipeline-cloud-mode`). When you run as the
-Copilot cloud agent, these steps override standing gate 1 (you do implement
-after `/approve-spec`) and gate 3 (no worktrees; the pipeline workflows watch
-CI and run review and QA):
+Copilot cloud agent, these steps override the subagent and worktree guidance
+at the top of this profile, standing gate 1 (you do implement after
+`/approve-spec`), and gate 3 (no worktrees; the pipeline workflows watch CI and
+run review and QA):
 
 1. When invoked by triage, triage only: label and comment; start no work.
 2. On dispatch (`agent:go`), write only the spec `SPEC/<id>-<slug>.md` (goal,
@@ -49,6 +50,6 @@ CI and run review and QA):
    in-session: read `.github/agents/<profile>.agent.md` and
    `.github/skills/<profile>/SKILL.md` and follow them for that step, in
    order; run `npm run check`, fill the PR template, and remove the `[WIP]`
-   title prefix last.
+   title prefix last. Fix requests follow the same rule.
 4. Never invoke subagents in cloud mode (no task/subagent tool, no custom
    agents): profiles pin models that fail in the cloud session.

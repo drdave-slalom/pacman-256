@@ -277,7 +277,7 @@ write only through gh-aw safe outputs.
 | Step | Trigger | Result |
 |---|---|---|
 | 0. Triage | Issue opened/reopened by a triage+ collaborator (others are not triaged) | `factory-triage` (orchestrator profile, read-only) adds `type:*`/`lane:*`/`role:*` labels and one triage comment; labels `status:spec` if ready or `agent:needs-human` if gaps. Never starts work. |
-| 1. Queue | A triage+ user (not a bot) adds `agent:go` | `agent-dispatch.yml` assigns Copilot (`factory-orchestrator` profile, model `auto`) to write only `SPEC/<id>-<slug>.md` with a `## Delegation` section and open a draft PR with `Closes #N`. `agent:go` → `agent:active` + `status:spec`; stale `cycle:*`, `status:ready`/`status:review`, and `role:*` labels are cleared. |
+| 1. Queue | A triage+ user (not a bot) adds `agent:go` | `agent-dispatch.yml` assigns Copilot (`factory-orchestrator` profile, model `auto`) to write only `SPEC/<id>-<slug>.md` with a `## Delegation` section and open a draft PR with `Closes #N`; the instructions forbid subagents and ask Copilot to remove `[WIP]` from the title last. `agent:go` → `agent:active` + `status:spec`; stale `cycle:*`, `status:ready`/`status:review`, and `role:*` labels are cleared. |
 | 2. Spec gate | A write+ user (not a bot) comments `/approve-spec`, or `/approve-spec <sha>` which must match the PR head | Refused while the PR title starts with `[WIP]` (Copilot may still be writing; if it has finished, the approver removes `[WIP]` and comments again). `agent-gate.yml` requires exactly one linked issue with `agent:active` and binds the PR to it, and checks the PR changes exactly one `SPEC/*.md` with a valid Delegation section; otherwise `agent:needs-human`. It then re-adds `[WIP] ` to the PR title, mirrors Delegation to `role:*` labels, sets `status:ready`, and posts one `@copilot` build comment. |
 | 3. Build | That `@copilot` comment | Copilot implements per the Delegation in its own session, acting as each named profile in order (reading `.github/agents/<profile>.agent.md` and `.github/skills/<profile>/SKILL.md`; no subagents or custom agents), runs `npm run check`, fills the PR template, and removes `[WIP]` from the title last. When `[WIP]` is gone, the gate marks the PR ready and sets `status:review`. |
 | 4. Review + QA | PR ready / new push | `factory-review` submits a `github-actions[bot]` APPROVE or REQUEST_CHANGES review on the head commit (`[blocker]/[should]/[nit]`). `factory-qa` runs `npm ci && npm run check` plus focused tests; its `qa-verdict` job posts `<!-- factory-qa:pass\|fail -->` with `Head: <sha>`. The gate trusts only `github-actions[bot]` verdicts for the current head. |
@@ -338,6 +338,11 @@ untrusted input.
 - `[WIP]` may persist on the spec PR after Copilot's spec session finishes.
   `/approve-spec` is refused while it is there; once Copilot has stopped
   pushing spec commits, the approver removes `[WIP]` and comments again.
+- `[WIP]` may also persist after a build or fix session: on PR #58 Copilot did
+  not remove it after the build session (twice). After checking that the
+  Copilot session has finished, the approver/operator removes `[WIP]` so the
+  gate marks the PR ready. A gate change to detect session completion is a
+  follow-up.
 - **Accepted secret risk until issue #47:** `DO_API_TOKEN` and the
   `COPILOT_ASSIGN_TOKEN` PAT are repo-level, and workflow-run approval for
   Copilot branches is off, so an agent PR that edits a `pull_request` workflow

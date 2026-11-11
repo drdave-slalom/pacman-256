@@ -14,8 +14,9 @@ Humans keep two gates: spec approval and (for features/playtest work) merge.
   triaged by `factory-orchestrator`, and every unit's spec names the role agent(s)
   that do the work. Humans do not pick the build agent; `role:*` labels mirror the
   orchestrator's decision. After `/approve-spec` the gate posts one `@copilot` comment telling
-  Copilot to work through the Delegation steps in order, acting as (or delegating to)
-  each named `.github/agents` profile. Per-step re-assignment was not built because
+  Copilot to work through the Delegation steps in order, in its own session, acting as
+  each named profile (reading `.github/agents/<profile>.agent.md` and
+  `.github/skills/<profile>/SKILL.md`; no subagents). Per-step re-assignment was not built because
   re-assigning an issue opens a new PR.
 - **Build (writer):** Copilot cloud agent, assigned through the issues API with
   `agent_assignment.custom_agent` set to the profile the orchestrator chose.
@@ -31,7 +32,7 @@ Humans keep two gates: spec approval and (for features/playtest work) merge.
 | Step | Trigger | Actor | Result |
 |---|---|---|---|
 | 0. Triage | Issue `opened` / `reopened` by a triage+ collaborator (any template; others are not triaged, to protect the premium-request budget on this public repo) | `factory-triage.md` (gh-aw, orchestrator profile, read-only) | Classifies type, lane, and the role agent(s) needed; checks readiness (AC, validation, duplicates, conflicts with `docs/DECISIONS.md`); suggests a split into sub-issues when one unit spans roles that can't share a PR. Safe outputs: `type:*`/`lane:*`/`role:*` labels and one triage comment with the plan and any gaps. Labels `status:spec` (ready) or `agent:needs-human` (gaps/rule questions). Never starts work. |
-| 1. Queue | Human adds `agent:go` to an issue | `agent-dispatch.yml` | Verifies labeler has triage+, the issue is open, not assigned to Copilot, and lacks `agent:active`/`agent:needs-human` (triage is not required; label untriaged issues by hand first); max `AGENT_MAX_ACTIVE` (default 3) active; assigns Copilot with `custom_agent: factory-orchestrator` and instructions "spec only: write `SPEC/<id>-<slug>.md` including a **Delegation** section (ordered role agent per step, QA depth fast/slow), open a draft PR with `Closes #N`, stop". Labels: `agent:go` → `status:spec`, `agent:active`. |
+| 1. Queue | Human adds `agent:go` to an issue | `agent-dispatch.yml` | Verifies labeler has triage+, the issue is open, not assigned to Copilot, and lacks `agent:active`/`agent:needs-human` (triage is not required; label untriaged issues by hand first); max `AGENT_MAX_ACTIVE` (default 3) active; assigns Copilot with `custom_agent: factory-orchestrator` and instructions "spec only: write `SPEC/<id>-<slug>.md` including a **Delegation** section (ordered role agent per step, QA depth fast/slow), open a draft PR with `Closes #N`, stop"; the instructions forbid subagents and ask Copilot to remove `[WIP]` from the title last. Labels: `agent:go` → `status:spec`, `agent:active`. |
 | 2. Spec gate | Human comments `/approve-spec` on the PR | `agent-gate.yml` | Verifies commenter has write+; adds `status:ready`; comments `@copilot` build instructions naming the role agent. |
 | 3. Build | `/approve-spec` | Copilot cloud agent | On approval the gate re-adds `[WIP] ` to the PR title, mirrors Delegation to `role:*` labels, and posts one `@copilot` comment: implement per Delegation acting as each named profile in order, run `npm run check`, fill the PR template, remove `[WIP]` last. Unknown or missing role → `agent:needs-human`, no default. When the title loses `[WIP]` the gate marks the PR ready → `status:review`. |
 | 4. Review + QA | PR `ready_for_review` / new push after a fix | `factory-review.md`, `factory-qa.md` (gh-aw, parallel) | Reviewer submits a PR review (approve / request changes) against the spec with `[blocker]/[should]/[nit]`. QA runs `npm ci && npm run check` plus focused tests and posts a results comment with a pass/fail marker. Label `status:review`. |
@@ -103,6 +104,10 @@ Report results; adjust this spec before Phase 1.
    whose deployment branch policy allowed only `main`, so the job was rejected
    (`deployment_rejected`). The Lead added `copilot/*` to the policy; it is now a setup
    prerequisite in `docs/FACTORY.md`.
+   **`[WIP]` after build:** on PR #58 Copilot also did not remove `[WIP]` after the build
+   session (twice), so the approver/operator may need to remove `[WIP]` after a build or fix
+   session completes (check the Copilot session finished first). A gate change that detects
+   session completion is a follow-up.
 
 **Phase 1: build the chain** (files below). **Phase 2: docs + D057.**
 
