@@ -214,27 +214,6 @@ body {
   border-top: 2px solid var(--amber);
 }
 
-.board-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-
-.toolbar-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text);
-  cursor: pointer;
-  user-select: none;
-}
-
-.toolbar-toggle input[type="checkbox"] {
-  cursor: pointer;
-}
-
 .closed-issue-item {
   display: flex;
   align-items: center;

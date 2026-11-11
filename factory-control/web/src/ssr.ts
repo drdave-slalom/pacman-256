@@ -26,15 +26,9 @@ export function renderPage(snapshot: FactorySnapshot, path: string): string {
   return renderToString(element);
 }
 
-/** Render the board with the show-closed toggle in a given state (test helper). */
-export function renderBoardContent(snapshot: FactorySnapshot, showClosed: boolean): string {
-  return renderToString(
-    createElement(BoardContent, {
-      snapshot,
-      showClosed,
-      onToggleShowClosed: () => {},
-    }),
-  );
+/** Render the board with always-on closed issues (test helper). */
+export function renderBoardContent(snapshot: FactorySnapshot): string {
+  return renderToString(createElement(BoardContent, { snapshot }));
 }
 
 /** Render a single unit card (used by the integration tests). */

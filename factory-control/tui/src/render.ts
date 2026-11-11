@@ -192,9 +192,10 @@ function stageBox(title: string, count: number, style: LineStyle): StageBox {
 }
 
 /**
- * "Closed issues (N)" section for the show-closed toggle: a header row plus
- * one dim row per issue `#N title [status]` (via `issueDisplayStatus`),
- * truncated to width. Hidden (returns no lines) when the list is empty.
+ * "Closed issues (N)" section for closed-unmatched issues (always visible): a
+ * header row plus one dim row per issue `#N title [status]` (via
+ * `issueDisplayStatus`), truncated to width. Hidden (returns no lines) when
+ * the list is empty.
  */
 export function renderClosedIssues(issues: IssueCard[], style: LineStyle, width: number): string[] {
   if (issues.length === 0) return [];
@@ -211,7 +212,7 @@ export function renderBoardBody(
   selectedIndex: number,
   style: LineStyle,
   width: number,
-  closedIssues?: IssueCard[],
+  closedIssues: IssueCard[],
 ): string[] {
   const lines: string[] = [];
   let cursor = 0;
@@ -233,7 +234,7 @@ export function renderBoardBody(
   } else {
     for (const line of orphanLines) lines.push(style.dim(`  ${line}`));
   }
-  if (closedIssues !== undefined && closedIssues.length > 0) {
+  if (closedIssues.length > 0) {
     lines.push(...renderClosedIssues(closedIssues, style, width));
   }
   return lines.map((line) => truncateToWidth(line, width));
@@ -495,7 +496,7 @@ export function renderActionResult(state: ActionResultState, style: LineStyle, w
 
 export function renderHelp(view: ViewKind, style: LineStyle, width: number): string[] {
   const map: Record<ViewKind, string> = {
-    board: "↑/↓ move · enter detail · a agents · q queue · r refresh · i closed on/off · esc close",
+    board: "↑/↓ move · enter detail · a agents · q queue · r refresh · esc close",
     detail: "↑/↓ switch unit · esc board · x actions · a agents · q queue · r refresh",
     agents: "↑/↓ select · enter focus · esc back",
     actions: "↑/↓ select · enter open · esc back",
