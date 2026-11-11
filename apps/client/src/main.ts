@@ -47,6 +47,7 @@ import {
   isMazePhase,
   resultView,
   roundTimeRemaining,
+  effectStatus,
 } from "./hud-view.ts";
 import { parseAppRoute, serializeAppRoute } from "@maze/shared";
 import type { AppRoute } from "@maze/shared";
@@ -537,7 +538,7 @@ function renderGame(snapshot: GameRoomSnapshot, localId: string): void {
     ? `you: ${TEAM_LABELS[local.team]}`
     : "you: eliminated — spectating";
   // Patch-rate safe: rewrite the HUD only when a derived string changed.
-  const hudKey = JSON.stringify([phase, timer, counts, statusText]);
+  const hudKey = JSON.stringify([phase, timer, counts, statusText, effectStatus(snapshot, localId)]);
   if (hudKey !== renderedHudKey) {
     renderedHudKey = hudKey;
     ui.hudPhase.textContent = phase === "countdown" ? "Countdown" : phase === "playing" ? "Playing" : "Results";
@@ -545,7 +546,7 @@ function renderGame(snapshot: GameRoomSnapshot, localId: string): void {
     ui.hudTimer.textContent = timer;
     ui.hudHunters.textContent = String(counts.hunter);
     ui.hudRunners.textContent = String(counts.runner);
-    ui.hudStatus.textContent = statusText;
+    ui.hudStatus.textContent = [statusText, effectStatus(snapshot, localId), "Pickups: △ Speed · □ Shield · ◇ Reverse (runners only)"].filter(Boolean).join(" | ");
   }
   // Spectator overlay: shown while the local player is eliminated during play.
   // The notice is set only at reveal so its polite live region announces the

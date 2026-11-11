@@ -27,6 +27,8 @@ function player(id: string, overrides: Partial<PlayerSnapshot> = {}): PlayerSnap
     direction: "left",
     queuedDirection: "",
     lastInputSequence: -1,
+    speedEndsAt: 0,
+    shieldEndsAt: 0,
     ...overrides,
   };
 }
@@ -46,6 +48,10 @@ function snapshot(overrides: Partial<GameRoomSnapshot> = {}): GameRoomSnapshot {
     resultWinner: "",
     resultReason: "",
     resultEndedAt: 0,
+    simulationTime: 0,
+    vulnerabilityEndsAt: 0,
+    vulnerabilityRespawnAt: 0,
+    pickups: {},
     players: { a: player("a"), b: player("b", { team: "runner", x: 3.5 }) },
     ...overrides,
   };

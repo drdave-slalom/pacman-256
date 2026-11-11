@@ -192,6 +192,8 @@ export interface PlayerSnapshot {
   queuedDirection: QueuedDirection;
   /** Last accepted `setDirection` sequence this round; `-1` before any. */
   lastInputSequence: number;
+  speedEndsAt: number;
+  shieldEndsAt: number;
 }
 
 /** JSON view (`state.toJSON()`) of the synchronized game room state. */
@@ -219,6 +221,10 @@ export interface GameRoomSnapshot {
   resultReason: ResultReason | "";
   /** Epoch ms when the round ended; `0` until results. */
   resultEndedAt: number;
+  simulationTime: number;
+  vulnerabilityEndsAt: number;
+  vulnerabilityRespawnAt: number;
+  pickups: Record<string, import("./pickups.ts").PickupSnapshot>;
   players: Record<string, PlayerSnapshot>;
 }
 
