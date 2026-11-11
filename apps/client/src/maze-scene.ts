@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { MAZE_HEIGHT, MAZE_WIDTH, generateMaze, isWalkableIn } from "@maze/shared";
 import type { Direction, GameRoomSnapshot, PlayerTeam } from "@maze/shared";
-import { countdownRemaining } from "./hud-view.ts";
+import { countdownRemaining, PICKUP_CUES, playerEffectCue } from "./hud-view.ts";
 import { Interpolator, mazeKey, playerViews } from "./session-model.ts";
 
 export const TILE_SIZE = 32;
@@ -39,6 +39,7 @@ const PUPIL_COLOR = 0x0b1224;
 interface Mascot {
   container: Phaser.GameObjects.Container;
   body: Phaser.GameObjects.Graphics;
+  effectText: Phaser.GameObjects.Text;
   leftPupil: Phaser.GameObjects.Arc;
   rightPupil: Phaser.GameObjects.Arc;
   team: PlayerTeam;
@@ -133,6 +134,7 @@ export class MazeScene extends Phaser.Scene {
   private readonly mascots = new Map<string, Mascot>();
   private localRing!: Phaser.GameObjects.Arc;
   private countdownText!: Phaser.GameObjects.Text;
+  private readonly pickupTexts = new Map<string, Phaser.GameObjects.Text>();
   private dragPointerId: number | null = null;
   private dragAccum = { x: 0, y: 0 };
   private dragLast = { x: 0, y: 0 };
@@ -212,12 +214,28 @@ export class MazeScene extends Phaser.Scene {
       mascot.container.setPosition(x, y);
       // Eliminated players keep rendering but dimmed (spectator view).
       mascot.container.setAlpha(view.alive ? 1 : 0.35);
+      mascot.effectText.setText(playerEffectCue(snapshot, snapshot.players[view.id]!));
       if (view.isLocal) {
         this.localRing.setPosition(x, y);
         localShown = view.alive;
       }
     }
     this.localRing.setVisible(localShown);
+    const activePickups = new Set<string>();
+    for (const pickup of Object.values(snapshot.pickups)) {
+      if (!pickup.active || snapshot.phase !== "playing") continue;
+      activePickups.add(pickup.id);
+      let text = this.pickupTexts.get(pickup.id);
+      if (!text) {
+        const cue = PICKUP_CUES[pickup.kind];
+        text = this.add.text(0, 0, `${cue.symbol}\n${pickup.kind === "vulnerability" ? "REV" : cue.label}`, {
+          fontFamily: "system-ui, sans-serif", fontSize: "12px", color: "#ffffff", align: "center", backgroundColor: "#172238",
+        }).setOrigin(0.5).setDepth(5);
+        this.pickupTexts.set(pickup.id, text);
+      }
+      text.setPosition((pickup.col + 0.5) * TILE_SIZE, (pickup.row + 0.5) * TILE_SIZE).setVisible(true);
+    }
+    for (const [id, text] of this.pickupTexts) text.setVisible(activePickups.has(id));
     if (snapshot.phase === "countdown") {
       this.countdownText.setText(String(countdownRemaining(snapshot))).setVisible(true);
     } else {
@@ -239,9 +257,12 @@ export class MazeScene extends Phaser.Scene {
     const rightEye = this.add.circle(EYE_OFFSET_X, EYE_OFFSET_Y, EYE_WHITE_RADIUS, EYE_COLOR);
     const leftPupil = this.add.circle(-EYE_OFFSET_X, EYE_OFFSET_Y, PUPIL_RADIUS, PUPIL_COLOR);
     const rightPupil = this.add.circle(EYE_OFFSET_X, EYE_OFFSET_Y, PUPIL_RADIUS, PUPIL_COLOR);
-    const container = this.add.container(0, 0, [body, leftEye, rightEye, leftPupil, rightPupil]);
+    const effectText = this.add.text(0, -PLAYER_RADIUS - 8, "", {
+      fontFamily: "system-ui, sans-serif", fontSize: "11px", color: "#ffffff", backgroundColor: "#172238",
+    }).setOrigin(0.5, 1);
+    const container = this.add.container(0, 0, [body, leftEye, rightEye, leftPupil, rightPupil, effectText]);
     container.setDepth(isLocal ? 11 : 10);
-    return { container, body, leftPupil, rightPupil, team, facing: { x: 0, y: 1 }, lastPos: null };
+    return { container, body, effectText, leftPupil, rightPupil, team, facing: { x: 0, y: 1 }, lastPos: null };
   }
 
   /** Points the pupils along the mascot's recent travel; holds still when idle. */

@@ -322,3 +322,30 @@ tunables remain starting values for review.
   tests driving the real room through countdown→playing→(elimination/timeout)→results.
   Follow-ups: live two-tab browser smoke, physical-phone matrix (T8/T9), T7
   pickups/vulnerability.
+
+## T7 implementation context (not new gameplay decisions)
+
+- Implements [SPEC/T7](../SPEC/T7-three-pickups.md) against the approved
+  D012/D019/D033–D042 contract: one authoritative pickup of each kind,
+  independent speed/shield deadlines, global hunter vulnerability, safe seeded
+  spawn/retry, collection refresh and the 0/8/18-second vulnerability schedule.
+- Shared pure helpers retain true piecewise movement paths (including buffered
+  corners and wall stops). Claims use path arrival time and a server-seeded,
+  per-round stable shuffled player priority, not packet or map iteration order.
+  Collection deadlines use the arrival's simulation time. Speed expiry within
+  a step divides boosted/base-speed traversal; no speed strength stacking.
+- Colyseus state publishes pickup cells/availability/respawn deadlines, player
+  effect deadlines, global deadlines and the simulation cursor. Clients still
+  send only existing direction/lobby requests. Combat uses one post-pickup
+  snapshot, batches eliminations, blocks protected opposing contacts, and
+  evaluates victory before timeout. Results stop simulation/spawning; replay
+  clears pickup/effect state and reshuffles priority for the new round.
+- Phaser shows distinct triangle/square/diamond pickup cues with text; HTML
+  shows local speed/shield and global reversal seconds. Shielded and exposed
+  hunters have explicit shape/text labels, not color-only indicators. These
+  are authoritative-state displays, not client combat or winner predictions.
+- Automated coverage includes shared timing/spawn/path/claim rules, real-room
+  pickup/respawn/expiry/reversal/blocking/replay/deadline cases and client cue
+  mapping, alongside existing T5/T6 regressions. Independent review and QA
+  remain required before PR. No physical-phone, four-device, named browser,
+  orientation or FPS acceptance is asserted here (T8/T9 remain open).

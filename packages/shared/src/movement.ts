@@ -87,6 +87,7 @@ export function stepPlayerMove(
   speedTilesPerSecond: number,
   dtSeconds: number,
   maze: readonly string[] = MAZE_MAP,
+  path?: { position: Vec2; time: number; direction?: Direction; queuedDirection?: Direction | null }[],
 ): PlayerMoveState {
   const position: Vec2 = { x: state.position.x, y: state.position.y };
   let direction: Direction = state.direction;
@@ -104,6 +105,8 @@ export function stepPlayerMove(
   }
 
   let remaining = Math.max(0, speedTilesPerSecond) * Math.max(0, dtSeconds);
+  const total = remaining;
+  path?.push({ position: { ...position }, time: 0, direction, queuedDirection });
   if (remaining <= 0) {
     return { position, direction, queuedDirection };
   }
@@ -159,6 +162,7 @@ export function stepPlayerMove(
       const advance = Math.min(remaining, distanceToDecision);
       position.x += sign * advance;
       remaining -= advance;
+      path?.push({ position: { ...position }, time: (total - remaining) / total, direction, queuedDirection });
       if (advance >= distanceToDecision - MOVE_EPSILON) {
         if (nextBlocked) {
           break;
@@ -203,6 +207,7 @@ export function stepPlayerMove(
       const advance = Math.min(remaining, distanceToDecision);
       position.y += sign * advance;
       remaining -= advance;
+      path?.push({ position: { ...position }, time: (total - remaining) / total, direction, queuedDirection });
       if (advance >= distanceToDecision - MOVE_EPSILON) {
         if (nextBlocked) {
           break;
@@ -213,5 +218,6 @@ export function stepPlayerMove(
     }
   }
 
+  path?.push({ position: { ...position }, time: 1, direction, queuedDirection });
   return { position, direction, queuedDirection };
 }
