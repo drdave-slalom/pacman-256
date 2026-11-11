@@ -369,11 +369,22 @@ function runPathMatches(run, file) {
     return path === expected || path.startsWith(`${expected}@`);
 }
 
+/**
+ * Milliseconds since the epoch for an ISO timestamp, or NaN. Fractions beyond
+ * milliseconds (the tasks API sends nanoseconds) are truncated first.
+ */
+export function timeMs(value) {
+    if (typeof value !== "string" || value === "") {
+        return Number.NaN;
+    }
+    return Date.parse(value.replace(/(\.\d{3})\d+/, "$1"));
+}
+
 /** Latest `pull_request` run of the given workflow file; `done` once completed and not skipped. */
 export function latestRunState(runs, file) {
     const latest = (runs ?? [])
         .filter((run) => run.event === "pull_request" && (!file || runPathMatches(run, file)))
-        .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || a.id - b.id)
+        .sort((a, b) => (timeMs(a.created_at) || 0) - (timeMs(b.created_at) || 0) || a.id - b.id)
         .at(-1);
     if (!latest) {
         return { done: false, run: null };
@@ -543,9 +554,10 @@ const HANDOFF_MARKER = /<!-- agent-gate:(?:build|fix) sha=/;
 export function latestHandoffAt(comments, patLogin) {
     const times = (comments ?? [])
         .filter((comment) => Boolean(patLogin) && comment?.user?.login === patLogin && HANDOFF_MARKER.test(String(comment.body ?? "")))
-        .map((comment) => String(comment.created_at ?? ""))
-        .sort();
-    return times.at(-1) || null;
+        .map((comment) => comment.created_at)
+        .filter((time) => !Number.isNaN(timeMs(time)))
+        .sort((a, b) => timeMs(a) - timeMs(b));
+    return times.at(-1) ?? null;
 }
 
 /** A Copilot agent task belongs to a PR when it has the PR (by database id) or its head branch as an artifact. */
@@ -586,7 +598,8 @@ export function copilotActivity(tasks, { since = null } = {}) {
             }
             if (!ENDED_SESSION_STATES.has(state)) {
                 unknown ??= `task ${task.id} has a session in state "${session?.state}"`;
-            } else if (since && String(session?.created_at ?? "") > since) {
+            } else if (since && timeMs(session?.created_at) > timeMs(since)) {
+                // NaN never compares greater, so an unreadable time leaves the hand-off pending.
                 afterHandoff = true;
             }
         }

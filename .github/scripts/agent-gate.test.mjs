@@ -43,6 +43,7 @@ import {
     specPathFor,
     stripWipTitle,
     taskMatchesPr,
+    timeMs,
 } from "./agent-gate.mjs";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
@@ -995,6 +996,20 @@ test("completion: only a session started after the latest build or fix hand-off 
         assert.deepEqual([world.writes, world.pat, world.agentReads], [[], [], []]);
         assert.match(world.logs.at(-1), /no build or fix hand-off/);
     }
+
+    // Nanosecond session times compare numerically with second-precision comment times.
+    const marker = [handoff("build", "2026-11-11T16:18:10Z")];
+    const sameSecondAfter = buildWorld({ prComments: marker, tasks: [copilotTask("completed", undefined, "task-1", "2026-11-11T16:18:10.115573504Z")] });
+    await run(sameSecondAfter, handleCopilotComment, copilotCommentPayload());
+    assert.deepEqual(sameSecondAfter.pat, [["graphql", "markPullRequestReadyForReview", { id: "PR_20" }]]);
+    for (const latestAt of ["2026-11-11T16:18:09.999999999Z", "2026-11-11T16:18:10.000000000Z", "not a time"]) {
+        const before = buildWorld({ prComments: marker, tasks: [copilotTask("completed", undefined, "task-1", latestAt)] });
+        await run(before, handleCopilotComment, copilotCommentPayload());
+        assert.deepEqual([before.writes, before.pat], [[], []], latestAt);
+        assert.match(before.logs.at(-1), /is pending/, latestAt);
+    }
+    assert.ok(timeMs("2026-11-11T15:54:33.115573504Z") > timeMs("2026-11-11T15:54:33Z"));
+    assert.ok(Number.isNaN(timeMs(undefined)));
 
     // An unrecognised session state is unknown.
     const odd = buildWorld({ tasks: [{ ...copilotTask("completed"), sessions: [{ state: "waiting_for_user", created_at: "2026-01-01T02:00:00Z" }] }] });
