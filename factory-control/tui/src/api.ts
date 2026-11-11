@@ -24,6 +24,45 @@ export interface ActionResultLike {
   outputTail: string;
 }
 
+export type DispatchStatus = "queued" | "dispatched" | "done" | "cancelled";
+
+export interface DispatchPlanLike {
+  kind: "dispatch" | "skill";
+  unit: string;
+  role: string;
+  worktree: string;
+  worktreePath?: string;
+  specPath?: string;
+  skill?: string;
+  skillPath?: string;
+  contextRefs?: string[];
+  acceptance: string;
+  summary: string;
+  delegationPrompt: string;
+}
+
+export interface DispatchPrepareResponse {
+  requestId: string;
+  entryId: string;
+  ok: boolean;
+  preconditions: PreconditionLike[];
+  plan: DispatchPlanLike;
+}
+
+export interface DispatchEntryLike {
+  id: string;
+  at: string;
+  unit: string;
+  specPath?: string;
+  worktree?: string;
+  role?: string;
+  acceptance?: string;
+  skill?: string;
+  contextRefs?: string[];
+  status: DispatchStatus;
+  prompt?: string;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly preconditions: PreconditionLike[];
@@ -100,5 +139,30 @@ export function executeAction(name: string, requestId: string, approvedBy?: stri
   return requestJson<ActionResultLike>(`/api/actions/${encodeURIComponent(name)}/execute`, {
     method: "POST",
     body: JSON.stringify(body),
+  });
+}
+
+export function dispatchPrepare(body: { unit: string; skill?: string }): Promise<DispatchPrepareResponse> {
+  return requestJson<DispatchPrepareResponse>("/api/dispatch/prepare", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function dispatchEnqueue(requestId: string): Promise<{ entry: DispatchEntryLike; prompt: string }> {
+  return requestJson<{ entry: DispatchEntryLike; prompt: string }>("/api/dispatch/enqueue", {
+    method: "POST",
+    body: JSON.stringify({ requestId }),
+  });
+}
+
+export function dispatchQueue(): Promise<{ entries: DispatchEntryLike[] }> {
+  return requestJson<{ entries: DispatchEntryLike[] }>("/api/dispatch/queue");
+}
+
+export function dispatchStatus(id: string, status: DispatchStatus): Promise<{ entry: DispatchEntryLike }> {
+  return requestJson<{ entry: DispatchEntryLike }>("/api/dispatch/status", {
+    method: "POST",
+    body: JSON.stringify({ id, status }),
   });
 }

@@ -79,9 +79,10 @@ factory-control/
 ```
 
 Commands: `npm run factory:control -- snapshot [--json]` is the snapshot CLI;
+`npm run factory:control -- queue [--json]` lists the M4 dispatch/skill queue;
 `npm run factory:control:serve` starts the server (snapshot + web + action
-API); the TUI is a pi extension registered in the pi config (see
-[`tui/README.md`](tui/README.md)).
+API + dispatch API); the TUI is a pi extension registered in the pi config
+(see [`tui/README.md`](tui/README.md)).
 
 ## Where the code goes and how it integrates
 
@@ -169,4 +170,111 @@ denied (`503`).
   (>1 h, or held by a dead pid) are releasable with `override:true`.
 
 Build/test: `npm run check` covers the server workspace, including the action
-modules and their unit/integration tests.
+modules and the dispatch module and their unit/integration tests.
+
+## Dispatch & skill triggers (M4)
+
+Operator-driven triggers that help *start* factory work from the control center
+while preserving factory authority (decision 6) and the one-executor rule:
+
+- **Dispatch trigger** — turn a unit in the `Spec` stage into a bounded
+  delegation request the Lead session picks up and dispatches.
+- **Skill trigger** — run skill-guided workflows (e.g. `open-pr`, `qa-tester`,
+  `pr-reviewer`) with the resulting agent starting **as a new tab/pane in
+  Herdr** (native pi managed-agent behavior).
+
+The control server **never spawns agents**. It only writes a structured request
+into a queue; the Lead session (or the human operator) is the one that
+delegates (`delegate_agent` / `continue_agent`), so each subagent opens as a
+new Herdr pane naturally. Queue entries are *requests*, not commands — the
+Lead confirms before dispatching.
+
+### Queue (state)
+
+- `factory-control/state/dispatch-queue/queue.jsonl` — append-only JSONL; one
+  line per enqueued entry: `{id, at, unit, specPath, worktree, role, acceptance,
+  status}` (+ `skill` / `contextRefs` for skill entries). Lines are never
+  rewritten or removed.
+- `factory-control/state/dispatch-queue/events.jsonl` — append-only transition
+  log (`{id, at, status}`); an entry's current status is derived by replaying
+  the events over its creation line, so history is never lost.
+- Status transitions: `queued → dispatched → done/cancelled`. The Lead may
+  update status explicitly; the server also marks `dispatched` (live agent
+  matches the unit) and `done` (a handoff is present) from snapshot evidence.
+  Evidence never cancels, reverses, or resurrects terminal entries.
+
+### Endpoints
+
+- `POST /api/dispatch/prepare` body `{unit, skill?}` → validates (unit has a
+  SPEC file, no active writer/worktree; for skills, the skill is eligible for
+  the unit) and returns `{requestId, entryId, ok, preconditions, plan}` with
+  `plan` = suggested role, worktree name (`factory/<unit>`), spec path,
+  acceptance summary, and the ready-to-paste delegation prompt. Returns
+  `409` `{error}` when an active (queued/dispatched) entry already exists for
+  the unit (S2).
+- `POST /api/dispatch/enqueue` body `{requestId}` → writes the JSONL entry
+  (one-shot requestId) and returns the entry + the delegation prompt. Returns
+  `409` `{error, preconditions}` when the prepare did not pass preconditions or
+  when the unit gained an active writer/worktree/branch/live-agent (or an
+  active queue entry) since prepare — the enqueue re-checks the snapshot
+  preconditions, closing the prepare→enqueue TOCTOU (S1).
+- `GET /api/dispatch/queue` → `{entries}` (newest last), each enriched with
+  its lead prompt; snapshot evidence is applied before listing.
+- `POST /api/dispatch/status` body `{id, status}` → explicit Lead transition
+  (`queued → dispatched`, `queued → cancelled`, `dispatched → done`,
+  `dispatched → cancelled`); invalid transitions are `400`.
+
+All dispatch endpoints use the same operator token gate as the M2 action API
+(loopback exempt).
+
+### Skill catalog
+
+`factory-control/server/src/dispatch/skills.ts` defines the bounded skills:
+
+| Skill | Skill file | Suggested role | Eligible when |
+| --- | --- | --- | --- |
+| `qa-tester` | `.github/skills/qa-tester/SKILL.md` | qa-tester | QA-stage unit (review done) |
+| `pr-reviewer` | `.github/skills/pr-reviewer/SKILL.md` | pr-reviewer | Review-stage unit |
+| `open-pr` | `.github/skills/open-pr/SKILL.md` | builder | Branch exists, no PR yet |
+
+### Delegation prompt template
+
+The server prints (and the TUI shows) a ready-to-paste prompt for the Lead:
+
+```text
+LEAD DELEGATION PROMPT — queue <id>
+Unit:       <unit>
+Spec:       <specPath>
+Worktree:   <worktreePath>   (branch factory/<unit>)
+Role:       <role>
+Queued:     <at> · status <status>
+Skill:      <skill>            (skill entries)
+Context:    <contextRefs>      (skill entries)
+
+Acceptance:
+  <acceptance>
+
+Dispatch in your pi session with the standard delegation tools, e.g.:
+
+delegate_agent({
+  definition: "<role>",
+  task: "…",
+  files: ["<specPath>", …],
+})
+```
+
+### TUI surface
+
+- “Dispatch unit” menu item on Spec-stage cards (via the unit's `x` action
+  menu) and “Run skill…” items on eligible cards.
+- `q` opens the Factory screen's queue view (entries + status).
+- Selecting an entry prints the delegation prompt; `c` notifies the copy hint.
+- `npm run factory:control -- queue list` is the CLI equivalent for the Lead.
+
+### No-server-spawn guarantee
+
+The dispatch module (`factory-control/server/src/dispatch/`) imports no
+`child_process` and executes no commands — its only side effects are append-only
+writes to the queue state directory. This is enforced by an integration test
+that enqueues and asserts no agents appear in the Herdr root and no subprocess
+runner is involved, plus a static source scan for `child_process`/`spawn`.

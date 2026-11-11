@@ -21,6 +21,8 @@ export interface FactoryScreenOps {
   refresh(): void;
   close(): void;
   startServer(): void;
+  openQueue(): void;
+  copyLeadPrompt(): void;
 }
 
 export function handleKey(data: string, kb: KeyMatcher, ops: FactoryScreenOps): void {
@@ -62,6 +64,14 @@ export function handleKey(data: string, kb: KeyMatcher, ops: FactoryScreenOps): 
   }
   if (data === "s" || data === "S") {
     ops.startServer();
+    return;
+  }
+  if (data === "q" || data === "Q") {
+    ops.openQueue();
+    return;
+  }
+  if (data === "c" || data === "C") {
+    ops.copyLeadPrompt();
     return;
   }
 }

@@ -1,4 +1,7 @@
 import { pathToFileURL } from "node:url";
+import { DispatchService } from "./dispatch/service.ts";
+import type { DispatchEntry } from "./dispatch/types.ts";
+import { SnapshotService } from "./service.ts";
 import { buildSnapshot } from "./snapshot.ts";
 import type { FactorySnapshot, Unit } from "./types.ts";
 
@@ -10,14 +13,19 @@ export interface CliOptions {
 
 export function usage(): string {
   return [
-    "factory:control — factory snapshot CLI",
+    "factory:control — factory control CLI",
     "",
     "Usage:",
     "  factory:control snapshot [--json] [--root <path>] [--no-gh]",
+    "  factory:control queue [--json] [--root <path>]",
+    "",
+    "Commands:",
+    "  snapshot  print the factory snapshot (stages, agents, PRs)",
+    "  queue     list the M4 dispatch/skill queue entries (newest last)",
     "",
     "Options:",
-    "  --json        print the raw snapshot as JSON",
-    "  --root <path> repo root to snapshot (default: current directory)",
+    "  --json        print raw JSON",
+    "  --root <path> repo root (default: current directory)",
     "  --no-gh      skip GitHub reads (gh fields become unavailable)",
   ].join("\n");
 }
@@ -38,6 +46,20 @@ export function parseArgs(argv: string[]): CliOptions | { error: string } {
     }
   }
   return options;
+}
+
+function queueLine(entry: DispatchEntry): string {
+  const skill = entry.skill !== undefined ? ` skill=${entry.skill}` : "";
+  const role = entry.role !== undefined ? ` role=${entry.role}` : "";
+  const spec = entry.specPath !== undefined ? `  ${entry.specPath}` : "";
+  return `  [${entry.status.padEnd(10)}] ${entry.id} ${entry.unit}${role}${skill}${spec}`;
+}
+
+export function queueSummary(entries: DispatchEntry[]): string {
+  const lines: string[] = [];
+  lines.push(`dispatch queue — ${entries.length} entries`);
+  for (const entry of entries) lines.push(queueLine(entry));
+  return lines.join("\n");
 }
 
 function stageLine(unit: Unit): string {
@@ -75,7 +97,7 @@ export function humanSummary(snapshot: FactorySnapshot): string {
 
 export async function runCli(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
-  if (command !== "snapshot") {
+  if (command !== "snapshot" && command !== "queue") {
     process.stderr.write(usage() + "\n");
     return 2;
   }
@@ -83,6 +105,17 @@ export async function runCli(argv: string[]): Promise<number> {
   if ("error" in parsed) {
     process.stderr.write(`${parsed.error}\n\n${usage()}\n`);
     return 2;
+  }
+  if (command === "queue") {
+    const service = new SnapshotService({ root: parsed.root, noGh: parsed.noGh });
+    const dispatch = new DispatchService({ snapshot: () => service.get(), factoryRoot: parsed.root });
+    const entries = await dispatch.list();
+    if (parsed.json) {
+      process.stdout.write(JSON.stringify(entries, null, 2) + "\n");
+    } else {
+      process.stdout.write(queueSummary(entries) + "\n");
+    }
+    return 0;
   }
   const snapshot = await buildSnapshot({ root: parsed.root, noGh: parsed.noGh });
   if (parsed.json) {
