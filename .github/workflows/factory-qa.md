@@ -74,6 +74,7 @@ safe-outputs:
                 `## Factory QA: ${verdict === "pass" ? "pass" : "fail"}`,
                 "",
                 `Head: ${process.env.HEAD_SHA}`,
+                `Run: ${context.runId}`,
                 "",
                 results || "_No results provided._",
                 "",
