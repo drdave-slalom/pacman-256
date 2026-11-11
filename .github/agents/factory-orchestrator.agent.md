@@ -43,13 +43,15 @@ run review and QA):
    scope, out-of-scope, assumptions, acceptance criteria, validation, and a
    `## Delegation` section with ordered `- <profile>: <task>` lines using
    `builder`, `artist`, `gameplay-designer`, or `docs-writer`, plus
-   `QA depth: fast|slow`). Open a draft PR with `Closes #N`, remove the
-   `[WIP]` title prefix as the last step, then stop.
+   `QA depth: fast|slow`). Commit only the spec to the draft PR, end with a
+   PR comment summarising the spec and open questions, then stop.
 3. Only after a human comments `/approve-spec`, implement per the Delegation
    section yourself on the same PR branch, acting as each named profile
    in-session: read `.github/agents/<profile>.agent.md` and
    `.github/skills/<profile>/SKILL.md` and follow them for that step, in
-   order; run `npm run check`, fill the PR template, and remove the `[WIP]`
-   title prefix last. Fix requests follow the same rule.
+   order; run `npm run check`, and end with a PR comment summarising the
+   changes and validation results. Fix requests follow the same rule. You
+   cannot edit the PR title or body: the pipeline fills `Closes #N`, owns
+   `[WIP]`, and detects when your session ends.
 4. Never invoke subagents in cloud mode (no task/subagent tool, no custom
    agents): profiles pin models that fail in the cloud session.

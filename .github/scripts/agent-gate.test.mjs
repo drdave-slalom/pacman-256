@@ -3,13 +3,16 @@ import test from "node:test";
 import {
     BUILD_PROFILES,
     buildInstructions,
+    copilotActivity,
     createPatClient,
     extractSection,
+    fillLinkedIssue,
     findQaVerdict,
     fixInstructions,
     followUpTitle,
     gateMarker,
     handleApproveSpec,
+    handleCopilotComment,
     handleDispatch,
     handleManualEvaluate,
     handlePullRequestEvent,
@@ -18,6 +21,7 @@ import {
     hasRole,
     hasTrustedMarker,
     isCopilotAuthor,
+    isCopilotBotUser,
     isHumanActor,
     isPipelinePr,
     isSensitivePath,
@@ -37,6 +41,8 @@ import {
     sensitivePaths,
     specInstructions,
     specPathFor,
+    stripWipTitle,
+    taskMatchesPr,
 } from "./agent-gate.mjs";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
@@ -291,29 +297,34 @@ test("review, QA, and check helpers read only trusted verdicts for the head SHA 
     assert.equal(gateMarker("bound", 20), "<!-- agent-gate:bound pr=20 -->");
 });
 
-test("instruction text names the spec, profiles, and required rules", () => {
+test("instruction text names the spec, profiles, and required rules, and never asks Copilot to edit the title or body", () => {
     const spec = specInstructions({ issueNumber: 9, specPath: "SPEC/issue-9-x.md" });
     assert.match(spec, /Spec only/);
+    assert.match(spec, /issue #9/);
     assert.match(spec, /SPEC\/issue-9-x\.md/);
     assert.match(spec, /## Delegation/);
-    assert.match(spec, /Closes #9/);
-    assert.match(spec, /remove the `\[WIP\]` prefix/);
     assert.match(spec, /Do not use the task\/subagent tool/);
-    const build = buildInstructions({ issueNumber: 9, specPath: "SPEC/a.md", steps: [{ profile: "artist", task: "Draw" }], qaDepth: "fast" });
+    assert.match(spec, /final step, post a pull request comment summarising/);
+    const build = buildInstructions({ specPath: "SPEC/a.md", steps: [{ profile: "artist", task: "Draw" }], qaDepth: "fast" });
     assert.match(build, /^@copilot /);
     assert.match(build, /\.github\/agents\/artist\.agent\.md/);
     assert.match(build, /\.github\/skills\/artist\/SKILL\.md/);
     assert.match(build, /Do NOT use the task\/subagent tool or start custom agents/);
     assert.doesNotMatch(build, /delegate to that custom agent/);
     assert.match(build, /npm run check/);
-    assert.match(build, /Closes #9/);
-    assert.match(build, /auto-generated-pr-description:start/);
-    assert.match(build, /remove the `\[WIP\]` prefix/);
+    assert.match(build, /post a pull request comment summarising what you changed, the validation you ran/);
     const fix = fixInstructions({ blockers: [{ source: "QA", details: "> boom" }], cycleLabel: "cycle:1", steps: [], sha: SHA });
     assert.match(fix, /^@copilot /);
-    assert.match(fix, /remove the `\[WIP\]` prefix/);
     assert.match(fix, /Do NOT use the task\/subagent tool/);
+    assert.match(fix, /post a pull request comment summarising/);
+    assert.match(fix, /false positive/);
     assert.ok(fix.endsWith(gateMarker("fix", SHA)));
+    for (const [name, text] of Object.entries({ spec, build, fix })) {
+        assert.doesNotMatch(text, /\[WIP\]/, name);
+        assert.doesNotMatch(text, /pull_request_template|fill the (?:pr|pull request) template|keep the pull request template/i, name);
+        assert.doesNotMatch(text, /(?:edit|update|fill|remove)[^.\n]*(?:pull request|PR) (?:title|body)/i, name);
+        assert.doesNotMatch(text, /Linked issue/, name);
+    }
 });
 
 test("PAT client sends bearer auth, caches the login, and surfaces API and GraphQL errors", async () => {
@@ -369,6 +380,7 @@ function fakeGitHub(seed = {}) {
     }
     const writes = [];
     const pat = [];
+    const agentReads = [];
     const notFound = () => Object.assign(new Error("Not Found"), { status: 404 });
     const labelsOf = (number) => state.issues.get(number)?.labels.map(({ name }) => name) ?? [];
     const github = {
@@ -435,9 +447,18 @@ function fakeGitHub(seed = {}) {
                 listFiles: async () => ({ data: state.files }),
                 listCommits: async () => ({ data: state.commits.map(({ sha }) => ({ sha })) }),
                 listReviews: async () => ({ data: state.reviews }),
-                update: async ({ pull_number, title }) => {
-                    writes.push(["setTitle", pull_number, title]);
-                    state.prs.get(pull_number).title = title;
+                update: async ({ pull_number, title, body }) => {
+                    if (seed.updateBodyError && body !== undefined) {
+                        throw new Error(seed.updateBodyError);
+                    }
+                    if (title !== undefined) {
+                        writes.push(["setTitle", pull_number, title]);
+                        state.prs.get(pull_number).title = title;
+                    }
+                    if (body !== undefined) {
+                        writes.push(["setBody", pull_number, body]);
+                        state.prs.get(pull_number).body = body;
+                    }
                 },
                 requestReviewers: async ({ pull_number, reviewers }) => writes.push(["requestReviewers", pull_number, reviewers]),
             },
@@ -456,6 +477,14 @@ function fakeGitHub(seed = {}) {
         let response = {};
         if (path === "/user") {
             response = { login: PAT_LOGIN };
+        } else if (path.startsWith("/agents/")) {
+            agentReads.push(path);
+            if (seed.tasksError) {
+                return { ok: false, status: seed.tasksError, text: async () => JSON.stringify({ message: "Agents API unavailable" }) };
+            }
+            const detail = /\/tasks\/([^/]+)$/.exec(path);
+            const tasks = seed.tasks ?? [];
+            response = detail ? tasks.find((task) => String(task.id) === decodeURIComponent(detail[1])) : { tasks: tasks.map(({ sessions, ...task }) => task) };
         } else if (path === "/graphql") {
             const mutation = /\{\s*(\w+)\(/.exec(body.query)[1];
             pat.push(["graphql", mutation, body.variables]);
@@ -474,7 +503,7 @@ function fakeGitHub(seed = {}) {
     };
     const logs = [];
     const core = { info: (line) => logs.push(line), warning: (line) => logs.push(line), setFailed: (line) => writes.push(["failed", line]) };
-    return { state, github, core, writes, pat, logs, fetchImpl, labelsOf };
+    return { state, github, core, writes, pat, agentReads, logs, fetchImpl, labelsOf };
 }
 
 async function run(world, handler, payload, env = {}) {
@@ -488,6 +517,7 @@ async function run(world, handler, payload, env = {}) {
 }
 
 const pipelinePr = (overrides = {}) => ({
+    id: 9020,
     number: 20,
     node_id: "PR_20",
     state: "open",
@@ -497,7 +527,7 @@ const pipelinePr = (overrides = {}) => ({
     title: "Docs fix",
     body: "## Linked issue\n\nCloses #10\n\n## Follow-ups\n\nNone\n\n<!-- auto-generated-pr-description:start -->\nFixes #99\n<!-- auto-generated-pr-description:end -->\nFixes #10",
     user: { login: "Copilot", type: "Bot" },
-    head: { sha: SHA, repo: { full_name: REPO } },
+    head: { sha: SHA, ref: "copilot/docs-fix", repo: { full_name: REPO } },
     base: { ref: "main" },
     ...overrides,
 });
@@ -521,10 +551,13 @@ function reviewWorld(overrides = {}) {
         commits: overrides.commits,
         fileContent: "## Delegation\n- docs-writer: Update docs\n- QA depth: fast\n",
         graphqlErrors: overrides.graphqlErrors,
+        tasks: overrides.tasks,
+        tasksError: overrides.tasksError,
     });
 }
 
 const workflowRun = (head_sha = SHA) => ({ workflow_run: { event: "pull_request", head_sha, pull_requests: [{ number: 20 }] } });
+const copilotTask = (sessionState, artifacts = [{ type: "pull", data: { id: 9020 } }], id = "task-1") => ({ id, state: sessionState, artifacts, sessions: [{ state: "completed" }, { state: sessionState, error: null }] });
 
 test("evaluate: all gates green on a docs PR enables auto-merge bound to the head SHA", async () => {
     const world = reviewWorld();
@@ -576,15 +609,34 @@ test("evaluate: blockers start a cycle, return the PR to draft and [WIP], and po
     assert.ok(body.body.includes(gateMarker("fix", SHA)));
     assert.ok(!body.body.includes("[nit]"));
 
-    // A trusted fix marker for this SHA makes a second evaluation a no-op.
-    const again = reviewWorld({ reviews, prComments: [qaComment("fail"), { user: { login: PAT_LOGIN }, body: gateMarker("fix", SHA) }] });
+    // A trusted fix marker for this SHA while Copilot is still working only waits.
+    const fixMarker = { user: { login: PAT_LOGIN }, body: gateMarker("fix", SHA) };
+    const again = reviewWorld({ reviews, prComments: [qaComment("fail"), fixMarker], tasks: [copilotTask("in_progress")] });
     await run(again, handleWorkflowRun, workflowRun());
     assert.deepEqual([again.writes, again.pat], [[], []]);
+    assert.match(again.logs.at(-1), /still working; waiting/);
 
     // A marker from anyone else is ignored.
     const spoofed = reviewWorld({ reviews, prComments: [qaComment("fail"), { user: { login: "mallory" }, body: gateMarker("fix", SHA) }] });
     await run(spoofed, handleWorkflowRun, workflowRun());
     assert.equal(spoofed.pat.length, 2);
+});
+
+test("evaluate: blockers repeated on a head whose fix session ended without commits stop at needs-human", async () => {
+    const reviews = [copilotReview, { ...factoryApproval, state: "CHANGES_REQUESTED", body: "- [blocker] AGENTS.md:38 unchanged" }];
+    const fixMarker = { user: { login: PAT_LOGIN }, body: gateMarker("fix", SHA) };
+    for (const [name, overrides] of Object.entries({ done: { tasks: [copilotTask("completed")] }, "API error": { tasksError: 500 } })) {
+        const world = reviewWorld({ labels: ["agent:active", "status:review", "type:docs", "cycle:1"], reviews, prComments: [qaComment(), fixMarker], ...overrides });
+        await run(world, handleWorkflowRun, workflowRun());
+        assert.deepEqual(world.pat, [], name);
+        assert.ok(world.labelsOf(10).includes("agent:needs-human"), name);
+        assert.ok(!world.labelsOf(10).includes("cycle:2"), name);
+        const message = world.writes.at(-1)[2];
+        assert.equal(world.writes.at(-1)[1], 20, name);
+        assert.match(message, /raised again on `0123456`/, name);
+        assert.match(message, /false positive/, name);
+        assert.match(message, /AGENTS\.md:38 unchanged/, name);
+    }
 });
 
 test("evaluate: second cycle adds cycle:2; blockers after cycle:2 stop at needs-human", async () => {
@@ -769,12 +821,23 @@ test("dispatch ignores bots, non-collaborators, and readers; respects needs-huma
     assert.match(full.writes[0][2], /limit 3/);
 });
 
-function approveWorld({ title = "Spec: docs fix", fileContent = "## Delegation\n- docs-writer: Update README\n- builder: Add a test\n- QA depth: slow\n", labels = ["agent:active", "status:spec", "role:art", "type:docs"] } = {}) {
+function approveWorld({
+    title = "Spec: docs fix",
+    body,
+    fileContent = "## Delegation\n- docs-writer: Update README\n- builder: Add a test\n- QA depth: slow\n",
+    labels = ["agent:active", "status:spec", "role:art", "type:docs"],
+    tasks,
+    tasksError,
+    updateBodyError,
+} = {}) {
     return fakeGitHub({
         issues: [{ number: 10, labels }],
-        prs: [pipelinePr({ draft: true, title })],
+        prs: [pipelinePr({ draft: true, title, ...(body === undefined ? {} : { body }) })],
         files: [{ filename: "SPEC/issue-10-docs-fix.md", status: "added" }],
         fileContent,
+        tasks,
+        tasksError,
+        updateBodyError,
     });
 }
 const approvePayload = (body = "/approve-spec", user = { login: PAT_LOGIN, type: "User" }) => ({ issue: { number: 20, pull_request: {} }, comment: { body, user } });
@@ -792,15 +855,169 @@ test("/approve-spec binds the issue, mirrors roles, re-marks [WIP], and posts bu
     assert.match(build[2].body, /1\. \*\*docs-writer\*\*: Update README/);
     assert.match(build[2].body, /2\. \*\*builder\*\*: Add a test/);
     assert.match(build[2].body, /QA depth: slow/);
+    assert.ok(!world.writes.some(([kind]) => kind === "setBody"), "Linked issue already closes #10");
 });
 
-test("/approve-spec refuses while [WIP], on a SHA mismatch, and ignores bots and non-writers", async () => {
-    const wip = approveWorld({ title: "[WIP] Spec: docs fix" });
-    await run(wip, handleApproveSpec, approvePayload());
-    assert.deepEqual(wip.pat, []);
-    assert.match(wip.writes.at(-1)[2], /still be working/);
-    assert.match(wip.writes.at(-1)[2], /remove the `\[WIP\]` prefix yourself and comment `\/approve-spec` again/);
-    assert.ok(wip.labelsOf(10).includes("status:spec"));
+test("/approve-spec: a Copilot session in progress refuses; a finished session strips [WIP] and proceeds", async () => {
+    for (const state of ["in_progress", "queued"]) {
+        const busy = approveWorld({ title: "Spec: docs fix", tasks: [copilotTask(state)] });
+        await run(busy, handleApproveSpec, approvePayload());
+        assert.deepEqual(busy.pat, [], state);
+        assert.match(busy.writes.at(-1)[2], /Copilot is still working/, state);
+        assert.ok(busy.labelsOf(10).includes("status:spec"), state);
+        assert.deepEqual(busy.agentReads, ["/agents/repos/drdave-slalom/pacman-256/tasks", "/agents/repos/drdave-slalom/pacman-256/tasks/task-1"]);
+    }
+
+    const done = approveWorld({ title: "[WIP] Spec: docs fix", tasks: [copilotTask("completed", [{ type: "branch", data: { head_ref: "copilot/docs-fix" } }])] });
+    await run(done, handleApproveSpec, approvePayload());
+    const titles = done.writes.filter(([kind]) => kind === "setTitle").map(([, , title]) => title);
+    assert.deepEqual(titles, ["Spec: docs fix", "[WIP] Spec: docs fix"]);
+    assert.ok(done.labelsOf(10).includes("status:ready"));
+    assert.equal(done.pat.length, 2);
+
+    // Tasks for other PRs or branches do not count.
+    const other = approveWorld({ title: "[WIP] Spec: docs fix", tasks: [copilotTask("completed", [{ type: "pull", data: { id: 1 } }, { type: "branch", data: { head_ref: "copilot/other" } }])] });
+    await run(other, handleApproveSpec, approvePayload());
+    assert.deepEqual(other.pat, []);
+    assert.match(other.writes.at(-1)[2], /could not be confirmed/);
+});
+
+test("/approve-spec fills `Closes #<issue>` under Linked issue only when it is missing", async () => {
+    const placeholder = "## Linked issue\n\n<!-- `Closes #<n>`, or \"No issue\" if none. -->\nCloses #\n\n## Spec\n\nSPEC/x.md\n\n<!-- auto-generated-pr-description:start -->\nFixes #10\n<!-- auto-generated-pr-description:end -->\nFixes #10";
+    const world = approveWorld({ body: placeholder });
+    await run(world, handleApproveSpec, approvePayload());
+    const [, number, body] = world.writes.find(([kind]) => kind === "setBody");
+    assert.equal(number, 20);
+    assert.equal(body, placeholder.replace("Closes #\n", "Closes #10\n"));
+    assert.equal(world.pat.length, 2);
+
+    // A failed body update is only a warning.
+    const failing = approveWorld({ body: placeholder, updateBodyError: "Forbidden" });
+    await run(failing, handleApproveSpec, approvePayload());
+    assert.equal(failing.pat.length, 2);
+    assert.ok(failing.logs.some((line) => /Could not fill "Linked issue"/.test(line)));
+});
+
+test("Linked issue filling: placeholder, missing line, missing section, already present", () => {
+    assert.equal(fillLinkedIssue("## Linked issue\n\nCloses #10\n\n## Spec", 10), null);
+    assert.equal(fillLinkedIssue("## Linked issue\nFixes #10", 10), null);
+    assert.equal(fillLinkedIssue("## Linked issue\n\n## Spec\nx", 10), "## Linked issue\n\nCloses #10\n\n## Spec\nx");
+    assert.equal(fillLinkedIssue("## Linked issue\nCloses #\n## Spec", 10), "## Linked issue\nCloses #10\n## Spec");
+    assert.equal(fillLinkedIssue("## Linked issue\nCloses #7\n## Spec", 10), "## Linked issue\n\nCloses #10\nCloses #7\n## Spec");
+    assert.equal(fillLinkedIssue("Summary\n\nFixes #10", 10), "## Linked issue\n\nCloses #10\n\nSummary\n\nFixes #10");
+    assert.equal(
+        fillLinkedIssue("<!-- auto-generated-pr-description:start -->\n## Linked issue\nCloses #10\n<!-- auto-generated-pr-description:end -->\n## Linked issue\nCloses #\n", 10),
+        "<!-- auto-generated-pr-description:start -->\n## Linked issue\nCloses #10\n<!-- auto-generated-pr-description:end -->\n## Linked issue\nCloses #10\n",
+    );
+});
+
+test("Copilot activity: matching by PR id or branch; working, done, and unknown", () => {
+    const pr = { id: 9020, head: { ref: "copilot/docs-fix" } };
+    assert.equal(taskMatchesPr({ artifacts: [{ type: "pull", data: { id: 9020 } }] }, pr), true);
+    assert.equal(taskMatchesPr({ artifacts: [{ type: "branch", data: { head_ref: "copilot/docs-fix" } }] }, pr), true);
+    assert.equal(taskMatchesPr({ artifacts: [{ type: "pull", data: { id: 1 } }, { type: "branch", data: { head_ref: "main" } }] }, pr), false);
+    assert.equal(taskMatchesPr({}, pr), false);
+    assert.equal(copilotActivity([]).state, "unknown");
+    assert.equal(copilotActivity([copilotTask("in_progress")]).state, "working");
+    assert.equal(copilotActivity([copilotTask("queued")]).state, "working");
+    assert.equal(copilotActivity([copilotTask("completed"), copilotTask("failed")]).state, "done");
+    assert.equal(copilotActivity([{ id: "t", state: "queued", sessions: [] }]).state, "working");
+    assert.equal(copilotActivity([{ id: "t", state: "completed", sessions: [] }]).state, "unknown");
+    assert.equal(stripWipTitle("[WIP] [wip]  Docs fix"), "Docs fix");
+    assert.equal(stripWipTitle("Docs fix [WIP]"), "Docs fix [WIP]");
+    assert.equal(isCopilotBotUser({ login: "Copilot", type: "Bot" }), true);
+    assert.equal(isCopilotBotUser({ login: "copilot-swe-agent[bot]", type: "Bot" }), true);
+    assert.equal(isCopilotBotUser({ login: "Copilot", type: "User" }), false);
+    assert.equal(isCopilotBotUser({ login: "github-actions[bot]", type: "Bot" }), false);
+});
+
+const copilotCommentPayload = (user = { login: "Copilot", type: "Bot" }, action = "created") => ({ action, issue: { number: 20, pull_request: {} }, comment: { body: "Done: updated docs; npm run check passed.", user } });
+const buildWorld = (overrides = {}) =>
+    reviewWorld({ pr: { draft: true, title: "[WIP] Docs fix", ...overrides.pr }, labels: overrides.labels ?? ["agent:active", "status:ready", "type:docs", "role:docs"], ...overrides, prComments: [] });
+
+test("completion: a Copilot reply after the session ended strips [WIP] and marks the build ready", async () => {
+    const world = buildWorld({ tasks: [copilotTask("completed")] });
+    const sleeps = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = world.fetchImpl;
+    try {
+        await handleCopilotComment({ github: world.github, context: { repo: { owner: "drdave-slalom", repo: "pacman-256" }, payload: copilotCommentPayload() }, core: world.core, env: { COPILOT_ASSIGN_TOKEN: "pat" }, sleep: async (ms) => sleeps.push(ms) });
+    } finally {
+        globalThis.fetch = original;
+    }
+    assert.deepEqual(sleeps, []);
+    assert.ok(world.writes.some(([kind, number, title]) => kind === "setTitle" && number === 20 && title === "Docs fix"));
+    assert.deepEqual(world.pat, [["graphql", "markPullRequestReadyForReview", { id: "PR_20" }]]);
+    assert.ok(world.labelsOf(10).includes("status:review") && !world.labelsOf(10).includes("status:ready"));
+
+    // At the spec gate only the title is cleaned up.
+    const spec = buildWorld({ labels: ["agent:active", "status:spec"], tasks: [copilotTask("completed")] });
+    await run(spec, handleCopilotComment, copilotCommentPayload());
+    assert.deepEqual(spec.writes, [["setTitle", 20, "Docs fix"]]);
+    assert.deepEqual(spec.pat, []);
+});
+
+test("completion: in progress (after retries), API errors, and other commenters do nothing", async () => {
+    const busy = buildWorld({ tasks: [copilotTask("in_progress")] });
+    const sleeps = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = busy.fetchImpl;
+    try {
+        await handleCopilotComment({ github: busy.github, context: { repo: { owner: "drdave-slalom", repo: "pacman-256" }, payload: copilotCommentPayload() }, core: busy.core, env: { COPILOT_ASSIGN_TOKEN: "pat" }, sleep: async (ms) => sleeps.push(ms) });
+    } finally {
+        globalThis.fetch = original;
+    }
+    assert.equal(sleeps.length, 3);
+    assert.deepEqual([busy.writes, busy.pat], [[], []]);
+    assert.match(busy.logs.at(-1), /is working/);
+
+    for (const [name, overrides] of Object.entries({ "API error": { tasksError: 502 }, "no linked task": { tasks: [copilotTask("completed", [{ type: "pull", data: { id: 1 } }])] } })) {
+        const world = buildWorld(overrides);
+        await run(world, handleCopilotComment, copilotCommentPayload());
+        assert.deepEqual([world.writes, world.pat], [[], []], name);
+        assert.match(world.logs.at(-1), /is unknown/, name);
+    }
+    const errored = buildWorld({ tasksError: 502 });
+    await run(errored, handleCopilotComment, copilotCommentPayload());
+    assert.ok(errored.logs.some((line) => /Could not read Copilot task state.*502/.test(line)));
+
+    for (const payload of [copilotCommentPayload({ login: "drdave-slalom", type: "User" }), copilotCommentPayload({ login: "Copilot", type: "User" }), copilotCommentPayload(undefined, "edited")]) {
+        const world = buildWorld({ tasks: [copilotTask("completed")] });
+        await run(world, handleCopilotComment, payload);
+        assert.deepEqual([world.writes, world.pat, world.agentReads], [[], [], []]);
+    }
+
+    const stopped = buildWorld({ labels: ["agent:active", "status:ready", "agent:needs-human"], tasks: [copilotTask("completed")] });
+    await run(stopped, handleCopilotComment, copilotCommentPayload());
+    assert.deepEqual([stopped.writes, stopped.pat], [[], []]);
+});
+
+test("completion: manual evaluate finishes a completed build before evaluating gates", async () => {
+    const world = buildWorld({ tasks: [copilotTask("completed")] });
+    await run(world, handleManualEvaluate, {}, { PR_NUMBER: "20" });
+    assert.ok(world.writes.some(([kind, , title]) => kind === "setTitle" && title === "Docs fix"));
+    assert.deepEqual(world.pat, [["graphql", "markPullRequestReadyForReview", { id: "PR_20" }]]);
+    assert.ok(world.labelsOf(10).includes("status:review"));
+
+    const busy = buildWorld({ tasks: [copilotTask("queued")] });
+    await run(busy, handleManualEvaluate, {}, { PR_NUMBER: "20" });
+    assert.deepEqual([busy.writes, busy.pat], [[], []]);
+});
+
+test("/approve-spec refuses while [WIP] when the tasks API is unavailable, on a SHA mismatch, and ignores bots and non-writers", async () => {
+    for (const overrides of [{}, { tasksError: 403 }]) {
+        const wip = approveWorld({ title: "[WIP] Spec: docs fix", ...overrides });
+        await run(wip, handleApproveSpec, approvePayload());
+        assert.deepEqual(wip.pat, []);
+        assert.match(wip.writes.at(-1)[2], /could not be confirmed/);
+        assert.match(wip.writes.at(-1)[2], /remove the `\[WIP\]` prefix yourself and comment `\/approve-spec` again/);
+        assert.ok(wip.labelsOf(10).includes("status:spec"));
+    }
+
+    // No [WIP] and no task information: approve as before.
+    const unknownClean = approveWorld({ tasksError: 500 });
+    await run(unknownClean, handleApproveSpec, approvePayload());
+    assert.equal(unknownClean.pat.length, 2);
 
     const mismatch = approveWorld();
     await run(mismatch, handleApproveSpec, approvePayload("/approve-spec abcdef0"));

@@ -156,15 +156,19 @@ review, QA, integration, CI watch), and the worktree discipline below:
    `SPEC/<id>-<slug>.md`, with goal, scope, out-of-scope, assumptions,
    acceptance criteria, validation, and a `## Delegation` section: one line per
    ordered step, `- <profile>: <task>` (profiles: `builder`, `artist`,
-   `gameplay-designer`, `docs-writer`), plus `QA depth: fast|slow`. Open a
-   draft PR with `Closes #N`, remove the `[WIP]` title prefix as the last
-   step, then stop at the spec gate.
+   `gameplay-designer`, `docs-writer`), plus `QA depth: fast|slow`. Commit
+   only the spec to the draft PR, end with a PR comment summarising the spec
+   and open questions, then stop at the spec gate.
 3. **Build** (only after a human comments `/approve-spec`): implement per the
    Delegation section yourself on the same PR branch, acting as each named
    profile in-session: read `.github/agents/<profile>.agent.md` and
    `.github/skills/<profile>/SKILL.md` and follow them for that step, in
-   order. Run `npm run check`, fill the PR template, and remove the `[WIP]`
-   title prefix last. Fix requests follow the same rule.
+   order. Run `npm run check` and end with a PR comment summarising the
+   changes and validation results. Fix requests follow the same rule.
+
+The cloud agent cannot edit the PR title or body, so the pipeline owns them:
+it fills `Closes #N` under "Linked issue", strips `[WIP]`, and detects the end
+of each session through the Copilot agent tasks API.
 
 Cloud mode uses no worktrees and never invokes subagents: do not use the
 task/subagent tool or start custom agents, because profiles pin models that
