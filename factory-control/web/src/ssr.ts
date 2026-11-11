@@ -1,7 +1,8 @@
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
-import type { FactorySnapshot } from "@maze/factory-control-shared";
+import type { FactorySnapshot, Unit } from "@maze/factory-control-shared";
 import { Board } from "./components/Board";
+import { UnitCard } from "./components/UnitCard";
 import { AgentsPanel } from "./components/AgentsPanel";
 import { UnitDetail } from "./components/UnitDetail";
 import { NotFound, Unreachable } from "./components/Unreachable";
@@ -23,6 +24,11 @@ export function renderPage(snapshot: FactorySnapshot, path: string): string {
     element = createElement(Board, { snapshot });
   }
   return renderToString(element);
+}
+
+/** Render a single unit card (used by the integration tests). */
+export function renderUnitCard(unit: Unit): string {
+  return renderToString(createElement(UnitCard, { unit }));
 }
 
 /** Render the friendly “control server not reachable” state. */

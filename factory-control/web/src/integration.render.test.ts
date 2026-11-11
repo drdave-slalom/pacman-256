@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { buildSync } from "esbuild";
+import type { Unit } from "@maze/factory-control-shared";
 import { fixtureSnapshot } from "./state/fixtures.ts";
 
 /**
@@ -19,8 +20,9 @@ const ssrEntry = fileURLToPath(new URL("./ssr.ts", import.meta.url));
 
 type SsrModule = {
   renderPage?: (snapshot: ReturnType<typeof fixtureSnapshot>, path: string) => string;
+  renderUnitCard?: (unit: Unit) => string;
   renderUnreachable?: () => string;
-  default?: { renderPage: (snapshot: ReturnType<typeof fixtureSnapshot>, path: string) => string; renderUnreachable: () => string };
+  default?: { renderPage: (snapshot: ReturnType<typeof fixtureSnapshot>, path: string) => string; renderUnitCard: (unit: Unit) => string; renderUnreachable: () => string };
 };
 
 function compileSsr(): Promise<SsrModule> {
@@ -54,9 +56,38 @@ test("board renders every unit card with stage columns and attention badges", as
     "#16", "#17", "⛔ blocked",
     "Review pending", "Ready to merge", "Ready for cleanup", "Parse error",
     "PR #42", "@factory/t10-execute", "+42 −7", "● dirty",
+    "github-mark", "chip-source",
   ]) {
     assert.ok(html.includes(expected), `board missing ${expected}`);
   }
+  // Exactly the two issue-carrying units (I16-issue, T17-hybrid) show the GitHub badge.
+  assert.equal((html.match(/github-mark/g) ?? []).length, 2, "GitHub badge count on board");
+});
+
+test("unit cards show a GitHub logo badge only when an issue is attached", async () => {
+  const mod = await compileSsr();
+  const renderUnitCard = mod.renderUnitCard ?? mod.default?.renderUnitCard;
+  assert.ok(renderUnitCard, "ssr bundle missing renderUnitCard");
+  const snap = fixtureSnapshot();
+  const unit = (id: string) => snap.units.find((u) => u.id === id);
+  assert.ok(unit("I16-issue"), "fixture missing I16-issue");
+  assert.ok(unit("T17-hybrid"), "fixture missing T17-hybrid");
+  assert.ok(unit("T10-execute"), "fixture missing T10-execute");
+
+  // Issue-seeded card shows the badge, placed right before the #<n> chip.
+  const issueHtml = renderUnitCard(unit("I16-issue")!);
+  assert.ok(issueHtml.includes("github-mark"), "issue-seeded card missing GitHub badge");
+  assert.ok(issueHtml.includes("#16"), "issue-seeded card missing # chip");
+  assert.ok(issueHtml.indexOf("github-mark") < issueHtml.indexOf("#16"), "GitHub badge should sit next to the # chip");
+
+  // Hybrid card (issue + spec) shows the badge.
+  const hybridHtml = renderUnitCard(unit("T17-hybrid")!);
+  assert.ok(hybridHtml.includes("github-mark"), "hybrid card missing GitHub badge");
+  assert.ok(hybridHtml.includes("#17"), "hybrid card missing # chip");
+
+  // Spec-only card shows none.
+  const specHtml = renderUnitCard(unit("T10-execute")!);
+  assert.ok(!specHtml.includes("github-mark"), "spec-only card must not show GitHub badge");
 });
 
 test("unit detail renders spec, git, PR/checks, and the handoff trail", async () => {

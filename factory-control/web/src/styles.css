@@ -350,6 +350,17 @@ body {
   color: var(--muted);
 }
 
+.chip-source {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 5px;
+  color: var(--muted);
+}
+
+.chip-source .github-mark {
+  display: block;
+}
+
 /* ---------- badges ---------- */
 .badges {
   display: flex;
