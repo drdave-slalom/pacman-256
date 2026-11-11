@@ -3,6 +3,7 @@ import test from "node:test";
 import {
     applyTaskStatusUpdates,
     buildCopilotInvocation,
+    buildPiInvocation,
     containsLikelySecret,
     detectDocsBackend,
     getDocumentationPlan,
@@ -11,6 +12,7 @@ import {
     renderBriefTaskStatus,
     replaceManagedStatusBlock,
     resolveDocumentationUpdates,
+    runPiAgent,
     validateCopilotResponse,
 } from "./update-staged-docs.mjs";
 
@@ -199,4 +201,124 @@ test("validated response is applied after the retry loop (task statuses, docs, b
     assert.equal(byPath["README.md"], "# Readme\n\nUpdated.\n");
     assert.equal(readTaskStatuses(byPath["DELIVERY-PLAN.md"]).statuses.get("T2").status, "In progress");
     assert.match(byPath["PROJECT-BRIEF.md"], /- T2: In progress\./);
+});
+
+function fakeSpawnResult(overrides = {}) {
+    return { error: null, status: 0, stdout: "", stderr: "", signal: null, ...overrides };
+}
+
+test("Pi invocation keeps headless isolation flags but drops --no-extensions", () => {
+    const invocation = buildPiInvocation("Update docs.", {
+        DOCS_PI_TIMEOUT_MS: "5000",
+        PI_PROVIDER: "inception",
+        PI_MODEL: "mercury-3",
+    });
+    assert.equal(invocation.command, "pi");
+    assert.ok(invocation.args.includes("--no-tools"));
+    assert.ok(invocation.args.includes("--no-session"));
+    assert.ok(invocation.args.includes("--no-context-files"));
+    assert.ok(invocation.args.includes("--no-mcp"));
+    assert.ok(invocation.args.includes("--no-skills"));
+    assert.ok(!invocation.args.includes("--no-extensions"));
+    assert.equal(invocation.args[invocation.args.indexOf("--provider") + 1], "inception");
+    assert.equal(invocation.args[invocation.args.indexOf("--model") + 1], "mercury-3");
+    assert.equal(invocation.options.timeout, 5000);
+});
+
+test("Pi invocation omits provider/model unless explicitly configured", () => {
+    const plain = buildPiInvocation("Update docs.", {});
+    assert.ok(!plain.args.includes("--provider"));
+    assert.ok(!plain.args.includes("--model"));
+    assert.equal(plain.options.timeout, 240_000);
+});
+
+test("requested-model Pi failure fails fast instead of retrying on a default model", () => {
+    const saved = {
+        DOCS_PI_MODEL: process.env.DOCS_PI_MODEL,
+        PI_MODEL: process.env.PI_MODEL,
+        PI_PROVIDER: process.env.PI_PROVIDER,
+    };
+    try {
+        delete process.env.DOCS_PI_MODEL;
+        process.env.PI_MODEL = "mercury-3";
+        process.env.PI_PROVIDER = "inception";
+        const calls = [];
+        let thrown = null;
+        const spawnSync = (command, args) => {
+            calls.push({ command, args });
+            return fakeSpawnResult({
+                error: new Error('Unknown provider "inception"'),
+                status: null,
+                stderr: 'Error: Unknown provider "inception".',
+            });
+        };
+        try {
+            runPiAgent("prompt", { spawnSync });
+        } catch (error) {
+            thrown = error;
+        }
+        assert.ok(thrown instanceof Error);
+        assert.match(thrown.message, /requested model "mercury-3"/);
+        assert.match(thrown.message, /provider "inception"/);
+        assert.match(thrown.message, /--list-models/);
+        assert.equal(calls.length, 1);
+        assert.ok(!calls[0].args.includes("--no-extensions"));
+        assert.ok(calls[0].args.includes("--model"));
+    } finally {
+        for (const [key, value] of Object.entries(saved)) {
+            if (value === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = value;
+            }
+        }
+    }
+});
+
+test("Pi agent success returns stdout", () => {
+    const calls = [];
+    const stdout = '{"requiresHumanReview":false,"updates":[],"taskStatuses":[]}';
+    const result = runPiAgent("prompt", {
+        spawnSync: (command, args) => {
+            calls.push(args);
+            return fakeSpawnResult({ stdout });
+        },
+    });
+    assert.equal(result, stdout);
+    assert.equal(calls.length, 1);
+    assert.ok(!calls[0].includes("--no-extensions"));
+});
+
+test("missing Pi CLI fails with a clear path hint", () => {
+    const error = new Error("spawnSync pi ENOENT");
+    error.code = "ENOENT";
+    assert.throws(
+        () => runPiAgent("prompt", { spawnSync: () => fakeSpawnResult({ error, status: null }) }),
+        /not found on PATH/,
+    );
+});
+
+test("Pi agent non-zero exit reports stderr", () => {
+    const saved = {
+        DOCS_PI_MODEL: process.env.DOCS_PI_MODEL,
+        PI_MODEL: process.env.PI_MODEL,
+        PI_PROVIDER: process.env.PI_PROVIDER,
+    };
+    try {
+        delete process.env.DOCS_PI_MODEL;
+        delete process.env.PI_MODEL;
+        delete process.env.PI_PROVIDER;
+        assert.throws(
+            () => runPiAgent("prompt", { spawnSync: () => fakeSpawnResult({ status: 1, stderr: "boom" }) }),
+            /exit code 1.*boom/,
+        );
+    } finally {
+        for (const [key, value] of Object.entries(saved)) {
+            if (value === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = value;
+            }
+        }
+    }
 });
