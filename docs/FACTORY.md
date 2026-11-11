@@ -4,7 +4,8 @@ This is the operating guide for the **local, agent-powered software factory**
 for pacman-256. It defines how we break work into bounded units and distribute
 them across role-specific subagents, with a human Lead owning acceptance and
 integration. The factory supports GitHub Copilot in VS Code and the original
-Herdr (Pi Herdsman) runtime.
+Herdr (Pi Herdsman) runtime. A cloud variant runs on GitHub issues and PRs;
+see [GitHub agent pipeline (cloud mode)](#github-agent-pipeline-cloud-mode).
 
 **Lead sessions should load the `factory-orchestrator` skill** to run this
 workflow; it is the executable form of this guide. The skill is dual-located:
@@ -228,6 +229,83 @@ Use the `.pi/agents/` definitions with Herdr's `delegate_agent` interface.
 Create a separate worktree for each unit, pass relevant files, and forward
 completed-agent result references exactly as described below. The default
 `scripts/factory-setup.sh` mode continues to validate this original runtime.
+
+## GitHub agent pipeline (cloud mode)
+
+A label-driven pipeline runs the same SDLC on GitHub without a VS Code
+session (D056, [spec](../SPEC/github-agent-pipeline.md)). The local VS Code /
+Herdr flow above stays supported; the two are complementary.
+[`factory-control/`](../factory-control/README.md) remains the local operator
+surface (TUI + read-only web mirror) for local units.
+
+**When to use which:**
+
+- **Cloud:** well-specified, low-risk units (docs, chores, follow-ups) and
+  first drafts of features that need no phone or LAN check during the build.
+- **Local (VS Code / Herdr):** gameplay and multiplayer work that needs
+  phone/LAN validation, multi-unit parallel work in worktrees, or anything
+  needing close human steering.
+
+**Moving parts** (being added in Phase 1; check they exist before relying on
+them): `.github/workflows/copilot-setup-steps.yml` (Node 22.18 + `npm ci` for
+the cloud agent), `agent-dispatch.yml` and `agent-gate.yml` (label/comment glue),
+and the gh-aw workflows `factory-triage.md`, `factory-review.md`, and
+`factory-qa.md` (each compiled to a `.lock.yml`). The build writer is the
+Copilot cloud agent with the role profile from `.github/agents/`; review and QA
+are read-only and write only through gh-aw safe outputs.
+
+| Step | Trigger | Result |
+|---|---|---|
+| 0. Triage | Any issue opened/reopened | `factory-triage` (orchestrator profile, read-only) adds `type:*`/`lane:*`/`role:*` labels and one triage comment; labels `status:spec` if ready or `agent:needs-human` if gaps. Never starts work. |
+| 1. Queue | A collaborator (triage+) adds `agent:go` | `agent-dispatch.yml` assigns Copilot with the `factory-orchestrator` profile to write only `SPEC/<id>-<slug>.md` (with a `## Delegation` section) and open a draft PR with `Closes #N`. Labels `status:spec`, `agent:active`. |
+| 2. Spec gate | A write+ user comments `/approve-spec` on the PR | `agent-gate.yml` adds `status:ready`. |
+| 3. Build | `status:ready` | Each Delegation step's profile (`builder`, `artist`, `gameplay-designer`, `docs-writer`) builds in order on the same PR and runs `npm run check`. A missing or unknown role stops at `agent:needs-human`. |
+| 4. Review + QA | PR ready for review, or a fix push | `factory-review` submits a PR review against the spec (`[blocker]/[should]/[nit]`); `factory-qa` runs `npm ci && npm run check` plus focused tests and posts a pass/fail comment. Label `status:review`. |
+| 5. Fix cycles | Changes requested or QA fails | `cycle:1`, then `cycle:2` (D050); blockers go to the owning role via `@copilot`. After `cycle:2` only blockers reopen work; otherwise `agent:needs-human`. |
+| 6. Merge | Required CI, Copilot code review, reviewer approval, QA pass, no `agent:needs-human` | Auto-merge (squash) only when the issue has `type:docs`, `type:chore`, or `follow-up` and **not** `type:feature`, `type:bug`, or `playtest`; the strictest label wins. PRs touching sensitive paths (`.github/`, `deploy/`, `Dockerfile`, `scripts/`, `package*.json`, `factory-control/server/`) always need a human. Otherwise `agent:needs-human` and a review request. |
+| 7. Close-out | PR merged | `Closes #N` closes the issue; Follow-ups items become `follow-up` issues; `agent:active` is removed. |
+
+**Delegation section.** The spec's `## Delegation` lists one line per step,
+`- <profile>: <task>` (profiles: `builder`, `artist`, `gameplay-designer`,
+`docs-writer`), plus `QA depth: fast|slow`.
+
+**Labels** (added to `.github/labels.yml`): `agent:go` (start), `agent:active`
+(one agent run per issue; open agent PRs are capped, default 3), `agent:needs-human` (pipeline
+stopped; a person must act), `cycle:1`/`cycle:2` (D050 counter). They work
+alongside the D055 `type:*`, `role:*`, `lane:*`, and `status:*` labels.
+
+**Kill switch.** Workflows act only while repo variable `AGENT_PIPELINE_ENABLED`
+is `true`. Unset it or set any other value to stop all pipeline actions.
+
+**Stop or retry a unit.**
+
+- Stop: remove `agent:active`, unassign Copilot from the issue/PR, and add
+  `agent:needs-human`.
+- Small fix on an open PR: post one `@copilot` comment describing the change
+  (verified in the Phase 0 pilot).
+- Restart from dispatch: fix the gap, remove `agent:needs-human`, and add
+  `agent:go` again.
+
+**Permissions.** Only triage+ users can trigger `agent:go`; only write+ users
+can `/approve-spec`. Workflows recheck permissions and ignore other actors.
+Issue and PR text is untrusted input.
+
+**Known limits.**
+
+- No phone or LAN validation in the cloud; `playtest` and gameplay work still
+  needs a human check before merge.
+- Dispatch must send model `auto`: the local role-profile models (for example
+  Claude Haiku 5.5 for `docs-writer`) are not available to the cloud agent.
+- Copilot leaves PRs as drafts; `agent-gate.yml` marks them ready, which starts
+  Copilot code review.
+- **Accepted secret risk until issue #47:** `DO_API_TOKEN` and the
+  `COPILOT_ASSIGN_TOKEN` PAT are repo-level, and workflow-run approval for
+  Copilot branches is off, so an agent PR that edits a `pull_request` workflow
+  could read them. Mitigations: glue workflows run from base-branch definitions
+  (`pull_request_target`, `workflow_run`, `issues`, `issue_comment`) and never
+  check out PR code, and sensitive-path PRs never auto-merge.
+- Whether the cloud orchestrator can delegate to other profiles in-session is
+  untested; the gate assigns each Delegation profile instead.
 
 ## Worktree isolation
 

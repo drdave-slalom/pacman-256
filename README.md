@@ -343,6 +343,11 @@ The TUI extension is loaded via `.pi/extensions/factory-control.ts`; it only
 mutates through the M2 prepare/execute protocol and never re-renders the Herdr
 widget.
 
+Factory units can also run on GitHub without a local session: label an issue
+`agent:go`, approve the spec with `/approve-spec`, and the Copilot cloud agent
+builds while review and QA workflows gate the merge. See
+[GitHub agent pipeline (cloud mode)](docs/FACTORY.md#github-agent-pipeline-cloud-mode).
+
 ## GitHub Actions
 
 The [CI workflow](./.github/workflows/ci.yml) runs on pull requests, pushes to
