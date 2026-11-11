@@ -1,4 +1,3 @@
-import assert from "node:assert/strict";
 import { randomInt, randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { Room, ServerError, type Client } from "@colyseus/core";
@@ -19,6 +18,7 @@ import {
   findSpawnCells,
   generateMaze,
   isProtocolCompatible,
+  mazeDimensionsForPlayers,
   joinErrorText,
   parseChooseTeam,
   parseJoinOptions,
@@ -79,6 +79,8 @@ const GameState = schema({
   serverTime: t.number().default(0),
   roundId: t.string().default(""),
   mazeSeed: t.uint32().default(0),
+  mazeWidth: t.number().default(0),
+  mazeHeight: t.number().default(0),
   countdownEndsAt: t.number().default(0),
   roundEndsAt: t.number().default(0),
   resultWinner: t.string<ResultWinner | "">().default(""),
@@ -407,8 +409,17 @@ export class GameRoom extends Room<{ state: GameState }> {
     }
 
     const seed = this.nextMazeSeed() >>> 0;
-    const maze = generateMaze(seed);
-    const spawns = findSpawnCells(maze);
+    // T12: maze dimensions scale with the roster size (shared rule) so
+    // 16v16 rooms get a larger canvas; the authoritative dimensions ride on
+    // the snapshot so clients render the exact simulated maze even if a
+    // disconnect changes the roster before their first render. Spawn counts
+    // match actual team sizes so the arrays below can never be indexed past
+    // their end.
+    const dims = mazeDimensionsForPlayers(this.state.players.size);
+    const maze = generateMaze(seed, dims);
+    this.state.mazeWidth = dims.width;
+    this.state.mazeHeight = dims.height;
+    const spawns = findSpawnCells(maze, { hunter: hunters, runner: runners });
     const nextSpawnIndex = { hunter: 0, runner: 0 };
     this.#random = pickupRandom(seed);
     this.#priority = seededPriority(this.#joinOrder, this.#random);
@@ -422,8 +433,7 @@ export class GameRoom extends Room<{ state: GameState }> {
       if (!player || player.team === "unassigned") {
         continue;
       }
-      const cell = spawns[player.team][nextSpawnIndex[player.team]++];
-      assert(cell, "teams never exceed the available spawn cells");
+      const cell = spawns[player.team][nextSpawnIndex[player.team]++]!;
       const position = this.placeSpawn(player.team, { x: cell.col + 0.5, y: cell.row + 0.5 }, maze);
       this.#spawnPositions.push(position);
       player.speedEndsAt = 0;
@@ -487,6 +497,8 @@ export class GameRoom extends Room<{ state: GameState }> {
     this.state.phase = "lobby";
     this.state.roundId = "";
     this.state.mazeSeed = 0;
+    this.state.mazeWidth = 0;
+    this.state.mazeHeight = 0;
     this.state.countdownEndsAt = 0;
     this.state.roundEndsAt = 0;
     this.state.resultWinner = "";

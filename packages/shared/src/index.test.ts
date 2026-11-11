@@ -68,5 +68,5 @@ test("shared tuning matches the approved initial timing", () => {
     18_000,
   );
   assert.equal(GAME_RULES.standardPickupRespawnMs, 15_000);
-  assert.equal(GAME_RULES.maxPlayers, 4);
+  assert.equal(GAME_RULES.maxPlayers, 32);
 });

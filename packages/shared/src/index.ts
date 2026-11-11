@@ -66,7 +66,7 @@ export function isConnectionState(value: unknown): value is ConnectionState {
 }
 
 export const GAME_RULES = {
-  maxPlayers: 4,
+  maxPlayers: 32,
   countdownMs: 3_000,
   roundDurationMs: 180_000,
   speedMultiplier: 1.5,
@@ -86,7 +86,9 @@ export {
   isInsideIn,
   isWalkable,
   isWalkableIn,
+  mazeDimensionsForPlayers,
 } from "./map.ts";
+export type { MazeDimensions } from "./map.ts";
 
 export {
   DEFAULT_MOVE_SPEED_TILES_PER_SECOND,
@@ -145,5 +147,5 @@ export type {
 export { CONTACT_DISTANCE_TILES, evaluateRoundOutcome, sweptContact } from "./round.ts";
 export type { ResultReason, ResultWinner } from "./round.ts";
 
-export { SPAWN_CORNER_INSET_TILES, findSpawnCells, spawnDirection } from "./spawn.ts";
-export type { SpawnCell, SpawnCells } from "./spawn.ts";
+export { SPAWN_CORNER_INSET_TILES, SPAWN_MAX_PER_TEAM, findSpawnCells, spawnDirection } from "./spawn.ts";
+export type { SpawnCell, SpawnCells, SpawnOptions } from "./spawn.ts";

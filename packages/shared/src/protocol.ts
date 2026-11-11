@@ -66,7 +66,7 @@ export function isErrorCode(value: unknown): value is ErrorCode {
 /** Player-facing, actionable message for each failure code. */
 export const ERROR_MESSAGES: Readonly<Record<ErrorCode, string>> = {
   ROOM_NOT_FOUND: "That room code was not found. Check the code or create a new room.",
-  ROOM_FULL: "That room is full (4 players). Ask the host for another room.",
+  ROOM_FULL: "That room is full (32 players). Ask the host for another room.",
   JOIN_CLOSED: "That match has already started. Wait for the next lobby or create a room.",
   // D054: the per-team cap was removed, so the server never emits TEAM_FULL;
   // retained here for contract continuity (informative copy only).
@@ -211,6 +211,10 @@ export interface GameRoomSnapshot {
   roundId: string;
   /** uint32 seed for `generateMaze`; `0` in the lobby. */
   mazeSeed: number;
+  /** Authoritative generated-maze width in tiles (shared sizing rule); `0` in the lobby. */
+  mazeWidth: number;
+  /** Authoritative generated-maze height in tiles (shared sizing rule); `0` in the lobby. */
+  mazeHeight: number;
   /** Epoch ms when the countdown ends; `0` when not counting down. */
   countdownEndsAt: number;
   /** Epoch ms deadline of the playing round; `0` when not applicable. */
