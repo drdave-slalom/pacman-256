@@ -37,7 +37,9 @@ non-interactive output you can confirm the command registered via
 | `Esc` | back one view (board → close) |
 | `a` | agents panel (read-only rows) |
 | `x` | action menu for the selected unit (detail view) |
-| `r` | refresh snapshot now |
+| `q` | dispatch queue view (M4 entries + status) |
+| `c` | (lead-prompt view) notify the copy hint for the printed prompt |
+| `r` | refresh snapshot now (also reloads the queue in the queue view) |
 | `s` | (offline banner) request the server be started |
 
 - `ctx.ui.setWidget("factory", …)` shows a compact strip (working/blocked/
@@ -47,6 +49,13 @@ non-interactive output you can confirm the command registered via
   the M2 `prepare` endpoint. Passing rows are runnable (`prepare` → plan shown
   → `ctx.ui.confirm()` → `execute`); rejected rows show the exact guard
   reasons (409).
+- M4 triggers: the same menu includes “Dispatch unit” (Spec-stage cards) and
+  “Run skill…” items on eligible cards. Opening one shows the M4 delegation
+  plan (role, worktree, spec, acceptance, lead prompt); confirming **enqueues**
+  the request (the server never spawns agents) and opens the lead-prompt view
+  for the Lead to copy and dispatch.
+- `q` lists the dispatch queue with statuses; `Enter` on an entry prints its
+  ready-to-paste delegation prompt.
 - Agents rows are read-only. Selecting one falls back to the owning unit's
   detail — native Herdr pane focus is intentionally untouched (no public
   affordance to reimplement it).

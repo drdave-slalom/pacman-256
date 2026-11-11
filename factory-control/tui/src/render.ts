@@ -7,7 +7,8 @@
  */
 
 import type { AgentRecord, FactorySnapshot, Unit } from "@maze/factory-control-shared";
-import type { ActionMenuRow, PreconditionLike } from "./actions.ts";
+import type { ActionMenuRow, MenuPlan, PreconditionLike } from "./actions.ts";
+import type { DispatchEntryLike, DispatchPlanLike } from "./api.ts";
 import {
   ATTENTION_GLYPH,
   agentContext,
@@ -45,7 +46,7 @@ export const plainStyle: LineStyle = {
   bold: (s) => s,
 };
 
-export type ViewKind = "board" | "detail" | "agents" | "actions" | "action-detail";
+export type ViewKind = "board" | "detail" | "agents" | "actions" | "action-detail" | "queue" | "lead-prompt";
 
 const DIVIDER = "─";
 
@@ -233,14 +234,33 @@ export function renderActionMenu(rows: ActionMenuRow[], selectedIndex: number, s
   return lines.map((line) => truncateToWidth(line, width));
 }
 
+function isDispatchPlan(plan: MenuPlan): plan is DispatchPlanLike {
+  const p = plan as DispatchPlanLike;
+  return p.kind === "dispatch" || p.kind === "skill";
+}
+
 export function renderActionPlan(row: ActionMenuRow, style: LineStyle, width: number): string[] {
   const lines: string[] = [];
   lines.push(style.accent(style.bold(row.label)));
-  if (row.plan !== undefined) {
+  const plan = row.plan;
+  if (plan !== undefined && isDispatchPlan(plan)) {
+    // M4 trigger plan: role/worktree/spec/acceptance + the lead prompt.
+    lines.push(style.muted("delegation plan"));
+    lines.push(`  role ${style.accent(plan.role)} · worktree ${plan.worktree}`);
+    if (plan.specPath !== undefined) lines.push(`  spec ${plan.specPath}`);
+    if (plan.acceptance !== "") {
+      lines.push(style.muted("acceptance"));
+      lines.push(`  ${truncateToWidth(plan.acceptance, width - 4)}`);
+    }
+    lines.push(style.muted("lead prompt"));
+    for (const p of plan.delegationPrompt.split("\n")) {
+      lines.push(style.dim(`  ${truncateToWidth(p, Math.max(20, width - 4))}`));
+    }
+  } else if (plan !== undefined) {
     lines.push(style.muted("plan"));
-    lines.push(`  ${truncateToWidth(row.plan.summary, width - 4)}`);
+    lines.push(`  ${truncateToWidth(plan.summary, width - 4)}`);
     lines.push(style.muted("steps"));
-    for (const step of row.plan.steps) {
+    for (const step of plan.steps) {
       const cwd = step.cwd !== undefined ? `  # cwd: ${step.cwd}` : "";
       lines.push(style.dim(`  $ ${truncateToWidth(`${step.command} ${step.args.join(" ")}${cwd}`, width - 4)}`));
     }
@@ -252,10 +272,44 @@ export function renderActionPlan(row: ActionMenuRow, style: LineStyle, width: nu
     lines.push(`  ${mark} ${p.name} — ${truncateToWidth(p.detail, width - 8)}`);
   }
   if (!row.ok) {
-    lines.push(style.error("action blocked by preconditions — not runnable"));
+    lines.push(style.error("trigger blocked by preconditions — not runnable"));
   } else {
-    lines.push(style.dim("enter = confirm & execute · esc = back"));
+    const hint = row.kind !== undefined && row.kind !== "action" ? "enter = confirm & enqueue · esc = back" : "enter = confirm & execute · esc = back";
+    lines.push(style.dim(hint));
   }
+  return lines.map((line) => truncateToWidth(line, width));
+}
+
+export function renderQueueView(entries: DispatchEntryLike[], selectedIndex: number, style: LineStyle, width: number): string[] {
+  const lines: string[] = [];
+  lines.push(`${style.accent(style.bold("Dispatch queue"))}  (${entries.length})`);
+  if (entries.length === 0) {
+    lines.push(style.dim("  no entries — dispatch a unit or run a skill from a unit's action menu"));
+  } else {
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      if (entry === undefined) continue;
+      const marker = i === selectedIndex ? "› " : "  ";
+      const skill = entry.skill !== undefined ? ` skill=${entry.skill}` : "";
+      const role = entry.role !== undefined ? ` role=${entry.role}` : "";
+      const spec = entry.specPath !== undefined ? `  ${entry.specPath}` : "";
+      lines.push(`${marker}${i === selectedIndex ? style.accent("[" + entry.status + "]") : "[" + entry.status + "]"} ${entry.id} ${entry.unit}${role}${skill}${spec}`);
+    }
+  }
+  lines.push(style.dim("enter = lead prompt · r refresh · esc back"));
+  return lines.map((line) => truncateToWidth(line, width));
+}
+
+export function renderLeadPrompt(entry: DispatchEntryLike, style: LineStyle, width: number): string[] {
+  const lines: string[] = [];
+  lines.push(`${style.accent(style.bold("Lead delegation prompt"))}  ${entry.id} · ${entry.status}`);
+  lines.push(rule(width));
+  const text = entry.prompt ?? "(no prompt available for this entry)";
+  for (const line of text.split("\n")) {
+    lines.push(truncateToWidth(line, width));
+  }
+  lines.push(style.dim(rule(width)));
+  lines.push(style.dim("c = notify copy hint · esc = back"));
   return lines.map((line) => truncateToWidth(line, width));
 }
 
@@ -299,11 +353,13 @@ export function renderActionResult(state: ActionResultState, style: LineStyle, w
 
 export function renderHelp(view: ViewKind, style: LineStyle, width: number): string[] {
   const map: Record<ViewKind, string> = {
-    board: "↑/↓ move · enter detail · a agents · r refresh · esc close",
-    detail: "↑/↓ switch unit · esc board · x actions · a agents · r refresh",
+    board: "↑/↓ move · enter detail · a agents · q queue · r refresh · esc close",
+    detail: "↑/↓ switch unit · esc board · x actions · a agents · q queue · r refresh",
     agents: "↑/↓ select · enter focus · esc back",
     actions: "↑/↓ select · enter open · esc back",
     "action-detail": "enter confirm & execute · esc back",
+    queue: "↑/↓ select · enter lead prompt · r refresh · esc back",
+    "lead-prompt": "esc back · c notify copy hint",
   };
   const line = style.dim(map[view]);
   return [truncateToWidth(line, width), style.dim(rule(width))];

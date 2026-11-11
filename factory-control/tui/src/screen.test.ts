@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import type { FactorySnapshot } from "@maze/factory-control-shared";
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
-import type { PrepareResponse } from "./api.ts";
+import type { DispatchPrepareResponse, PrepareResponse } from "./api.ts";
 import { fixtureSnapshot } from "./fixtures.ts";
 import { FactoryScreen } from "./screen.ts";
 
@@ -20,6 +20,7 @@ const W = 100;
 interface HarnessOptions {
   fetch?: () => Promise<FactorySnapshot>;
   prepare?: (name: string, body: Record<string, unknown>) => Promise<PrepareResponse>;
+  dispatchPrepare?: (body: { unit: string; skill?: string }) => Promise<DispatchPrepareResponse>;
 }
 
 function makeHarness(opts: HarnessOptions = {}) {
@@ -54,6 +55,25 @@ function makeHarness(opts: HarnessOptions = {}) {
     query: "",
     fetchSnapshotImpl: opts.fetch ?? (() => Promise.resolve(fixtureSnapshot())),
     ...(opts.prepare !== undefined ? { prepareActionImpl: opts.prepare } : {}),
+    dispatchPrepareImpl:
+      opts.dispatchPrepare ??
+      (() =>
+        Promise.resolve({
+          requestId: "rid",
+          entryId: "req-x",
+          ok: true,
+          preconditions: [],
+          plan: {
+            kind: "dispatch",
+            unit: "T3-review",
+            role: "builder",
+            worktree: "factory/t3-review",
+            specPath: "SPEC/T3-review.md",
+            acceptance: "a",
+            summary: "s",
+            delegationPrompt: "p",
+          },
+        })),
   });
   return { screen, notifies, doneCalls };
 }

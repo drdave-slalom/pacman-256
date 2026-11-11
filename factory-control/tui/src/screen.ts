@@ -27,17 +27,23 @@ import {
 } from "@earendil-works/pi-tui";
 import {
   ApiError,
+  dispatchEnqueue,
+  dispatchPrepare,
+  dispatchQueue,
   executeAction,
   fetchSnapshot,
   healthz,
   prepareAction,
   type ActionResultLike,
+  type DispatchEntryLike,
+  type DispatchPrepareResponse,
   type PrepareResponse,
 } from "./api.ts";
 import {
   buildActionMenu,
   candidateActions,
   type ActionMenuRow,
+  type MenuCandidate,
   type PreparedOutcome,
 } from "./actions.ts";
 import { handleKey, type FactoryScreenOps } from "./keyroutes.ts";
@@ -50,13 +56,16 @@ import {
   renderDetail,
   renderHeader,
   renderHelp,
+  renderLeadPrompt,
   renderOfflineBanner,
+  renderQueueView,
   type ActionResultState,
   type LineStyle,
   type OfflineBannerState,
   type ViewKind,
 } from "./render.ts";
 import { buildBoard, flattenUnits, formatAge, summarizeAttention, type BoardModel } from "./selectors.ts";
+import { candidateTriggers, type TriggerCandidate } from "./triggers.ts";
 
 const POLL_MS = 5000;
 
@@ -73,6 +82,12 @@ export interface FactoryScreenOptions {
   prepareActionImpl?: (name: string, body: Record<string, unknown>) => Promise<PrepareResponse>;
   /** M2 execute (injectable for tests). Defaults to the real client. */
   executeActionImpl?: (name: string, requestId: string, approvedBy?: string) => Promise<ActionResultLike>;
+  /** M4 dispatch prepare (injectable for tests). Defaults to the real client. */
+  dispatchPrepareImpl?: (body: { unit: string; skill?: string }) => Promise<DispatchPrepareResponse>;
+  /** M4 enqueue (injectable for tests). Defaults to the real client. */
+  dispatchEnqueueImpl?: (requestId: string) => Promise<{ entry: DispatchEntryLike; prompt: string }>;
+  /** M4 queue list (injectable for tests). Defaults to the real client. */
+  dispatchQueueImpl?: () => Promise<{ entries: DispatchEntryLike[] }>;
 }
 
 function styleFromTheme(theme: Theme): LineStyle {
@@ -154,6 +169,9 @@ export class FactoryScreen implements Component {
   private timer: ReturnType<typeof setInterval> | undefined;
   private inFlight = false;
   private disposed = false;
+  private queueEntries: DispatchEntryLike[] = [];
+  private selectedQueue = 0;
+  private activeQueueEntry: DispatchEntryLike | undefined;
   private scroll = new ScrollView(new Text(""));
   private lastHeadLen = 0;
   private lastRegion = 0;
@@ -178,6 +196,9 @@ export class FactoryScreen implements Component {
       this.offline = { retrying: false, serverStarted: this.offline.serverStarted };
       this.rebuild();
       this.updateWidget();
+      if (this.view === "queue" || this.view === "lead-prompt") {
+        void this.loadQueue().catch(() => {});
+      }
     } catch (e) {
       this.offline = {
         retrying: false,
@@ -240,6 +261,10 @@ export class FactoryScreen implements Component {
     startServer: () => {
       void this.startServer();
     },
+    openQueue: () => {
+      void this.openQueue();
+    },
+    copyLeadPrompt: () => this.copyLeadPrompt(),
   };
 
   private moveSelection(delta: number): void {
@@ -260,7 +285,14 @@ export class FactoryScreen implements Component {
         if (this.rows.length > 0) this.selectedAction = clamp(this.selectedAction + delta, 0, this.rows.length - 1);
         break;
       }
+      case "queue": {
+        if (this.queueEntries.length > 0) {
+          this.selectedQueue = clamp(this.selectedQueue + delta, 0, this.queueEntries.length - 1);
+        }
+        break;
+      }
       case "action-detail":
+      case "lead-prompt":
         return;
     }
     this.bump();
@@ -324,7 +356,13 @@ export class FactoryScreen implements Component {
       case "action-detail":
         if (!this.runningAction) void this.confirmExecute();
         break;
+      case "queue": {
+        const entry = this.queueEntries[this.selectedQueue];
+        if (entry !== undefined) this.showQueueEntry(this.selectedQueue);
+        break;
+      }
       case "detail":
+      case "lead-prompt":
         break;
     }
   }
@@ -372,13 +410,26 @@ export class FactoryScreen implements Component {
     this.preparingActions = true;
     const token = ++this.actionPrepToken;
     this.bump();
-    const candidates = candidateActions(unit, this.snapshot);
+    const candidates: MenuCandidate[] = [
+      ...candidateActions(unit, this.snapshot).map((c) => ({ ...c, kind: "action" as const })),
+      ...candidateTriggers(unit, this.snapshot),
+    ];
     const prepared = new Map<string, PreparedOutcome>();
     const prepareImpl = this.opts.prepareActionImpl ?? prepareAction;
+    const dispatchPrepareImpl = this.opts.dispatchPrepareImpl ?? dispatchPrepare;
     for (const c of candidates) {
       try {
-        const resp = await prepareImpl(c.name, this.prepareBody(c.name, unit));
-        prepared.set(c.name, { ok: resp.ok, preconditions: resp.preconditions, plan: resp.plan });
+        if ("kind" in c && (c.kind === "dispatch" || c.kind === "skill")) {
+          const trigger = c as TriggerCandidate;
+          const resp = await dispatchPrepareImpl({
+            unit: unit.id,
+            ...(trigger.skill !== undefined ? { skill: trigger.skill } : {}),
+          });
+          prepared.set(c.name, { ok: resp.ok, preconditions: resp.preconditions, plan: resp.plan });
+        } else {
+          const resp = await prepareImpl(c.name, this.prepareBody(c.name, unit));
+          prepared.set(c.name, { ok: resp.ok, preconditions: resp.preconditions, plan: resp.plan });
+        }
       } catch (e) {
         prepared.set(c.name, {
           ok: false,
@@ -398,6 +449,10 @@ export class FactoryScreen implements Component {
   private async startAction(row: ActionMenuRow): Promise<void> {
     const unit = this.currentUnit();
     if (unit === undefined) return;
+    if (row.kind !== undefined && row.kind !== "action") {
+      await this.startTrigger(row);
+      return;
+    }
     this.activeRow = row;
     this.resultState = null;
     this.view = "action-detail";
@@ -426,11 +481,55 @@ export class FactoryScreen implements Component {
     this.bump();
   }
 
+  private async startTrigger(row: ActionMenuRow): Promise<void> {
+    const unit = this.currentUnit();
+    if (unit === undefined) return;
+    this.activeRow = row;
+    this.resultState = null;
+    this.view = "action-detail";
+    this.runningAction = true;
+    this.bump();
+    try {
+      const dispatchPrepareImpl = this.opts.dispatchPrepareImpl ?? dispatchPrepare;
+      const resp = await dispatchPrepareImpl({
+        unit: unit.id,
+        ...(row.skill !== undefined ? { skill: row.skill } : {}),
+      });
+      this.activeRow = {
+        ...row,
+        ok: resp.ok,
+        reasons: resp.preconditions.filter((p) => !p.ok).map((p) => `${p.name}: ${p.detail}`),
+        preconditions: resp.preconditions,
+        plan: resp.plan,
+      };
+      if (resp.ok) this.preparedRequestId = resp.requestId;
+    } catch (e) {
+      this.activeRow = { ...row, ok: false, reasons: [errorMessage(e)], preconditions: [] };
+      this.resultState = {
+        kind: "error",
+        message: errorMessage(e),
+        preconditions: e instanceof ApiError ? e.preconditions : [],
+      };
+    }
+    this.runningAction = false;
+    this.bump();
+  }
+
   private async confirmExecute(): Promise<void> {
     const row = this.activeRow;
     if (row === null || !row.ok || this.preparedRequestId === undefined) return;
+    if (row.kind !== undefined && row.kind !== "action") {
+      await this.confirmEnqueue();
+      return;
+    }
     const planText = row.plan !== undefined
-      ? `${row.plan.summary}\n\n${row.plan.steps.map((s) => `$ ${s.command} ${s.args.join(" ")}`).join("\n")}`
+      ? (() => {
+          const summary = row.plan.summary;
+          if ("steps" in row.plan) {
+            return `${summary}\n\n${row.plan.steps.map((s) => `$ ${s.command} ${s.args.join(" ")}`).join("\n")}`;
+          }
+          return summary;
+        })()
       : row.label;
     const confirmed = await this.opts.ctx.ui.confirm(`${row.label} — confirm?`, planText);
     if (!confirmed) {
@@ -453,6 +552,79 @@ export class FactoryScreen implements Component {
     this.bump();
   }
 
+  private async confirmEnqueue(): Promise<void> {
+    const row = this.activeRow;
+    if (row === null || !row.ok || this.preparedRequestId === undefined) return;
+    const planText =
+      row.plan !== undefined
+        ? (() => {
+            const summary = row.plan.summary;
+            const prompt = "delegationPrompt" in row.plan ? row.plan.delegationPrompt : "";
+            return prompt !== "" ? `${summary}\n\n${prompt}` : summary;
+          })()
+        : row.label;
+    const confirmed = await this.opts.ctx.ui.confirm(`${row.label} — enqueue for the Lead?`, planText);
+    if (!confirmed) {
+      this.back();
+      return;
+    }
+    this.resultState = { kind: "running" };
+    this.bump();
+    try {
+      const enqueueImpl = this.opts.dispatchEnqueueImpl ?? dispatchEnqueue;
+      const { entry, prompt } = await enqueueImpl(this.preparedRequestId);
+      this.activeQueueEntry = { ...entry, prompt };
+      this.prevView = "actions";
+      this.view = "lead-prompt";
+      this.resultState = null;
+      this.opts.ctx.ui.notify(`Enqueued ${entry.id} (${entry.status}) — hand to Lead`, "info");
+      void this.loadQueue().catch(() => {});
+    } catch (e) {
+      this.resultState = e instanceof ApiError
+        ? { kind: "error", message: e.message, preconditions: e.preconditions }
+        : { kind: "error", message: errorMessage(e) };
+    }
+    this.preparedRequestId = undefined;
+    this.bump();
+  }
+
+  private async openQueue(): Promise<void> {
+    this.prevView = this.view === "queue" ? this.prevView : this.view;
+    this.view = "queue";
+    this.bump();
+    try {
+      await this.loadQueue();
+    } catch (e) {
+      this.opts.ctx.ui.notify(`queue unavailable: ${errorMessage(e)}`, "error");
+    }
+    this.bump();
+  }
+
+  private async loadQueue(): Promise<void> {
+    const queueImpl = this.opts.dispatchQueueImpl ?? dispatchQueue;
+    const res = await queueImpl();
+    this.queueEntries = res.entries;
+    this.selectedQueue = clamp(this.selectedQueue, 0, Math.max(0, res.entries.length - 1));
+  }
+
+  private showQueueEntry(index: number): void {
+    const entry = this.queueEntries[index];
+    if (entry === undefined) return;
+    this.activeQueueEntry = entry;
+    this.prevView = "queue";
+    this.view = "lead-prompt";
+    this.bump();
+  }
+
+  private copyLeadPrompt(): void {
+    if (this.view !== "lead-prompt" || this.activeQueueEntry === undefined) return;
+    const entry = this.activeQueueEntry;
+    this.opts.ctx.ui.notify(
+      `Lead prompt for ${entry.id} printed above — copy it from this pane/buffer`,
+      "info",
+    );
+  }
+
   private back(): void {
     switch (this.view) {
       case "action-detail":
@@ -471,6 +643,13 @@ export class FactoryScreen implements Component {
         break;
       case "detail":
         this.view = "board";
+        break;
+      case "queue":
+        this.view = "board";
+        break;
+      case "lead-prompt":
+        this.view = this.prevView === "queue" ? "queue" : "detail";
+        this.activeQueueEntry = undefined;
         break;
       case "board":
         this.close();
@@ -569,6 +748,12 @@ export class FactoryScreen implements Component {
         const row = this.activeRow;
         if (row === null) return renderActionMenu(this.rows, this.selectedAction, style, width);
         return this.resultState !== null ? renderActionResult(this.resultState, style, width) : renderActionPlan(row, style, width);
+      }
+      case "queue":
+        return renderQueueView(this.queueEntries, this.selectedQueue, style, width);
+      case "lead-prompt": {
+        const entry = this.activeQueueEntry;
+        return entry !== undefined ? renderLeadPrompt(entry, style, width) : ["  no entry selected"];
       }
     }
   }

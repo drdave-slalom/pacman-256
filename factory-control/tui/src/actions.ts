@@ -8,6 +8,8 @@
  */
 
 import type { FactorySnapshot, Unit } from "@maze/factory-control-shared";
+import type { DispatchPlanLike } from "./api.ts";
+import type { TriggerCandidate } from "./triggers.ts";
 
 /** Structural mirrors of the M2 API shapes (server's own types are not shared). */
 export interface PreconditionLike {
@@ -26,6 +28,8 @@ export interface PlanLike {
   summary: string;
   steps: PlanStepLike[];
 }
+
+export type MenuPlan = PlanLike | DispatchPlanLike;
 
 export interface ActionCandidate {
   name: string;
@@ -103,22 +107,31 @@ export interface ActionMenuRow {
   ok: boolean;
   reasons: string[];
   preconditions: PreconditionLike[];
-  plan?: PlanLike;
+  plan?: MenuPlan;
+  /** `action` (M2) | `dispatch` | `skill` (M4 triggers). */
+  kind?: "action" | "dispatch" | "skill";
+  skill?: string;
 }
 
 export interface PreparedOutcome {
   ok: boolean;
   preconditions: PreconditionLike[];
-  plan?: PlanLike;
+  plan?: MenuPlan;
 }
 
 function reasonLines(preconditions: PreconditionLike[]): string[] {
   return preconditions.filter((p) => !p.ok).map((p) => `${p.name}: ${p.detail}`);
 }
 
+export type MenuCandidate = ActionCandidate | TriggerCandidate;
+
+function isTrigger(c: MenuCandidate): c is TriggerCandidate {
+  return "kind" in c && (c.kind === "dispatch" || c.kind === "skill");
+}
+
 /** Build menu rows from prepare outcomes (ok/reasons per row). */
 export function buildActionMenu(
-  candidates: ActionCandidate[],
+  candidates: readonly MenuCandidate[],
   prepared: ReadonlyMap<string, PreparedOutcome>,
 ): ActionMenuRow[] {
   return candidates.map((c) => {
@@ -131,7 +144,9 @@ export function buildActionMenu(
       ok,
       reasons: outcome !== undefined ? reasonLines(outcome.preconditions) : ["not prepared"],
       preconditions: outcome?.preconditions ?? [],
+      kind: isTrigger(c) ? c.kind : "action",
     };
+    if (isTrigger(c) && c.skill !== undefined) row.skill = c.skill;
     if (outcome?.plan !== undefined) row.plan = outcome.plan;
     return row;
   });

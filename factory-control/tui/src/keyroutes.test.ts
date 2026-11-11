@@ -21,6 +21,8 @@ function makeOps() {
     refresh: () => calls.push("refresh"),
     close: () => calls.push("close"),
     startServer: () => calls.push("startServer"),
+    openQueue: () => calls.push("openQueue"),
+    copyLeadPrompt: () => calls.push("copyLeadPrompt"),
   };
   return { calls, ops };
 }
@@ -46,13 +48,15 @@ test("page keys route to pageSelection", () => {
   assert.deepEqual(calls, ["page:-1", "page:1"]);
 });
 
-test("direct keys route to agents/actions/refresh/server/close through back", () => {
+test("direct keys route to agents/actions/refresh/server/queue/copy", () => {
   const { calls, ops } = makeOps();
   handleKey("a", kbThat({}, "a"), ops);
   handleKey("x", kbThat({}, "x"), ops);
   handleKey("r", kbThat({}, "r"), ops);
   handleKey("s", kbThat({}, "s"), ops);
-  assert.deepEqual(calls, ["openAgents", "openActions", "refresh", "startServer"]);
+  handleKey("q", kbThat({}, "q"), ops);
+  handleKey("c", kbThat({}, "c"), ops);
+  assert.deepEqual(calls, ["openAgents", "openActions", "refresh", "startServer", "openQueue", "copyLeadPrompt"]);
 });
 
 test("unknown keys are ignored", () => {

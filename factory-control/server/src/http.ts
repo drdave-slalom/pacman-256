@@ -4,6 +4,8 @@ import type { SnapshotService } from "./service.ts";
 import { ActionsService } from "./actions/actions.ts";
 import type { ExecuteRequest, ExecuteMeta, PrepareMeta, PrepareRequest } from "./actions/types.ts";
 import { checkControlToken, clientIp } from "./actions/token.ts";
+import { DispatchService } from "./dispatch/service.ts";
+import type { DispatchPrepareRequest } from "./dispatch/types.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -56,6 +58,7 @@ async function route(
   service: SnapshotService,
   webRoot: string,
   actions: ActionsService,
+  dispatch: DispatchService,
 ): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
   const method = req.method ?? "GET";
@@ -188,6 +191,105 @@ async function route(
     return;
   }
 
+  // M4 dispatch/skill triggers (operator-driven queue). The control server
+  // never spawns agents — it only records queue entries the Lead picks up.
+  if (path.startsWith("/api/dispatch/")) {
+    const token = checkControlToken(req);
+    if (!token.ok) {
+      sendJson(res, token.status, { error: token.error });
+      return;
+    }
+    if (method === "POST" && path === "/api/dispatch/prepare") {
+      const body = await readJsonBody(req);
+      if (body === null || typeof body !== "object") {
+        sendJson(res, 400, { error: "invalid JSON body" });
+        return;
+      }
+      const meta: PrepareMeta = {};
+      const ip = clientIp(req);
+      if (ip !== undefined) meta.ip = ip;
+      const outcome = await dispatch.prepare(body as DispatchPrepareRequest, meta);
+      if (outcome.kind === "invalid-input") {
+        sendJson(res, 400, { error: outcome.error });
+        return;
+      }
+      if (outcome.kind === "unknown-unit") {
+        sendJson(res, 404, { error: "unknown unit" });
+        return;
+      }
+      if (outcome.kind === "unknown-skill") {
+        sendJson(res, 404, { error: "unknown skill" });
+        return;
+      }
+      if (outcome.kind === "active-entry") {
+        sendJson(res, 409, { error: outcome.error });
+        return;
+      }
+      sendJson(res, 200, {
+        requestId: outcome.requestId,
+        entryId: outcome.entryId,
+        ok: outcome.ok,
+        preconditions: outcome.preconditions,
+        plan: outcome.plan,
+      });
+      return;
+    }
+    if (method === "POST" && path === "/api/dispatch/enqueue") {
+      const body = await readJsonBody(req);
+      const requestId =
+        body !== null && typeof body === "object" && typeof (body as { requestId?: unknown }).requestId === "string"
+          ? (body as { requestId: string }).requestId
+          : "";
+      const outcome = await dispatch.enqueue(requestId);
+      if (outcome.kind === "no-prepare") {
+        sendJson(res, 409, { error: "no matching prepare for this requestId" });
+        return;
+      }
+      if (outcome.kind === "rejected") {
+        const payload: { error: string; preconditions?: { name: string; ok: boolean; detail: string }[] } = { error: outcome.reason };
+        if (outcome.preconditions !== undefined) payload.preconditions = outcome.preconditions;
+        sendJson(res, 409, payload);
+        return;
+      }
+      sendJson(res, 200, { entry: outcome.entry, prompt: outcome.prompt });
+      return;
+    }
+    if (method === "GET" && path === "/api/dispatch/queue") {
+      const entries = await dispatch.list();
+      const withPrompts = entries.map((entry) => ({
+        ...entry,
+        prompt: dispatch.prompt(entry.id),
+      }));
+      sendJson(res, 200, { entries: withPrompts });
+      return;
+    }
+    if (method === "POST" && path === "/api/dispatch/status") {
+      const body = await readJsonBody(req);
+      const id =
+        body !== null && typeof body === "object" && typeof (body as { id?: unknown }).id === "string"
+          ? (body as { id: string }).id
+          : "";
+      const status = body !== null && typeof body === "object" ? (body as { status?: unknown }).status : undefined;
+      const outcome = await dispatch.status(id, status);
+      if (outcome.kind === "not-found") {
+        sendJson(res, 404, { error: "no such queue entry" });
+        return;
+      }
+      if (outcome.kind === "invalid-status") {
+        sendJson(res, 400, { error: "invalid status; expected queued|dispatched|done|cancelled" });
+        return;
+      }
+      if (outcome.kind === "invalid-transition") {
+        sendJson(res, 400, { error: outcome.reason });
+        return;
+      }
+      sendJson(res, 200, { entry: outcome.entry });
+      return;
+    }
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+
   // Read-only API: every other method/path is 404.
   sendJson(res, 404, { error: "not found" });
 }
@@ -201,7 +303,7 @@ async function route(
  */
 export function createApiServer(
   service: SnapshotService,
-  opts: { webRoot?: string; actions?: ActionsService } = {},
+  opts: { webRoot?: string; actions?: ActionsService; dispatch?: DispatchService } = {},
 ): Server {
   const factoryRoot = process.env.FACTORY_ROOT ?? process.cwd();
   const webRoot = opts.webRoot ?? defaultWebRoot(factoryRoot);
@@ -211,7 +313,13 @@ export function createApiServer(
       snapshot: () => service.get(),
       factoryRoot,
     });
+  const dispatch =
+    opts.dispatch ??
+    new DispatchService({
+      snapshot: () => service.get(),
+      factoryRoot,
+    });
   return createServer((req, res) => {
-    void route(req, res, service, webRoot, actions);
+    void route(req, res, service, webRoot, actions, dispatch);
   });
 }
