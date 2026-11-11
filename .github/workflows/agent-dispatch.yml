@@ -1,4 +1,4 @@
-# Agent pipeline step 1 (SPEC/github-agent-pipeline.md, D056): a collaborator with
+# Agent pipeline step 1 (SPEC/github-agent-pipeline.md, D057): a collaborator with
 # triage or higher adds `agent:go` to an issue; Copilot is assigned with the
 # factory-orchestrator profile to write the spec only. Logic lives in
 # .github/scripts/agent-gate.mjs, loaded from the default branch.

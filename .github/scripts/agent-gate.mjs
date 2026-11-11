@@ -1,4 +1,4 @@
-// Agent pipeline glue (SPEC/github-agent-pipeline.md, D056).
+// Agent pipeline glue (SPEC/github-agent-pipeline.md, D057).
 //
 // Loaded by agent-dispatch.yml and agent-gate.yml through actions/github-script
 // from a checkout of the default branch, never from pull request code. The pure
@@ -295,7 +295,7 @@ export function sensitivePaths(files) {
 }
 
 /**
- * D056 merge rule once every gate is green: sensitive paths always need a
+ * D057 merge rule once every gate is green: sensitive paths always need a
  * human; otherwise auto-merge only low-risk types, and the strictest label wins.
  */
 export function mergeDecision({ labels, files }) {
@@ -1112,13 +1112,13 @@ async function evaluatePullRequest({ github, context, core, env }, pullNumber, e
                 return core.info(`Auto-merge is already enabled on PR #${pr.number}.`);
             }
             await enableAutoMerge(pat, api, pr);
-            await api.comment(pr.number, `All gates green for \`${sha.slice(0, 7)}\` (required checks, Copilot code review, factory review, factory QA). Low-risk type: squash auto-merge enabled for this head only (D056).`);
+            await api.comment(pr.number, `All gates green for \`${sha.slice(0, 7)}\` (required checks, Copilot code review, factory review, factory QA). Low-risk type: squash auto-merge enabled for this head only (D057).`);
             return;
         }
         const reason =
             decision.reason === "sensitive-paths"
                 ? `this PR changes sensitive paths (${decision.sensitive.map((path) => `\`${path}\``).join(", ")}), which never auto-merge.`
-                : `issue #${issue.number} is not a low-risk type (D056: type:feature, type:bug, and playtest need a human merge; auto-merge needs type:docs, type:chore, or follow-up).`;
+                : `issue #${issue.number} is not a low-risk type (D057: type:feature, type:bug, and playtest need a human merge; auto-merge needs type:docs, type:chore, or follow-up).`;
         const reviewer = env.AGENT_MERGE_REVIEWER || api.owner;
         await api.addLabels(issue.number, [LABEL.needsHuman]);
         try {

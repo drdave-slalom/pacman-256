@@ -68,7 +68,7 @@
   color: "ff7619"
   description: "Found or needs checking in a playtest"
 
-# Agent pipeline (SPEC/github-agent-pipeline.md, D056).
+# Agent pipeline (SPEC/github-agent-pipeline.md, D057).
 - name: "agent:go"
   color: "0e8a16"
   description: "Start the agent pipeline: Copilot writes the spec"

@@ -145,7 +145,7 @@ GitHub issue / spec / ask
 
 ## Cloud mode
 
-When you run as the Copilot cloud agent on a GitHub issue or PR (D056; see
+When you run as the Copilot cloud agent on a GitHub issue or PR (D057; see
 `docs/FACTORY.md#github-agent-pipeline-cloud-mode`), this section overrides
 step 0 (the Lead does not implement), steps 3–8 (worktrees, local subagents,
 review, QA, integration, CI watch), and the worktree discipline below:

@@ -1,6 +1,6 @@
 ---
 name: Factory Review
-description: Independent pr-reviewer pass on Copilot agent pull requests against their spec (SPEC/github-agent-pipeline.md, D056).
+description: Independent pr-reviewer pass on Copilot agent pull requests against their spec (SPEC/github-agent-pipeline.md, D057).
 on:
   pull_request:
     types: [ready_for_review, synchronize]
@@ -48,7 +48,7 @@ wrote it from a spec under `SPEC/` that a human approved.
    `## Delegation` section.
 3. Read the full diff and enough surrounding code to judge it. Check correctness,
    regressions, missing or weak tests, scope beyond the spec, contract and
-   decision compliance (D048/D050/D056), security, and mobile/multiplayer edge
+   decision compliance (D048/D050/D057), security, and mobile/multiplayer edge
    cases. Do not claim you ran tests; QA runs them separately.
 4. Classify every finding with exactly one tag:
    - `[blocker]`: an acceptance criterion is not met, a crash or data-integrity

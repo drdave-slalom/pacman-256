@@ -55,13 +55,13 @@ function attachBranches(
   }
 }
 
-function attachWorktrees(
+async function attachWorktrees(
   units: Unit[],
   worktrees: WorktreeFacts[],
   diffByBranch: Map<string, DiffTotals>,
   orphaned: { worktrees: string[] },
   repoRoot: string,
-): void {
+): Promise<void> {
   for (const worktree of worktrees) {
     const branchName = worktree.branch;
     // The primary checkout and non-factory worktrees are not factory artifacts.
@@ -75,7 +75,7 @@ function attachWorktrees(
     const diff = diffByBranch.get(branchName);
     match.value.worktree = {
       path: worktree.path,
-      dirty: isDirty(worktree.path),
+      dirty: await isDirty(worktree.path),
       ...(diff ? { diff } : {}),
     };
   }
@@ -160,10 +160,10 @@ function decideUnit(unit: Unit): void {
   }
 }
 
-function collectDifferences(repoRoot: string, branches: BranchFacts[]): Map<string, DiffTotals> {
+async function collectDifferences(repoRoot: string, branches: BranchFacts[]): Promise<Map<string, DiffTotals>> {
   const map = new Map<string, DiffTotals>();
   for (const branch of branches) {
-    const diff = diffTotals(repoRoot, branch.name);
+    const diff = await diffTotals(repoRoot, branch.name);
     if (diff !== undefined) map.set(branch.name, diff);
   }
   return map;
@@ -177,10 +177,10 @@ export async function buildSnapshot(opts: SnapshotOptions): Promise<FactorySnaps
   const orphaned = { branches: [] as string[], worktrees: [] as string[], handoffs: [] as HandoffRef[], prs: [] as PullRequest[] };
 
   // Git facts.
-  const repo = repoFacts(repoRoot);
-  const branches = listFactoryBranches(repoRoot);
-  const diffByBranch = collectDifferences(repoRoot, branches);
-  const gitWorktreeResult = run("git", ["worktree", "list", "--porcelain"], { cwd: repoRoot });
+  const repo = await repoFacts(repoRoot);
+  const branches = await listFactoryBranches(repoRoot);
+  const diffByBranch = await collectDifferences(repoRoot, branches);
+  const gitWorktreeResult = await run("git", ["worktree", "list", "--porcelain"], { cwd: repoRoot });
   const worktrees: WorktreeFacts[] = gitWorktreeResult.ok ? parseWorktrees(gitWorktreeResult.stdout) : [];
   if (!gitWorktreeResult.ok) errors.push("gitUnavailable: worktree list failed");
 
@@ -215,7 +215,7 @@ export async function buildSnapshot(opts: SnapshotOptions): Promise<FactorySnaps
   }).sort((a, b) => a.id.localeCompare(b.id));
 
   attachBranches(units, branches, diffByBranch, orphaned);
-  attachWorktrees(units, worktrees, diffByBranch, orphaned, repoRoot);
+  await attachWorktrees(units, worktrees, diffByBranch, orphaned, repoRoot);
 
   // Herdr state (defensive).
   const herdr = readHerdr();

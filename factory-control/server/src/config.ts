@@ -26,6 +26,13 @@ export function staleAfterMs(): number {
   return envInt("FACTORY_STALE_MS", STALE_AFTER_MS);
 }
 
+/** Default per-child timeout for external tool reads (gh/git). */
+export const GH_TIMEOUT_MS = 15_000;
+
+export function ghTimeoutMs(): number {
+  return envInt("FACTORY_GH_TIMEOUT_MS", GH_TIMEOUT_MS);
+}
+
 export function serverHost(): string {
   return process.env.HOST ?? "127.0.0.1";
 }

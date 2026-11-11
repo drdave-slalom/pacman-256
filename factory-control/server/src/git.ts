@@ -1,5 +1,6 @@
-import { execFileSync } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { canonicalId } from "./canonical.ts";
+import { ghTimeoutMs } from "./config.ts";
 import type { BranchFacts, DiffTotals, RepoFacts, WorktreeFacts } from "./types.ts";
 
 export interface RunResult {
@@ -7,53 +8,100 @@ export interface RunResult {
   stdout: string;
   stderr: string;
   status: number | null;
+  /** True when the child was killed by the per-child timeout. */
+  timedOut?: boolean;
 }
 
+/**
+ * Run a child process asynchronously (never blocking the event loop).
+ * Resolves with a `RunResult`; failures (non-zero exit, spawn error, or
+ * timeout) are reported in-band rather than thrown.
+ */
 export function run(
   command: string,
   args: string[],
   opts: { cwd?: string; timeoutMs?: number } = {},
-): RunResult {
-  try {
-    const output = execFileSync(command, args, {
-      cwd: opts.cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: opts.timeoutMs ?? 15_000,
+): Promise<RunResult> {
+  // Per-child timeout (spec: 10–15s; default 15s, configurable via
+  // FACTORY_GH_TIMEOUT_MS) — a wedged gh/git child must never freeze the
+  // server; it is killed and the read degrades.
+  const timeoutMs = opts.timeoutMs ?? ghTimeoutMs();
+  return new Promise<RunResult>((resolve) => {
+    let child: ChildProcess;
+    try {
+      child = spawn(command, args, {
+        cwd: opts.cwd,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      resolve({
+        ok: false,
+        stdout: "",
+        stderr: error instanceof Error ? error.message : String(error),
+        status: null,
+      });
+      return;
+    }
+
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, timeoutMs);
+
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
     });
-    return { ok: true, stdout: output, stderr: "", status: 0 };
-  } catch (error) {
-    const e = error as { stdout?: string; stderr?: string; status?: number | null };
-    return {
-      ok: false,
-      stdout: e.stdout ?? "",
-      stderr: e.stderr ?? "",
-      status: e.status ?? null,
-    };
-  }
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        resolve({ ok: false, stdout, stderr, status: null, timedOut: true });
+        return;
+      }
+      resolve({ ok: false, stdout, stderr: stderr === "" ? error.message : stderr, status: null });
+    });
+
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        resolve({ ok: false, stdout, stderr, status: null, timedOut: true });
+        return;
+      }
+      resolve({ ok: code === 0, stdout, stderr, status: code });
+    });
+  });
 }
 
-function git(args: string[], opts: { cwd?: string } = {}): RunResult {
+async function git(args: string[], opts: { cwd?: string } = {}): Promise<RunResult> {
   const runOpts: { cwd?: string } = {};
   if (opts.cwd !== undefined) runOpts.cwd = opts.cwd;
   return run("git", args, runOpts);
 }
 
-export function currentBranch(repoRoot: string): string {
-  const result = git(["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repoRoot });
+export async function currentBranch(repoRoot: string): Promise<string> {
+  const result = await git(["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repoRoot });
   return result.ok ? result.stdout.trim() || "unknown" : "unknown";
 }
 
-export function isDirty(repoRoot: string): boolean {
-  const result = git(["status", "--porcelain"], { cwd: repoRoot });
+export async function isDirty(repoRoot: string): Promise<boolean> {
+  const result = await git(["status", "--porcelain"], { cwd: repoRoot });
   return result.ok && result.stdout.trim() !== "";
 }
 
-export function repoFacts(repoRoot: string): RepoFacts {
+export async function repoFacts(repoRoot: string): Promise<RepoFacts> {
   return {
     root: repoRoot,
-    branch: currentBranch(repoRoot),
-    dirty: isDirty(repoRoot),
+    branch: await currentBranch(repoRoot),
+    dirty: await isDirty(repoRoot),
   };
 }
 
@@ -62,8 +110,8 @@ export function repoFacts(repoRoot: string): RepoFacts {
  * diff cannot be computed (unrelated ancestry, missing ref, git failure) —
  * per spec, base/ancestry unavailable → omit totals.
  */
-export function diffTotals(repoRoot: string, branchRef: string): DiffTotals | undefined {
-  const result = git(["diff", "main..." + branchRef, "--numstat"], { cwd: repoRoot });
+export async function diffTotals(repoRoot: string, branchRef: string): Promise<DiffTotals | undefined> {
+  const result = await git(["diff", "main..." + branchRef, "--numstat"], { cwd: repoRoot });
   if (!result.ok) return undefined;
   const lines = result.stdout.split(/\r?\n/).filter((line) => line.trim() !== "");
   const totals: DiffTotals = { add: 0, del: 0, files: 0 };
@@ -82,10 +130,10 @@ export function diffTotals(repoRoot: string, branchRef: string): DiffTotals | un
  * Remote refs surface merged/lingering branches that would otherwise vanish
  * silently (spec: orphaned artifacts are surfaced, never dropped).
  */
-export function listFactoryBranches(repoRoot: string): BranchFacts[] {
+export async function listFactoryBranches(repoRoot: string): Promise<BranchFacts[]> {
   const branches: BranchFacts[] = [];
 
-  const localResult = git(["branch", "--list", "factory/*"], { cwd: repoRoot });
+  const localResult = await git(["branch", "--list", "factory/*"], { cwd: repoRoot });
   if (localResult.ok) {
     for (const raw of localResult.stdout.split(/\r?\n/)) {
       // `*` = current branch, `+` = checked out in another worktree.
@@ -95,7 +143,7 @@ export function listFactoryBranches(repoRoot: string): BranchFacts[] {
     }
   }
 
-  const remoteResult = git(["for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/factory"], {
+  const remoteResult = await git(["for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/factory"], {
     cwd: repoRoot,
   });
   if (remoteResult.ok) {
@@ -131,8 +179,8 @@ export function parseWorktrees(stdout: string): WorktreeFacts[] {
   return worktrees;
 }
 
-export function listWorktrees(repoRoot: string): WorktreeFacts[] {
-  const result = git(["worktree", "list", "--porcelain"], { cwd: repoRoot });
+export async function listWorktrees(repoRoot: string): Promise<WorktreeFacts[]> {
+  const result = await git(["worktree", "list", "--porcelain"], { cwd: repoRoot });
   if (!result.ok) return [];
   return parseWorktrees(result.stdout);
 }

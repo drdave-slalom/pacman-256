@@ -92,20 +92,32 @@ export function checkStateFromResult(result: RunResult): CheckState {
   }
 }
 
-function checkStateFor(prNumber: number): CheckState {
-  // Valid `gh pr checks --json` fields: bucket, completedAt, description,
-  // event, link, name, startedAt, state, workflow (no `conclusion`).
-  const result = run("gh", ["pr", "checks", String(prNumber), "--json", "state,bucket,name,workflow"]);
+/** Read and summarize one PR's checks. A gh child that hangs past its timeout
+ *  degrades to `unknown` and records an `errors` entry — never freeze the
+ *  server. Valid `gh pr checks --json` fields: bucket, completedAt,
+ *  description, event, link, name, startedAt, state, workflow (no `conclusion`). */
+async function readPrChecks(
+  prNumber: number,
+  errors: string[],
+  runner: typeof run = run,
+): Promise<CheckState> {
+  const result = await runner("gh", ["pr", "checks", String(prNumber), "--json", "state,bucket,name,workflow"]);
+  if (!result.ok && result.timedOut) {
+    errors.push(`gh pr checks #${prNumber} timed out`);
+  }
   return checkStateFromResult(result);
 }
 
-export async function readGitHub(opts: { noGh: boolean }): Promise<GitHubRead> {
+export async function readGitHub(
+  opts: { noGh: boolean },
+  runner: typeof run = run,
+): Promise<GitHubRead> {
   const errors: string[] = [];
   if (opts.noGh) {
     return { prs: [], unavailable: true, errors };
   }
 
-  const result = run("gh", ["pr", "list", "--state", "all", "--json", "number,title,state,headRefName,url"]);
+  const result = await runner("gh", ["pr", "list", "--state", "all", "--json", "number,title,state,headRefName,url"]);
   if (!result.ok) {
     errors.push(`gh unavailable: ${result.stderr.trim() || (result.status ?? "missing")}`);
     return { prs: [], unavailable: true, errors };
@@ -131,7 +143,7 @@ export async function readGitHub(opts: { noGh: boolean }): Promise<GitHubRead> {
       state: item.state ?? "unknown",
       headRefName: item.headRefName ?? "",
       url: item.url ?? "",
-      checks: checkStateFor(item.number),
+      checks: await readPrChecks(item.number, errors, runner),
     });
   }
 

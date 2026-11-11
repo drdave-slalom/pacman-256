@@ -233,7 +233,7 @@ completed-agent result references exactly as described below. The default
 ## GitHub agent pipeline (cloud mode)
 
 A label-driven pipeline runs the same SDLC on GitHub without a VS Code
-session (D056, [spec](../SPEC/github-agent-pipeline.md)). The local VS Code /
+session (D057, [spec](../SPEC/github-agent-pipeline.md)). The local VS Code /
 Herdr flow above stays supported; the two are complementary.
 [`factory-control/`](../factory-control/README.md) remains the local operator
 surface (TUI + read-only web mirror) for local units.

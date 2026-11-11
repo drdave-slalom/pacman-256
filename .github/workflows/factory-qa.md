@@ -1,6 +1,6 @@
 ---
 name: Factory QA
-description: Independent qa-tester pass on Copilot agent pull requests; posts one pass/fail verdict comment (SPEC/github-agent-pipeline.md, D056).
+description: Independent qa-tester pass on Copilot agent pull requests; posts one pass/fail verdict comment (SPEC/github-agent-pipeline.md, D057).
 on:
   pull_request:
     types: [ready_for_review, synchronize]

@@ -309,9 +309,15 @@ Phaser wiring in `main.ts`/`maze-scene.ts` has no automated tests. `npm test`
 also runs the tests for the staged-documentation update script
 (`scripts/update-staged-docs.test.mjs`), the software-factory smoke tests
 (`scripts/factory-smoke.test.mjs`), the label-sync script tests
-(`scripts/sync-labels.test.mjs`), and the agent-pipeline gate tests
+(`scripts/sync-labels.test.mjs`), the Docker build-boundary tests
+(`scripts/docker-build.test.mjs`), and the agent-pipeline gate tests
 (`.github/scripts/agent-gate.test.mjs`). No cloud account is required.
-`npm run build` emits shared/server JavaScript and client static assets.
+`npm run build` covers all game and factory-control workspaces; `npm run check`
+retains that full-repository validation. `npm run build:game` builds only shared
+→ server → client, and is the production Docker build target. The image uses
+locked game workspace dependencies and excludes operational factory-control code.
+`npm run test:docker` checks this build boundary; see `deploy/README.md` for the
+real image smoke command.
 
 After building, `npm start` runs the compiled server. The built client is in
 `apps/client/dist`; see `deploy/` for the Kubernetes deployment, where one
@@ -358,6 +364,9 @@ The [CI workflow](./.github/workflows/ci.yml) runs on pull requests, pushes to
   **22.18.0** (minimum supported) and **24.x**.
 - Read-only repository permissions, a 15-minute job timeout, and cancellation of
   superseded runs on the same ref.
+- A separate **Game image build and smoke** job builds a local Docker image and
+  checks health, static assets, nonroot runtime, and real Colyseus create/join.
+  It runs on PRs too, without registry login, image publication, or deployment.
 - On `main` pushes or manual runs, the Node 24 job uploads a seven-day build
   artifact named `maze-workshop-<commit SHA>`. Pull requests validate only.
 

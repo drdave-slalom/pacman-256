@@ -1,4 +1,4 @@
-# Agent pipeline state machine (SPEC/github-agent-pipeline.md, D056).
+# Agent pipeline state machine (SPEC/github-agent-pipeline.md, D057).
 #
 # Only base-branch-safe triggers: the workflow definition and the logic in
 # .github/scripts/agent-gate.mjs always come from the default branch, and PR

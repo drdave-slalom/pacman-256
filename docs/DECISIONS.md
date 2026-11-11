@@ -84,7 +84,7 @@ decisions below instead of the delivery plan's initial gameplay proposals.
 | D052 | Drop the pre-T3 offline "Enter prototype maze" fallback from the client, because T3's live private-room flow supersedes it. | T3 merged (PR #19); the standalone prototype demo is no longer needed and removing it avoids maintaining two lobbies. |
 | D054 | Unbalanced lobbies: no per-team cap (a team is limited only by the room's 4-player cap); starting requires at least one hunter and one runner; unbalanced rosters (3v1, 2v1) are a warning only, not a block. The client shows a live Hunters/Runners counter and warns when the counts differ; `TEAMS_UNBALANCED` stays a contract-visible code but the server never emits it as a rejection. | Team confirmed no even-team requirement; the host may start any roster with ≥1 per team. Supersedes the balanced-start and 2-per-team-cap portion of D049/D023. Spec: `SPEC/unbalanced-lobbies.md`. |
 | D055 | GitHub Issues is the factory tracker (scoping profile tracker: `github`, labels in `.github/labels.yml`, issue forms + PR template); `main` ruleset requires CI checks `Validate (Node 22.18.0)` and `Validate (Node 24.x)`; no required approvals. Requested and confirmed by David on 2026-11-10. Details: [FACTORY.md](./FACTORY.md#github-tracker). | Links units, specs, PRs, and CI; CI-only keeps a three-person team fast. Spec: `SPEC/github-tracker-integration.md`. |
-| D056 | Label-driven GitHub agent pipeline ([SPEC](../SPEC/github-agent-pipeline.md)). Every new issue is triaged by `factory-orchestrator`, which picks the role agent(s); work starts only when a collaborator adds `agent:go`, and a human approves the spec with `/approve-spec`. Auto-merge is allowed only for `type:docs`, `type:chore`, and `follow-up` work, after required CI, Copilot code review, factory reviewer approval, and QA pass; `type:feature`, `type:bug`, and `playtest` work needs a human merge, and the strictest label wins. The pipeline acts only while repo variable `AGENT_PIPELINE_ENABLED` is `true`. | Requested and confirmed by David on 2026-11-10. Refines D048/D050 "human approval" for those low-risk types only; phone/LAN validation stays human. |
+| D057 | Label-driven GitHub agent pipeline ([SPEC](../SPEC/github-agent-pipeline.md)). Every new issue is triaged by `factory-orchestrator`, which picks the role agent(s); work starts only when a collaborator adds `agent:go`, and a human approves the spec with `/approve-spec`. Auto-merge is allowed only for `type:docs`, `type:chore`, and `follow-up` work, after required CI, Copilot code review, factory reviewer approval, and QA pass; `type:feature`, `type:bug`, and `playtest` work needs a human merge, and the strictest label wins. The pipeline acts only while repo variable `AGENT_PIPELINE_ENABLED` is `true`. | Requested and confirmed by David on 2026-11-10. Refines D048/D050 "human approval" for those low-risk types only; phone/LAN validation stays human. |
 
 ### Current combat summary
 
@@ -323,6 +323,31 @@ tunables remain starting values for review.
   tests driving the real room through countdown→playing→(elimination/timeout)→results.
   Follow-ups: live two-tab browser smoke, physical-phone matrix (T8/T9), T7
   pickups/vulnerability.
+
+## D056 — Factory control center complete (M0–M4)
+
+The factory control center shipped as a hybrid operator/team surface, in five
+reviewed/QA'd milestones (each via PR + green CI):
+
+- **M0** (`#38`): snapshot core — `factory-control/server` aggregates SPEC/git/
+  Herdr/gh into one JSON snapshot with pure-inference stages, read-only API +
+  CLI.
+- **Hook fix** (`#39`): pre-commit docs hook restored `inception` provider and
+  fails fast (drop `--no-extensions`; no silent Ollama fallback).
+- **M1** (`#40`): read-only web mirror — Vite/React kanban, unit detail, agents
+  panel, served by the control server; strictly read-only (405/404 contract).
+- **M2** (`#41`): guarded actions API — prepare/execute protocol, snapshot-derived
+  preconditions (409 + reasons), append-only audit log, per-unit locks, token
+  gate.
+- **M3** (`#42`): pi TUI extension — `/factory` screen (board/detail/actions/
+  agents), keyboard-first, Herdr widget/pane focus untouched.
+- **M4** (`#43`): skill & delegation triggers — dispatch queue
+  (`/api/dispatch/*`), no-server-spawn guarantee (no `child_process`), TUI
+  queue view + ready-to-paste delegation prompt.
+
+Open follow-ups: M1 cross-device LAN check; M4 AC#7 manual Herdr-pane smoke;
+snapshot cold-build latency (~38s `gh pr checks` fan-out); minor review nits
+(F3/F5/F8 for M0; N1–N5 for M4).
 
 ## T7 implementation context (not new gameplay decisions)
 

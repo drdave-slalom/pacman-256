@@ -88,7 +88,7 @@ Report results; adjust this spec before Phase 1.
    Copilot code review.
 5. **Orchestrator delegation in-session: not yet tested.**
 
-**Phase 1: build the chain** (files below). **Phase 2: docs + D056.**
+**Phase 1: build the chain** (files below). **Phase 2: docs + D057.**
 
 ## Files
 
@@ -97,7 +97,7 @@ Report results; adjust this spec before Phase 1.
 - `.github/workflows/factory-triage.md` + `.lock.yml`, `factory-review.md` + `.lock.yml`, `factory-qa.md` + `.lock.yml` (compiled with `gh aw compile`).
 - `.github/labels.yml`: `agent:go`, `agent:active`, `agent:needs-human`, `cycle:1`, `cycle:2`; run sync.
 - `.github/agents/factory-orchestrator.agent.md` + skill: a short "cloud mode" section (triage-only on open; spec-only with a Delegation section on dispatch; no worktrees; stop at the spec gate).
-- `docs/FACTORY.md`: GitHub pipeline section; `docs/DECISIONS.md`: D056 (after David confirms the final text).
+- `docs/FACTORY.md`: GitHub pipeline section; `docs/DECISIONS.md`: D057 (after David confirms the final text).
 - Repo setting: allow auto-merge.
 
 ## Guardrails
@@ -109,7 +109,7 @@ Report results; adjust this spec before Phase 1.
 - Concurrency: one active agent run per issue (`agent:active`); max open agent PRs configurable (default 3).
 - Kill switch: repo variable `AGENT_PIPELINE_ENABLED` must be `true`.
 
-## Decision D056 (approved by David, 2026-11-10)
+## Decision D057 (approved by David, 2026-11-10)
 
 Label-driven GitHub agent pipeline per this spec. Auto-merge allowed only for
 `type:docs`, `type:chore`, and `follow-up` work after required CI, Copilot code

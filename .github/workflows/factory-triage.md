@@ -1,6 +1,6 @@
 ---
 name: Factory Triage
-description: Read-only factory-orchestrator triage of issues opened by triage+ collaborators; labels it and posts one plan comment, never starts work (SPEC/github-agent-pipeline.md, D056).
+description: Read-only factory-orchestrator triage of issues opened by triage+ collaborators; labels it and posts one plan comment, never starts work (SPEC/github-agent-pipeline.md, D057).
 on:
   issues:
     types: [opened, reopened]
