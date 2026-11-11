@@ -14,14 +14,14 @@ COPY packages/shared/package.json packages/shared/package.json
 COPY apps/server/package.json apps/server/package.json
 COPY apps/client/package.json apps/client/package.json
 COPY scripts/install-git-hooks.mjs scripts/install-git-hooks.mjs
-RUN npm ci
+RUN npm ci --workspace @maze/shared --workspace @maze/server --workspace @maze/client --include-workspace-root
 
-# Copy sources and build all workspaces.
+# Copy and compile only game sources; root build also includes operator tooling.
 COPY tsconfig.json tsconfig.tests.json ./
 COPY packages/shared packages/shared
 COPY apps/server apps/server
 COPY apps/client apps/client
-RUN npm run build
+RUN npm run build:game
 
 # ---------- runtime stage: production dependencies + built artifacts ----------
 FROM node:22-alpine AS runtime
@@ -31,9 +31,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/package.json
 COPY apps/server/package.json apps/server/package.json
-COPY apps/client/package.json apps/client/package.json
 COPY scripts/install-git-hooks.mjs scripts/install-git-hooks.mjs
-RUN npm ci --omit=dev && npm cache clean --force
+# Only the server and shared package are runtime dependencies; client is static.
+RUN npm ci --omit=dev --workspace @maze/shared --workspace @maze/server --include-workspace-root=false && npm cache clean --force
 
 COPY --from=build /app/packages/shared/dist packages/shared/dist
 COPY --from=build /app/apps/server/dist apps/server/dist

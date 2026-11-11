@@ -34,6 +34,32 @@ Triggers: push to `main` (and `workflow_dispatch`). The rollback path is the
 previous image tag: `kubectl -n maze-workshop set image deployment/maze-game
 maze-game=ghcr.io/<owner>/<repo>:sha-<prev-sha>`.
 
+## Local image validation (no publication)
+
+The Dockerfile calls `npm run build:game` (shared → server → client), not the
+full-repository `npm run build`, which also compiles factory-control tooling.
+Build dependencies are selected from the root lockfile by explicit game
+workspaces; runtime installs only server/shared production dependencies and
+copies the built client as static files. No factory-control sources or outputs
+are copied. The image retains the nonroot `node` user and `CLIENT_DIST`.
+
+```sh
+npm ci
+npm run check
+npm run test:docker
+docker build --tag maze-workshop:ci .
+DOCKER_IMAGE=maze-workshop:ci npm run smoke:docker
+```
+
+The smoke script starts one container on a random loopback-only host port,
+overrides `PORT`, checks protocol-v1 health and referenced HTML/assets, and
+creates/joins a two-player game through the deployed root Colyseus HTTP/WebSocket
+route. It removes its exact container on completion, including assertion failure.
+The CI **Game image build and smoke** job runs these image checks on PRs without
+secrets, registry login/push, or deployment. Existing Validate jobs still check
+the full repository. Local success does not verify production rollout, TLS,
+load balancing, or physical-phone gameplay.
+
 ## Local (manual) equivalents
 
 ```sh

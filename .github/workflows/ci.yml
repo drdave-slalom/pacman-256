@@ -14,6 +14,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  docker:
+    name: Game image build and smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Check game image build contract
+        run: npm run test:docker
+
+      # Plain local build: no registry login, push, secrets, or deployment.
+      - name: Build game image
+        run: docker build --tag maze-workshop:ci .
+
+      - name: Smoke game image
+        run: npm run smoke:docker
+        env:
+          DOCKER_IMAGE: maze-workshop:ci
+
   validate:
     name: Validate (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
