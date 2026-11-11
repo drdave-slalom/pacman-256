@@ -27,7 +27,7 @@ import {
   type InputRejectedMessage,
   type PlayerSnapshot,
 } from "@maze/shared";
-import { SIMULATION_STEP_MS, planSimulationSteps, resolveContacts, type SpawnPlacer, type StepMove } from "./game-room.ts";
+import { GameRoom, SIMULATION_STEP_MS, planSimulationSteps, resolveContacts, type SpawnPlacer, type StepMove } from "./game-room.ts";
 import { createGameServer } from "./server.ts";
 
 const WAIT_MS = 3_000;
@@ -965,4 +965,201 @@ test("T5: a delayed tick across the deadline still resolves a catch in the final
   assert.ok(results.resultEndedAt < results.roundEndsAt, "decided before the deadline");
   assert.ok(results.resultEndedAt > results.roundEndsAt - 100);
   assert.equal(playerOf(results, guest.id).alive, false);
+});
+
+test("T7 real room: protected contact blocks without crossing and permits retreat", async t => {
+  const harness = await startServer(t);
+  const { host, guest } = await startOneVsOne(harness);
+  const room = authoritativeRoom(host.room.roomId);
+  const hunter = room.state.players.get(host.id)!;
+  const runner = room.state.players.get(guest.id)!;
+  const cell = corridor(generateMaze(TEST_SEED));
+  hunter.x = cell.col + 0.5; hunter.y = cell.row + 0.5; hunter.direction = "right";
+  runner.x = cell.col + 1.5; runner.y = cell.row + 0.5; runner.direction = "left";
+  runner.shieldEndsAt = harness.now() + 3000;
+  harness.advance(500);
+  const blocked = await host.waitFor(s => s.simulationTime >= harness.now() - 1e-6, "blocked movement");
+  assert.equal(blocked.phase, "playing");
+  const h = blocked.players[host.id]!, r = blocked.players[guest.id]!;
+  assert.ok(Math.abs(r.x - h.x - 0.6) < 1e-6, "stopped at the contact boundary");
+  hunter.direction = "left"; runner.direction = "right";
+  harness.advance(100);
+  const separated = await guest.waitFor(s => s.simulationTime >= harness.now() - 1e-6, "retreat");
+  assert.ok(separated.players[guest.id]!.x - separated.players[host.id]!.x > 0.6);
+});
+
+test("T7 real room: vulnerability respawns exactly at 18s, independent of hunter shields", async t => {
+  const harness = await startServer(t);
+  const { host, guest } = await startOneVsOne(harness);
+  const room = authoritativeRoom(host.room.roomId);
+  const runner = room.state.players.get(guest.id)!;
+  const pickup = room.state.pickups.get("vulnerability")!;
+  pickup.col = Math.floor(runner.x); pickup.row = Math.floor(runner.y);
+  const collected = await guest.waitFor(s => s.vulnerabilityEndsAt > 0, "global collection");
+  const at = collected.simulationTime;
+  room.state.players.get(host.id)!.shieldEndsAt = at + 30000;
+  harness.advance(8000);
+  const expired = await guest.waitFor(s => s.simulationTime >= at + 8000 - 1e-6, "8s expiry");
+  assert.equal(expired.pickups.vulnerability!.active, false);
+  assert.equal(expired.vulnerabilityRespawnAt, at + 18000);
+  harness.advance(10000);
+  const spawned = await guest.waitFor(s => s.simulationTime >= at + 18000 - 1e-6 && !!s.pickups.vulnerability?.active, "18s respawn");
+  assert.ok(spawned.players[host.id]!.shieldEndsAt > spawned.simulationTime);
+  assert.equal(spawned.vulnerabilityRespawnAt, at + 18000);
+});
+
+test("T7 real room: hunter shield exact deadline expiry reverses contact before timeout", async t => {
+  const harness = await startServer(t);
+  const { host, guest, state } = await startOneVsOne(harness);
+  harness.advance(GAME_RULES.roundDurationMs - 100);
+  await host.waitFor(s => s.simulationTime >= state.roundEndsAt - 100 - 1e-6, "last 100ms");
+  const room = authoritativeRoom(host.room.roomId);
+  const hunter = room.state.players.get(host.id)!;
+  const runner = room.state.players.get(guest.id)!;
+  runner.x = hunter.x; runner.y = hunter.y; runner.direction = hunter.direction;
+  runner.shieldEndsAt = state.roundEndsAt + 3000;
+  hunter.shieldEndsAt = state.roundEndsAt;
+  room.state.vulnerabilityEndsAt = state.roundEndsAt + 8000;
+  harness.advance(1000);
+  const result = await guest.waitFor(s => s.phase === "results", "deadline reversal");
+  assert.equal(result.resultWinner, "runner");
+  assert.equal(result.resultReason, "teamEliminated", "combat wins over timeout");
+  assert.equal(result.resultEndedAt, state.roundEndsAt);
+  assert.equal(result.simulationTime, state.roundEndsAt);
+  assert.equal(result.players[host.id]!.alive, false);
+});
+
+/** Trusted test setup only: clients have no path to mutate these schema fields. */
+function authoritativeRoom(code: string): GameRoom {
+  const room = matchMaker.getLocalRoomById(code);
+  assert.ok(room instanceof GameRoom);
+  return room;
+}
+
+function corridor(maze: readonly string[]): { col: number; row: number } {
+  for (let row = 1; row < maze.length - 1; row++) {
+    for (let col = 1; col < maze[row]!.length - 3; col++) {
+      if ([0, 1, 2].every(dx => isWalkableIn(maze, col + dx, row))) return { col, row };
+    }
+  }
+  throw new Error("test seed needs a straight corridor");
+}
+
+test("T7 real room: initial pickups, spoof rejection, speed/shield collection and exact respawn; replay clears effects", async t => {
+  const harness = await startServer(t);
+  const { host, guest, state } = await startOneVsOne(harness);
+  assert.equal(Object.keys(state.pickups).length, 3);
+  const cells = new Set<string>();
+  for (const pickup of Object.values(state.pickups)) {
+    assert.equal(pickup.active, true);
+    assert.ok(isWalkableIn(generateMaze(TEST_SEED), pickup.col, pickup.row));
+    assert.ok(!Object.values(state.players).some(p => Math.floor(p.x) === pickup.col && Math.floor(p.y) === pickup.row));
+    cells.add(`${pickup.col},${pickup.row}`);
+  }
+  assert.equal(cells.size, 3);
+  host.room.send("pickup", { kind: "speed", speedEndsAt: 999999999 });
+  assert.equal((await host.nextRejection()).code, "INVALID_INPUT");
+  const room = authoritativeRoom(host.room.roomId);
+  const hunter = room.state.players.get(host.id)!;
+  const runner = room.state.players.get(guest.id)!;
+  for (const kind of ["speed", "shield"] as const) {
+    const pickup = room.state.pickups.get(kind)!;
+    pickup.col = Math.floor(hunter.x); pickup.row = Math.floor(hunter.y); pickup.active = true;
+  }
+  const collected = await host.waitFor(s => (s.players[host.id]?.speedEndsAt ?? 0) > 0 && (s.players[host.id]?.shieldEndsAt ?? 0) > 0, "both effects");
+  const collectedAt = collected.simulationTime;
+  assert.equal(collected.players[host.id]!.speedEndsAt, collectedAt + 5000);
+  assert.equal(collected.players[host.id]!.shieldEndsAt, collectedAt + 3000);
+  harness.advance(3000);
+  const expired = await host.waitFor(s => s.simulationTime >= collectedAt + 3000, "exact shield expiry");
+  assert.equal(expired.players[host.id]!.shieldEndsAt, 0);
+  assert.ok(expired.players[host.id]!.speedEndsAt > expired.simulationTime);
+  harness.advance(12000);
+  const respawn = await host.waitFor(s => s.simulationTime >= collectedAt + 15000, "15s respawn");
+  // Respawn occurs at the beginning of a simulation step, including a zero step on the next tick.
+  const spawned = await host.waitFor(s => !!s.pickups.speed?.active && !!s.pickups.shield?.active, "standard respawns");
+  assert.ok(spawned.simulationTime >= respawn.simulationTime);
+  assert.equal(spawned.players[host.id]!.speedEndsAt, 0);
+  runner.x = hunter.x; runner.y = hunter.y;
+  await host.waitFor(s => s.phase === "results", "contact ends round");
+  expectAccepted(await host.request("returnToLobby", {}));
+  const lobby = await guest.waitFor(s => s.phase === "lobby", "reset");
+  assert.deepEqual(lobby.pickups, {});
+  assert.equal(lobby.vulnerabilityEndsAt, 0);
+  for (const player of Object.values(lobby.players)) {
+    assert.equal(player.speedEndsAt, 0); assert.equal(player.shieldEndsAt, 0); assert.equal(player.alive, true);
+  }
+});
+
+test("T7 real room: runner-only global pickup, 0/8/18 schedule and shield expiry exposes hunter", async t => {
+  const harness = await startServer(t);
+  const { host, guest, state } = await startOneVsOne(harness);
+  const room = authoritativeRoom(host.room.roomId);
+  const hunter = room.state.players.get(host.id)!;
+  const runner = room.state.players.get(guest.id)!;
+  const pickup = room.state.pickups.get("vulnerability")!;
+  pickup.col = Math.floor(hunter.x); pickup.row = Math.floor(hunter.y);
+  const revision = host.snapshot().revision;
+  await host.waitFor(s => s.revision > revision + 1, "hunter cannot claim");
+  assert.equal(pickup.active, true);
+  pickup.col = Math.floor(runner.x); pickup.row = Math.floor(runner.y);
+  const collected = await host.waitFor(s => s.vulnerabilityEndsAt > 0, "runner global pickup");
+  const at = collected.simulationTime;
+  assert.equal(collected.vulnerabilityEndsAt, at + 8000);
+  assert.equal(collected.vulnerabilityRespawnAt, at + 18000);
+  hunter.shieldEndsAt = at + 3000;
+  // Runner shield prevents normal combat while hunter shield overrides global reversal.
+  runner.shieldEndsAt = at + 5000;
+  runner.x = hunter.x; runner.y = hunter.y;
+  harness.advance(2999);
+  await host.waitFor(s => s.serverTime >= at + 2999, "shield still protects");
+  assert.equal(room.state.phase, "playing");
+  harness.advance(1);
+  const results = await guest.waitFor(s => s.phase === "results", "hunter shield expires");
+  assert.equal(results.resultWinner, "runner");
+  assert.equal(results.resultReason, "teamEliminated");
+  assert.equal(results.players[host.id]!.alive, false);
+  assert.ok(results.vulnerabilityEndsAt > results.resultEndedAt);
+  assert.equal(results.pickups.vulnerability!.active, false);
+  harness.advance(20000);
+  const finalRevision = results.revision;
+  const final = await host.waitFor(s => s.revision > finalRevision + 1, "results stay frozen");
+  assert.equal(final.pickups.vulnerability!.active, false);
+  assert.equal(final.simulationTime, results.simulationTime);
+});
+
+test("T7 real room: pickup-before-contact global reversal and speed traversal", async t => {
+  const harness = await startServer(t);
+  const { host, guest } = await startOneVsOne(harness);
+  const room = authoritativeRoom(host.room.roomId);
+  const hunter = room.state.players.get(host.id)!;
+  const runner = room.state.players.get(guest.id)!;
+  const cell = corridor(generateMaze(TEST_SEED));
+  runner.x = cell.col + 0.5; runner.y = cell.row + 0.5; runner.direction = "right";
+  runner.speedEndsAt = harness.now() + 5000;
+  const startX = runner.x;
+  harness.advance(100);
+  const moved = await guest.waitFor(s => s.simulationTime >= harness.now() - 1e-6, "speed movement");
+  assert.ok(Math.abs(moved.players[guest.id]!.x - startX - 0.6) < 1e-6);
+  // Put an unshielded hunter and the reversal pickup at the runner's current position.
+  hunter.x = runner.x; hunter.y = runner.y;
+  const pickup = room.state.pickups.get("vulnerability")!;
+  // Set up center contact in a zero-duration simulation tick.
+  runner.x = cell.col + 1.5; hunter.x = runner.x;
+  pickup.col = cell.col + 1; pickup.row = cell.row;
+  const results = await guest.waitFor(s => s.phase === "results", "post-pickup contact");
+  assert.equal(results.resultWinner, "runner");
+  assert.equal(results.players[host.id]!.alive, false);
+  assert.equal(results.players[guest.id]!.alive, true);
+});
+
+test("T7 unit: mixed contacts eliminate together, independent of iteration and runner shields", () => {
+  const moves = [
+    { ...move("h1", "hunter", [1.5, 1.5]), shieldEndsAt: 100 },
+    move("r1", "runner", [1.5, 1.5]),
+    move("h2", "hunter", [5.5, 5.5]),
+    { ...move("r2", "runner", [5.5, 5.5]), shieldEndsAt: 100 },
+  ];
+  assert.deepEqual([...resolveContacts(moves, 50, 100)].sort(), ["h2", "r1"]);
+  assert.deepEqual([...resolveContacts([...moves].reverse(), 50, 100)].sort(), ["h2", "r1"]);
 });
