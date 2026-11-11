@@ -11,6 +11,7 @@ function makeSnapshot(): FactorySnapshot {
     generatedAt: `g${seq}`,
     repo: { root: "/repo", branch: "main", dirty: false },
     units: [],
+    issues: [],
     agents: [],
     prs: [],
     orphaned: { branches: [], worktrees: [], handoffs: [], prs: [] },

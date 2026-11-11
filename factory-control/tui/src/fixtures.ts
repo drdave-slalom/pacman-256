@@ -11,6 +11,7 @@ export function fixtureSnapshot(overrides: Partial<FactorySnapshot> = {}): Facto
     units: [
       {
         id: "T1-spec",
+        kind: "spec",
         specPath: "SPEC/T1-spec.md",
         title: "T1 spec",
         goal: "Goal for T1",
@@ -31,6 +32,7 @@ export function fixtureSnapshot(overrides: Partial<FactorySnapshot> = {}): Facto
       },
       {
         id: "T2-execute",
+        kind: "spec",
         specPath: "SPEC/T2-execute.md",
         title: "T2 execute",
         stage: "execute",
@@ -72,6 +74,7 @@ export function fixtureSnapshot(overrides: Partial<FactorySnapshot> = {}): Facto
       },
       {
         id: "T3-review",
+        kind: "spec",
         specPath: "SPEC/T3-review.md",
         stage: "review",
         flags: {
@@ -92,6 +95,7 @@ export function fixtureSnapshot(overrides: Partial<FactorySnapshot> = {}): Facto
       },
       {
         id: "T4-merged",
+        kind: "spec",
         specPath: "SPEC/T4-merged.md",
         stage: "done",
         flags: {
@@ -118,6 +122,7 @@ export function fixtureSnapshot(overrides: Partial<FactorySnapshot> = {}): Facto
         attention: ["ready-for-cleanup"],
       },
     ],
+    issues: [],
     agents: [
       {
         label: "builder-t2",

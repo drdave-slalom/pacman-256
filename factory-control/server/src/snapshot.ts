@@ -189,6 +189,7 @@ export async function buildSnapshot(opts: SnapshotOptions): Promise<FactorySnaps
     const spec = readSpecUnit(repoRoot, relPath);
     const unit: Unit = {
       id: spec.id,
+      kind: "spec",
       specPath: spec.path,
       stage: "unknown",
       flags: {
@@ -234,6 +235,8 @@ export async function buildSnapshot(opts: SnapshotOptions): Promise<FactorySnaps
     generatedAt: new Date().toISOString(),
     repo,
     units,
+    // No GitHub reader yet (U2); issue cards arrive with the reader unit.
+    issues: [],
     agents: herdr.agents,
     prs: github.prs,
     orphaned: {
