@@ -179,8 +179,12 @@ simulation tick. No pickup request or client effect declaration is accepted.
 Movement traces record actual cell-center segments, buffered turns and wall stops.
 Pickup arrival time wins; exact ties use a once-per-round seeded player priority.
 After movement and pickup awards, all contacts use one effect snapshot; eliminations
-apply together, then victory precedes timeout. Shielded opposing contacts stop at
-the contact boundary and allow retreat. Team contacts do not block. The simulation
+apply together, then victory precedes timeout. Existing shielded opposing contacts stop movement at
+the contact boundary and allow retreat. Stops resolve chronologically through
+multi-player chains, bounded by the number of players. Pickup awards use these
+final movement paths. New shields affect all same-step combat contacts but never
+rewind completed movement or erase awarded arrivals; their movement blocking
+applies in the next movement phase. Team contacts do not block. The simulation
 cursor clamps at the round deadline. Results stop pickups/effects progressing;
 return-to-lobby clears them for replay.
 
@@ -188,7 +192,7 @@ Focused T7 coverage (build shared first, as root scripts do):
 
 ```bash
 npm --workspace packages/shared run build
-node --experimental-strip-types --test packages/shared/src/pickups.test.ts apps/server/src/game-room.test.ts apps/client/src/hud-view.test.ts
+node --experimental-strip-types --test packages/shared/src/pickups.test.ts apps/server/src/movement-resolution.test.ts apps/server/src/game-room.test.ts apps/client/src/hud-view.test.ts
 ```
 
 These include real-room SDK checks, not physical-device acceptance. T8 owns four

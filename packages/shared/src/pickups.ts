@@ -89,10 +89,48 @@ export function pathContact(a: MovePath, b: MovePath, distance = CONTACT_DISTANC
   return null;
 }
 
+/**
+ * First inward protected contact. Unlike combat contact, resting/tangential or
+ * separating contact does not stop motion. Check each real path segment so a
+ * retreat followed by a corner cannot hide a later inward contact.
+ */
+export function pathBlockingContact(a: MovePath, b: MovePath, distance = CONTACT_DISTANCE_TILES): number | null {
+  const times = [...new Set([0, 1, ...a.map(p => p.time), ...b.map(p => p.time)])].sort((x, y) => x - y);
+  for (let i = 1; i < times.length; i++) {
+    const start = times[i - 1]!, end = times[i]!;
+    const a0 = pathPosition(a, start), b0 = pathPosition(b, start);
+    const a1 = pathPosition(a, end), b1 = pathPosition(b, end);
+    const x = a0.x - b0.x, y = a0.y - b0.y;
+    const vx = a1.x - b1.x - x, vy = a1.y - b1.y - y;
+    const dot = x * vx + y * vy;
+    if (dot >= -1e-12) continue;
+    const c = x * x + y * y - distance * distance;
+    if (c <= 1e-12) return start;
+    const v = vx * vx + vy * vy;
+    const disc = dot * dot - v * c;
+    if (disc <= 0) continue;
+    const t = c / (-dot + Math.sqrt(disc));
+    if (t >= 0 && t <= 1) return start + t * (end - start);
+  }
+  return null;
+}
+
 /** Pickup collection occurs at its cell center, not an endpoint/chord approximation. */
 export function pickupArrival(path: MovePath, col: number, row: number): number | null {
-  const position = { x: col + 0.5, y: row + 0.5 };
-  return pathContact(path, [{ position, time: 0 }, { position, time: 1 }], 0);
+  const x = col + 0.5, y = row + 0.5;
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1]!, b = path[i]!;
+    const dx = b.position.x - a.position.x, dy = b.position.y - a.position.y;
+    const lengthSquared = dx * dx + dy * dy;
+    // Project onto the segment instead of solving a zero-radius quadratic:
+    // its discriminant can round negative even on an exact straight crossing.
+    const t = lengthSquared === 0 ? 0 : ((x - a.position.x) * dx + (y - a.position.y) * dy) / lengthSquared;
+    if (t < 0 || t > 1) continue;
+    if (Math.hypot(a.position.x + t * dx - x, a.position.y + t * dy - y) <= 1e-12) {
+      return a.time + t * (b.time - a.time);
+    }
+  }
+  return null;
 }
 export function pickupClaim(kind: PickupKind, col: number, row: number, players: readonly { id: string; team: Team; path: MovePath }[], priority: readonly string[]): { id: string; time: number } | null {
   const claims = players.flatMap(p => {

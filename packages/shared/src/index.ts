@@ -1,4 +1,4 @@
-export { PICKUP_KINDS, effectActive, pickupRandom, seededPriority, pickupCell, pathPosition, pathContact, pickupArrival, pickupClaim, pickupTiming, contactOutcome } from "./pickups.ts";
+export { PICKUP_KINDS, effectActive, pickupRandom, seededPriority, pickupCell, pathPosition, pathContact, pathBlockingContact, pickupArrival, pickupClaim, pickupTiming, contactOutcome } from "./pickups.ts";
 export type { PickupKind, PickupSnapshot, PathPoint, MovePath } from "./pickups.ts";
 
 export const PROTOCOL_VERSION = 1;

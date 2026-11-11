@@ -30,7 +30,7 @@ import {
   stepPlayerMove,
   sweptContact,
   PICKUP_KINDS, pickupRandom, seededPriority, pickupCell, pickupClaim, pickupTiming,
-  effectActive, contactOutcome, pathContact, pathPosition,
+  effectActive, contactOutcome, pathContact, pathPosition, pathBlockingContact,
   type PathPoint, type MovePath, type PickupKind,
   type ActionResultMessage,
   type Direction,
@@ -139,6 +139,47 @@ export function resolveContacts(moves: readonly StepMove[], now = 0, vulnerabili
     }
   }
   return eliminated;
+}
+
+/**
+ * Resolve protected obstacles chronologically, including contact chains created
+ * by a stop. Each event freezes at least one previously unfrozen path, so there
+ * are at most moves.length events. Earlier path history is never changed by a
+ * later event. All pairs tied at an event stop together, independent of order.
+ * Inputs are not mutated; callers commit the returned paths before pickup claims.
+ */
+export function resolveProtectedMovement(moves: readonly StepMove[], now: number, vulnerabilityEndsAt = 0): StepMove[] {
+  const resolved = moves.map(move => ({ ...move, path: move.path ?? [
+    { position: move.from, time: 0 }, { position: move.to, time: 1 },
+  ] }));
+  const frozen = new Set<string>();
+  for (let event = 0; event < moves.length; event++) {
+    let earliest = Infinity;
+    const contacts: { hunter: StepMove; runner: StepMove; time: number }[] = [];
+    for (const hunter of resolved.filter(move => move.team === "hunter")) {
+      for (const runner of resolved.filter(move => move.team === "runner")) {
+        if (frozen.has(hunter.id) && frozen.has(runner.id)) continue;
+        if (contactOutcome(now, vulnerabilityEndsAt, hunter.shieldEndsAt ?? 0, runner.shieldEndsAt ?? 0) !== "blocked") continue;
+        const time = pathBlockingContact(hunter.path, runner.path);
+        if (time === null) continue;
+        earliest = Math.min(earliest, time);
+        contacts.push({ hunter, runner, time });
+      }
+    }
+    if (!Number.isFinite(earliest)) break;
+    const stopping = new Set(contacts.filter(contact => contact.time === earliest)
+      .flatMap(contact => [contact.hunter.id, contact.runner.id]));
+    for (const move of resolved) {
+      if (!stopping.has(move.id) || frozen.has(move.id)) continue;
+      const position = pathPosition(move.path, earliest);
+      const segment = move.path.find(point => point.time > earliest) ?? move.path[move.path.length - 1]!;
+      const stop = { ...segment, position, time: earliest };
+      move.to = position;
+      move.path = [...move.path.filter(point => point.time < earliest), stop, { ...stop, time: 1 }];
+      frozen.add(move.id);
+    }
+  }
+  return resolved;
 }
 
 /** One full simulation step in ms (1000 / SIMULATION_HZ). */
@@ -578,38 +619,18 @@ export class GameRoom extends Room<{ state: GameState }> {
     });
   }
 
-  /** Stop paths together; keep untraveled buffered turns queued at a blocking boundary. */
+  /** Commit the final movement paths before claims; pickups never rewind these. */
   #blockProtectedMoves(moves: StepMove[], now: number): void {
-    // Block protected opposing contacts; compute all stops from the same snapshot.
-    const stops = new Map<string, number>();
-    for (const hunter of moves.filter(m => m.team === "hunter")) {
-      for (const runner of moves.filter(m => m.team === "runner")) {
-        if (contactOutcome(now, this.state.vulnerabilityEndsAt, hunter.shieldEndsAt!, runner.shieldEndsAt!) !== "blocked") continue;
-        const time = pathContact(hunter.path!, runner.path!);
-        if (time === null) continue;
-        if (time === 0) {
-          // At a blocking boundary, allow either side to retreat or travel together.
-          const startDistance = Math.hypot(hunter.from.x - runner.from.x, hunter.from.y - runner.from.y);
-          const endDistance = Math.hypot(hunter.to.x - runner.to.x, hunter.to.y - runner.to.y);
-          const dx = hunter.to.x - runner.to.x - (hunter.from.x - runner.from.x);
-          const dy = hunter.to.y - runner.to.y - (hunter.from.y - runner.from.y);
-          const approaching = (hunter.from.x - runner.from.x) * dx + (hunter.from.y - runner.from.y) * dy;
-          if (approaching >= -1e-10 && endDistance >= startDistance - 1e-10) continue;
-        }
-        for (const m of [hunter, runner]) stops.set(m.id, Math.min(stops.get(m.id) ?? 1, time));
-      }
-    }
-    for (const [id, time] of stops) {
-      const move = moves.find(m => m.id === id)!;
-      const position = pathPosition(move.path!, time);
-      const player = this.state.players.get(id)!;
-      player.x = position.x; player.y = position.y;
-      // A stop before a buffered corner must not retain the untraveled turn.
-      const segment = move.path!.find(point => point.time > time) ?? move.path![move.path!.length - 1]!;
-      if (segment.direction) player.direction = segment.direction;
-      if (segment.queuedDirection !== undefined) player.queuedDirection = segment.queuedDirection ?? "";
-      move.to = position;
-      move.path = [...move.path!.filter(point => point.time < time), { position, time }, { position, time: 1 }];
+    const resolved = resolveProtectedMovement(moves, now, this.state.vulnerabilityEndsAt);
+    for (let i = 0; i < moves.length; i++) {
+      const move = resolved[i]!;
+      moves[i] = move;
+      const player = this.state.players.get(move.id)!;
+      player.x = move.to.x;
+      player.y = move.to.y;
+      const last = move.path![move.path!.length - 1]!;
+      if (last.direction) player.direction = last.direction;
+      if (last.queuedDirection !== undefined) player.queuedDirection = last.queuedDirection ?? "";
     }
   }
 
@@ -674,8 +695,10 @@ export class GameRoom extends Room<{ state: GameState }> {
         this.state.vulnerabilityRespawnAt = timing.nextSpawnAt;
       }
     });
+    // Movement is already final. New protection affects every same-step combat
+    // contact, but cannot erase an arrival that awarded it (or a competing claim).
+    // It becomes a movement obstacle in the next movement phase.
     for (const move of moves) move.shieldEndsAt = this.state.players.get(move.id)!.shieldEndsAt;
-    this.#blockProtectedMoves(moves, stepEndsAt);
     for (const id of resolveContacts(moves, stepEndsAt, this.state.vulnerabilityEndsAt)) {
       const player = this.state.players.get(id);
       if (player) {

@@ -967,6 +967,91 @@ test("T5: a delayed tick across the deadline still resolves a catch in the final
   assert.equal(playerOf(results, guest.id).alive, false);
 });
 
+for (const contested of [false, true]) for (const reverse of [false, true]) {
+  test(`T7 cycle 1 real room: shield arrival retained, contested=${contested}, reversed=${reverse}`, async t => {
+    const harness = await startServer(t);
+    const { h1, r1, r2 } = await countdownTwoVsTwo(harness);
+    harness.advance(GAME_RULES.countdownMs);
+    await r1.waitFor(s => s.phase === "playing", "playing");
+    const room = authoritativeRoom(h1.room.roomId);
+    const hunter = room.state.players.get(h1.id)!;
+    const runner = room.state.players.get(r1.id)!;
+    const cell = corridor(generateMaze(TEST_SEED));
+    hunter.x = cell.col + 0.9; hunter.y = cell.row + 0.5; hunter.direction = "right";
+    runner.x = cell.col + 1.55; runner.y = cell.row + 0.5; runner.direction = "left";
+    if (contested) {
+      const challenger = room.state.players.get(r2.id)!;
+      challenger.x = cell.col + 1.6; challenger.y = cell.row + 0.5; challenger.direction = "left";
+    }
+    for (const pickup of room.state.pickups.values()) { pickup.active = false; pickup.nextSpawnAt = harness.now() + 100000; }
+    const shield = room.state.pickups.get("shield")!;
+    shield.col = cell.col + 1; shield.row = cell.row; shield.active = true;
+    if (reverse) {
+      const players = [...room.state.players.entries()].reverse();
+      room.state.players.clear();
+      for (const [id, player] of players) room.state.players.set(id, player);
+    }
+    const at = harness.now();
+    harness.advance(SIMULATION_STEP_MS);
+    const result = await r1.waitFor(s => s.simulationTime >= at + SIMULATION_STEP_MS - 1e-6, "single step shield acquisition");
+    assert.equal(result.phase, "playing");
+    assert.equal(result.pickups.shield!.active, false);
+    assert.ok(Math.abs(result.players[r1.id]!.shieldEndsAt - (at + 12.5 + GAME_RULES.shieldDurationMs)) < 1e-6);
+    assert.ok(Math.abs(result.pickups.shield!.nextSpawnAt - (at + 12.5 + GAME_RULES.standardPickupRespawnMs)) < 1e-6);
+    assert.ok(Math.abs(result.players[r1.id]!.x - (cell.col + 1.55 - 4 / 30)) < 1e-6, "decoded position must not rewind to cell.col + 1.525");
+    assert.ok(Math.abs(result.players[h1.id]!.x - (cell.col + 0.9 + 4 / 30)) < 1e-6);
+    assert.ok(Math.abs(runner.x - (cell.col + 1.55 - 4 / 30)) < 1e-10, "authority retains the complete awarded path");
+    assert.equal(result.players[r1.id]!.alive, true, "post-pickup shield prevents same-step elimination");
+    if (contested) {
+      assert.equal(result.players[r2.id]!.shieldEndsAt, 0, "later arrival loses despite map order");
+      assert.equal(result.players[r2.id]!.alive, false, "unshielded challenger contact resolves in same snapshot");
+    }
+    harness.advance(SIMULATION_STEP_MS);
+    const blocked = await r1.waitFor(s => s.simulationTime >= at + 2 * SIMULATION_STEP_MS - 1e-6, "next movement uses shield");
+    assert.equal(blocked.players[r1.id]!.x, result.players[r1.id]!.x, "no further inward movement");
+    assert.equal(blocked.players[h1.id]!.x, result.players[h1.id]!.x);
+  });
+}
+
+for (const boosted of [false, true]) {
+  test(`T7 cycle 1 real room: four-player blocking chain, boosted=${boosted}`, async t => {
+    const harness = await startServer(t);
+    const { h1, r1, h2, r2 } = await countdownTwoVsTwo(harness);
+    harness.advance(GAME_RULES.countdownMs);
+    await r1.waitFor(s => s.phase === "playing", "playing");
+    const room = authoritativeRoom(h1.room.roomId);
+    const maze = generateMaze(TEST_SEED);
+    let wall: { col: number; row: number } | undefined;
+    for (let row = 1; row < maze.length - 1 && !wall; row++) {
+      for (let col = 3; col < maze[row]!.length - 1; col++) {
+        if ([0, -1, -2, -3].every(dx => isWalkableIn(maze, col + dx, row)) && !isWalkableIn(maze, col + 1, row)) {
+          wall = { col, row }; break;
+        }
+      }
+    }
+    assert.ok(wall);
+    const lastX = wall.col + 0.5;
+    for (const [index, client] of [h1, r1, h2, r2].entries()) {
+      const player = room.state.players.get(client.id)!;
+      player.x = lastX - (3 - index) * 0.62; player.y = wall.row + 0.5;
+      player.direction = "right";
+      player.shieldEndsAt = player.team === "runner" ? harness.now() + 3000 : 0;
+      player.speedEndsAt = boosted ? harness.now() + 5000 : 0;
+    }
+    for (const pickup of room.state.pickups.values()) { pickup.active = false; pickup.nextSpawnAt = harness.now() + 100000; }
+    const at = harness.now();
+    harness.advance(SIMULATION_STEP_MS);
+    const result = await h1.waitFor(s => s.simulationTime >= at + SIMULATION_STEP_MS - 1e-6, "chain resolution");
+    for (const [index, client] of [h1, r1, h2, r2].entries()) {
+      const expected = lastX - (3 - index) * 0.6;
+      assert.ok(Math.abs(result.players[client.id]!.x - expected) < 1e-6, "decoded schema coordinates");
+      assert.ok(Math.abs(room.state.players.get(client.id)!.x - expected) < 1e-10, "authoritative stable separation");
+      assert.equal(result.players[client.id]!.alive, true);
+    }
+    assert.equal(result.phase, "playing");
+  });
+}
+
 test("T7 real room: protected contact blocks without crossing and permits retreat", async t => {
   const harness = await startServer(t);
   const { host, guest } = await startOneVsOne(harness);

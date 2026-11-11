@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { contactOutcome, effectActive, pickupArrival, pickupCell, pickupClaim, pickupRandom, pickupTiming, seededPriority, pathContact, type MovePath } from "./pickups.ts";
+import { contactOutcome, effectActive, pickupArrival, pickupCell, pickupClaim, pickupRandom, pickupTiming, seededPriority, pathContact, pathBlockingContact, type MovePath } from "./pickups.ts";
 import { stepPlayerMove } from "./movement.ts";
 import { generateMaze } from "./maze-gen.ts";
 import { findSpawnCells } from "./spawn.ts";
@@ -43,6 +43,38 @@ test("T7 true movement paths preserve fast crossings, corners and wall arrival t
   assert.equal(pickupArrival(path, 3, 3), 2 / 3, "wall stop must not stretch travel time");
   assert.notEqual(pathContact(line(1.5, 8.5), line(8.5, 1.5)), null);
 });
+test("T7 cycle 1: pickup center projection is robust to zero-radius discriminant rounding", () => {
+  const arrival = pickupArrival(line(2.49997, 2.633303333333333), 2, 1);
+  assert.notEqual(arrival, null);
+  assert.ok(Math.abs(arrival! - 0.000225) < 1e-12);
+  assert.equal(pickupArrival(line(2.5, 2.5), 2, 1), 0);
+  assert.equal(pickupArrival(line(2.6, 2.7), 2, 1), null, "no extrapolated arrival");
+  assert.equal(pickupArrival([
+    { position: { x: 2.49997, y: 1.500001 }, time: 0 },
+    { position: { x: 2.633303333333333, y: 1.500001 }, time: 1 },
+  ], 2, 1), null, "near misses remain misses");
+  for (let i = 1; i < 10000; i++) {
+    const path: { position: { x: number; y: number }; time: number }[] = [];
+    stepPlayerMove({ position: { x: 2.5 - i / 100000, y: 1.5 }, direction: "right", queuedDirection: null }, 4, 1 / 30,
+      ["######", "#....#", "######"], path);
+    assert.notEqual(pickupArrival(path, 2, 1), null);
+  }
+});
+
+test("T7 cycle 1: protected boundary permits retreat/tangency but detects inward motion after a corner", () => {
+  assert.equal(pathBlockingContact(line(1.5, 1.4), line(2.1, 2.2)), null);
+  assert.equal(pathBlockingContact(line(1.5, 1.6), line(2.1, 2.2)), null, "equal translation");
+  assert.equal(pathBlockingContact(line(1.5, 1.6), line(2.1, 2.1)), 0);
+  assert.equal(pathBlockingContact(line(1.5, 1.5), line(2.1, 2.1)), null, "resting is not another stop event");
+  const turn: MovePath = [
+    { position: { x: 1.5, y: 1.5 }, time: 0 },
+    { position: { x: 1.5, y: 1.7 }, time: 0.5 },
+    { position: { x: 2.1, y: 1.7 }, time: 1 },
+  ];
+  const contact = pathBlockingContact(turn, line(2.1, 2.1));
+  assert.ok(contact !== null && contact > 0.5, "initial separating segment must not hide later inward contact");
+});
+
 test("T7 safe deterministic distinct reachable spawns, exhausted-cell retry", () => {
   for (const seed of [1, 42, 424242]) {
     const maze = generateMaze(seed), spawns = findSpawnCells(maze);

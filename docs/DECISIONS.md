@@ -349,3 +349,16 @@ tunables remain starting values for review.
   mapping, alongside existing T5/T6 regressions. Independent review and QA
   remain required before PR. No physical-phone, four-device, named browser,
   orientation or FPS acceptance is asserted here (T8/T9 remain open).
+- Cycle 1 review fixes preserve D041's movement → pickups → contact-snapshot
+  order: protected movement resolves chronologically through stop-created
+  contact chains (each event freezes at least one new player, bounded by the
+  roster). Claims are then committed on those final paths. A newly awarded
+  shield protects against every same-step combat contact without rewinding
+  already completed movement; it blocks subsequent movement phases. There is
+  no retroactive pickup cancellation, claimant reassignment, separation teleport,
+  or added knockback. This is implementation context, not a contract amendment.
+  Regressions include the reviewer's four-player chain in all 24 iteration
+  orders at normal/boosted speeds, real-room chain checks, and the exact
+  6.25ms contact / 12.5ms shield-arrival example with a contested variant.
+  Pickup arrival uses segment projection to avoid zero-radius discriminant
+  roundoff on the QA-reported straight-crossing case.
