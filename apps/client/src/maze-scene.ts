@@ -63,7 +63,9 @@ function drawGhostBody(
   g.fillStyle(color, 1);
   g.beginPath();
   // Top dome: a semicircle centered on the origin, sweeping over the top.
-  g.arc(0, 0, w, Math.PI, 0, true);
+  // Clockwise (anticlockwise: false) from π to 0 passes through (0, -radius)
+  // in Phaser's downward-positive Y, so the dome caps the body.
+  g.arc(0, 0, w, Math.PI, 0, false);
   g.lineTo(w, GHOST_FOOT_BASE);
   // Scalloped feet, traced right to left back to the dome's left edge.
   const stepW = (2 * w) / GHOST_FEET;
