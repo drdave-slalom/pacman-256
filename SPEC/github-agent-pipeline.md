@@ -67,9 +67,10 @@ Report results; adjust this spec before Phase 1.
    The change was correct and minimal. Copilot used the PR template but left
    "Linked issue" empty and appended its own `Fixes #36`, so the issue still links.
    It ignored the request to report which profile/instructions it loaded.
-2. **`@copilot` from a workflow: not yet tested directly.** Comments posted with
-   `COPILOT_ASSIGN_TOKEN` are authored by David's account, so they should behave like
-   human comments. Verify in Phase 1.
+2. **`@copilot` fix loop: works.** A review-fix comment posted from David's account on PR #37
+   started an "Addressing comment" session that pushed exactly the requested change (`56669df`).
+   `COPILOT_ASSIGN_TOKEN` is David's token, so workflow comments should behave the same;
+   confirm on the first Phase 1 run. Each fix push re-triggers CI approval (see 4).
 3. **gh-aw can load profiles: yes (docs).** `{{#runtime-import .github/agents/<name>.agent.md}}`
    injects files under `.github/`; frontmatter fields such as `model:` are not applied.
 4. **CI approval: required by default.** CI and `pr-description.yml` runs on the Copilot
