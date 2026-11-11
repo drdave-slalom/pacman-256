@@ -2,9 +2,15 @@
 //
 // Loaded by agent-dispatch.yml and agent-gate.yml through actions/github-script
 // from a checkout of the default branch, never from pull request code. The pure
-// helpers are unit-tested in agent-gate.test.mjs; the handlers receive the
-// github-script `github`, `context`, and `core` objects plus `process.env`.
-// All issue, PR, comment, and spec text is untrusted and handled only as data.
+// helpers and handlers are unit-tested in agent-gate.test.mjs; handlers receive
+// the github-script `github`, `context`, and `core` objects plus `process.env`.
+// All issue, PR, comment, review, and spec text is untrusted and handled only as data.
+//
+// Trust model: verdicts count only when posted by github-actions[bot] and bound
+// to the head SHA and the latest run of the factory workflow for it; gate
+// markers count only when posted by the PAT user. Any workflow in this repo with
+// a write-capable GITHUB_TOKEN could still post as github-actions[bot], so the
+// sensitive-path rule (workflows never auto-merge) is the backstop.
 
 export const LABEL = Object.freeze({
     go: "agent:go",
@@ -18,6 +24,7 @@ export const LABEL = Object.freeze({
 });
 
 export const STATUS_LABELS = Object.freeze(["status:spec", "status:ready", "status:in-progress", "status:review"]);
+export const CYCLE_LABELS = Object.freeze([LABEL.cycle1, LABEL.cycle2]);
 
 /** Build profiles a spec's Delegation section may name, mapped to their role label. */
 export const BUILD_PROFILES = Object.freeze({
@@ -36,7 +43,7 @@ export const LOW_RISK_LABELS = Object.freeze(["type:docs", "type:chore", "follow
 export const HUMAN_MERGE_LABELS = Object.freeze(["type:feature", "type:bug", "playtest"]);
 
 export const SENSITIVE_PREFIXES = Object.freeze([".github/", "deploy/", "scripts/", "factory-control/server/"]);
-export const SENSITIVE_BASENAMES = Object.freeze(["Dockerfile", "package.json", "package-lock.json"]);
+export const SENSITIVE_BASENAMES = Object.freeze(["dockerfile", "package.json", "package-lock.json", ".npmrc", ".dockerignore"]);
 
 export const COPILOT_ASSIGNEE = "copilot-swe-agent[bot]";
 export const FACTORY_BOT_LOGIN = "github-actions[bot]";
@@ -50,18 +57,29 @@ const COPILOT_REVIEWERS = new Set(["copilot-pull-request-reviewer", "copilot-pul
 const ROLE_RANK = Object.freeze({ none: 0, read: 1, triage: 2, write: 3, maintain: 4, admin: 5 });
 const MAX_QUOTE_LENGTH = 3000;
 const SPEC_FILE = /^SPEC\/[^/]+\.md$/;
+const GENERATED_BLOCK = /<!-- auto-generated-pr-description:start -->[\s\S]*?(?:<!-- auto-generated-pr-description:end -->|$)/g;
 
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
 
-/** True for the Copilot cloud agent's author logins (REST and GraphQL forms). */
+/** True for the Copilot cloud agent's logins (REST and GraphQL forms). */
 export function isCopilotAuthor(login) {
     return typeof login === "string" && COPILOT_AUTHORS.has(login.toLowerCase());
 }
 
 export function isCopilotReviewer(login) {
     return typeof login === "string" && COPILOT_REVIEWERS.has(login.toLowerCase());
+}
+
+/** A pipeline PR is opened by the Copilot bot from a branch in this repository. */
+export function isPipelinePr(pr, repoFullName) {
+    return isCopilotAuthor(pr?.user?.login) && pr?.user?.type === "Bot" && pr?.head?.repo?.full_name === repoFullName;
+}
+
+/** Human gates (`agent:go`, `/approve-spec`) accept only human accounts. */
+export function isHumanActor(user) {
+    return user?.type === "User" && !isCopilotAuthor(user?.login);
 }
 
 /** Compare a repository role name (`role_name` from the permission API) against a minimum. */
@@ -75,7 +93,7 @@ export function hasRole(roleName, minimum) {
 }
 
 export function labelNames(labels) {
-    return new Set((labels ?? []).map((label) => (typeof label === "string" ? label : label?.name)).filter(Boolean));
+    return new Set([...(labels ?? [])].map((label) => (typeof label === "string" ? label : label?.name)).filter(Boolean));
 }
 
 export function isWipTitle(title) {
@@ -86,11 +104,21 @@ export function stripHtmlComments(text) {
     return String(text ?? "").replace(/<!--[\s\S]*?-->/g, "");
 }
 
+/** Remove the pr-description workflow's generated block (it is not written by the agent). */
+export function stripGenerated(text) {
+    return String(text ?? "").replace(GENERATED_BLOCK, "");
+}
+
+/** Insert a zero-width space after `@` so quoted text cannot mention anyone. */
+export function neutralizeMentions(text) {
+    return String(text ?? "").replace(/@(?=[A-Za-z0-9_-])/g, "@\u200b");
+}
+
 /** Issue numbers referenced with a GitHub closing keyword (`Closes #12`, `Fixes #12`, ...), in order. */
 export function parseLinkedIssues(body) {
     const numbers = [];
     const pattern = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s+#(\d+)\b/gi;
-    for (const match of stripHtmlComments(body).matchAll(pattern)) {
+    for (const match of stripHtmlComments(stripGenerated(body)).matchAll(pattern)) {
         const number = Number(match[1]);
         if (!numbers.includes(number)) {
             numbers.push(number);
@@ -99,24 +127,62 @@ export function parseLinkedIssues(body) {
     return numbers;
 }
 
-/** Text of a `## <heading>` section up to the next level-1 or level-2 heading, or null. */
-export function extractSection(markdown, heading) {
-    const lines = String(markdown ?? "").split(/\r?\n/);
-    const wanted = heading.toLowerCase();
-    const start = lines.findIndex((line) => /^##\s+/.test(line) && line.replace(/^##\s+/, "").trim().toLowerCase() === wanted);
-    if (start === -1) {
-        return null;
+function normalizeHeading(text) {
+    return String(text).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+const FENCE = /^\s*(?:```|~~~)/;
+
+/**
+ * Text of a `## <heading>` section (any of `headings`, compared ignoring case,
+ * spaces, and punctuation) up to the next heading of any level outside a code
+ * fence, or null when absent.
+ */
+export function extractSection(markdown, headings) {
+    const wanted = new Set([headings].flat().map(normalizeHeading));
+    const collected = [];
+    let inFence = false;
+    let found = false;
+    for (const line of String(markdown ?? "").split(/\r?\n/)) {
+        const fence = FENCE.test(line);
+        if (!found) {
+            if (fence) {
+                inFence = !inFence;
+            } else if (!inFence) {
+                const heading = /^##\s+(.*)$/.exec(line);
+                found = Boolean(heading && wanted.has(normalizeHeading(heading[1])));
+            }
+            continue;
+        }
+        if (fence) {
+            inFence = !inFence;
+        } else if (!inFence && /^#{1,6}\s/.test(line)) {
+            break;
+        }
+        collected.push(line);
     }
-    const rest = lines.slice(start + 1);
-    const end = rest.findIndex((line) => /^#{1,2}\s/.test(line));
-    return (end === -1 ? rest : rest.slice(0, end)).join("\n");
+    return found ? collected.join("\n") : null;
+}
+
+/** Lines of a section outside code fences. */
+function unfencedLines(section) {
+    const lines = [];
+    let inFence = false;
+    for (const line of String(section).split(/\r?\n/)) {
+        if (FENCE.test(line)) {
+            inFence = !inFence;
+        } else if (!inFence) {
+            lines.push(line);
+        }
+    }
+    return lines;
 }
 
 const LIST_ITEM = /^(?:[-*+]|\d+[.)])\s+(.*)$/;
 
 /**
  * Parse a spec's `## Delegation` section: ordered `- <profile>: <task>` steps
- * plus a `QA depth: fast|slow` line. Returns errors instead of guessing; a
+ * plus one `QA depth: fast|slow` line. Returns errors instead of guessing; a
  * missing QA depth falls back to fast with a warning.
  */
 export function parseDelegation(markdown) {
@@ -128,7 +194,7 @@ export function parseDelegation(markdown) {
     const errors = [];
     const warnings = [];
     let qaDepth = null;
-    for (const rawLine of stripHtmlComments(section).split(/\r?\n/)) {
+    for (const rawLine of unfencedLines(stripHtmlComments(section))) {
         const line = rawLine.trim();
         if (!line) {
             continue;
@@ -137,10 +203,12 @@ export function parseDelegation(markdown) {
         const qa = /^qa[\s_-]*depth\b\s*[:=]?\s*(.*)$/i.exec(plain);
         if (qa) {
             const value = qa[1].trim().toLowerCase().replace(/[.\s].*$/, "");
-            if (QA_DEPTHS.includes(value)) {
-                qaDepth = value;
-            } else {
+            if (!QA_DEPTHS.includes(value)) {
                 errors.push(`QA depth must be \`fast\` or \`slow\`, not "${qa[1].trim()}".`);
+            } else if (qaDepth !== null) {
+                errors.push("QA depth is given more than once.");
+            } else {
+                qaDepth = value;
             }
             continue;
         }
@@ -174,21 +242,21 @@ export function roleLabelsFor(steps) {
     return [...new Set(steps.map(({ profile }) => BUILD_PROFILES[profile]))];
 }
 
-/** Items under `## Follow-ups` (top-level list items, skipping None/N/A), capped at `max`. */
+/** Items under `## Follow-ups` (top-level list items, skipping None/N/A variants), capped at `max`. */
 export function parseFollowUps(body, max = MAX_FOLLOW_UPS) {
-    const beforeGenerated = String(body ?? "").split("<!-- auto-generated-pr-description:start -->")[0];
-    const section = extractSection(stripHtmlComments(beforeGenerated), "Follow-ups");
+    const section = extractSection(stripHtmlComments(stripGenerated(body)), "Follow-ups");
     if (section === null) {
         return { items: [], skipped: 0 };
     }
     const items = [];
-    for (const line of section.split(/\r?\n/)) {
+    for (const line of unfencedLines(section)) {
         const item = LIST_ITEM.exec(line);
         if (!item) {
             continue;
         }
         const text = item[1].replace(/^\[[ xX]\]\s*/, "").trim();
-        if (!text || /^(?:none|n\/?a|nothing)\.?$/i.test(text)) {
+        const plain = text.replace(/[_*`~]/g, "").trim();
+        if (!plain || /^(?:none|n\/?a|nothing)\b/i.test(plain)) {
             continue;
         }
         items.push(text);
@@ -206,12 +274,14 @@ export function nextCycle(labels) {
 }
 
 export function isSensitivePath(filename) {
-    const path = String(filename ?? "").replace(/^\.\//, "");
+    const path = String(filename ?? "")
+        .replace(/^(?:\.\/|\/)+/, "")
+        .toLowerCase();
     const basename = path.split("/").pop();
-    return SENSITIVE_PREFIXES.some((prefix) => path.startsWith(prefix)) || SENSITIVE_BASENAMES.includes(basename);
+    return SENSITIVE_PREFIXES.some((prefix) => path.startsWith(prefix)) || SENSITIVE_BASENAMES.includes(basename) || basename.startsWith("dockerfile.");
 }
 
-/** Sensitive paths touched by a list of PR files (`{ filename, previous_filename }` or strings). */
+/** Sensitive paths touched by a list of PR or commit files (`{ filename, previous_filename }` or strings). */
 export function sensitivePaths(files) {
     const hits = new Set();
     for (const file of files ?? []) {
@@ -259,10 +329,59 @@ export function specPathFor(issue) {
     return `SPEC/${unit}-${slug}.md`;
 }
 
-/** Latest factory-reviewer review for the head SHA (the reviewer posts as github-actions[bot]). */
-export function pickFactoryReview(reviews, sha) {
+/**
+ * Parse `/approve-spec [sha]`. Returns `{ ok: true }` or `{ ok: false, reason }`.
+ * A SHA argument must be 7-40 hex characters and prefix the PR head.
+ */
+export function parseApproveCommand(body, headSha) {
+    const firstLine = String(body ?? "").trim().split(/\r?\n/)[0];
+    const match = /^\/approve-spec(?:\s+(\S+))?/.exec(firstLine);
+    if (!match) {
+        return { ok: false, reason: "not an /approve-spec command" };
+    }
+    const sha = match[1];
+    if (sha === undefined) {
+        return { ok: true };
+    }
+    if (!/^[0-9a-f]{7,40}$/i.test(sha)) {
+        return { ok: false, reason: `\`${sha.slice(0, 40)}\` is not a commit SHA (7-40 hex characters).` };
+    }
+    if (!String(headSha ?? "").startsWith(sha.toLowerCase())) {
+        return { ok: false, reason: `\`${sha}\` does not match the PR head \`${String(headSha).slice(0, 7)}\`; review the latest commit and approve again.` };
+    }
+    return { ok: true };
+}
+
+function runPathMatches(run, file) {
+    const path = String(run?.path ?? "");
+    const expected = `.github/workflows/${file}`;
+    return path === expected || path.startsWith(`${expected}@`);
+}
+
+/** Latest `pull_request` run of the given workflow file; `done` once completed and not skipped. */
+export function latestRunState(runs, file) {
+    const latest = (runs ?? [])
+        .filter((run) => run.event === "pull_request" && (!file || runPathMatches(run, file)))
+        .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || a.id - b.id)
+        .at(-1);
+    if (!latest) {
+        return { done: false, run: null };
+    }
+    return { done: latest.status === "completed" && latest.conclusion !== "skipped", run: latest };
+}
+
+/**
+ * Latest factory-reviewer review for the head SHA, posted by github-actions[bot]
+ * no earlier than `notBefore` (the start of the latest successful review run).
+ */
+export function pickFactoryReview(reviews, sha, notBefore) {
     const matching = (reviews ?? []).filter(
-        (review) => review?.user?.login === FACTORY_BOT_LOGIN && review.commit_id === sha && review.state !== "PENDING" && review.state !== "DISMISSED",
+        (review) =>
+            review?.user?.login === FACTORY_BOT_LOGIN &&
+            review.commit_id === sha &&
+            review.state !== "PENDING" &&
+            review.state !== "DISMISSED" &&
+            (!notBefore || String(review.submitted_at ?? "") >= String(notBefore)),
     );
     return matching.at(-1) ?? null;
 }
@@ -271,12 +390,18 @@ export function hasCopilotReview(reviews) {
     return (reviews ?? []).some((review) => isCopilotReviewer(review?.user?.login) && review.state !== "PENDING");
 }
 
-/** Latest factory-qa verdict comment for the head SHA (posted by github-actions[bot]). */
-export function findQaVerdict(comments, sha) {
+/**
+ * Latest factory-qa verdict comment for the head SHA and QA run: posted by
+ * github-actions[bot], with `Head: <sha>` and `Run: <runId>` lines and exactly one marker.
+ */
+export function findQaVerdict(comments, sha, runId) {
+    if (!sha || !runId) {
+        return null;
+    }
     let verdict = null;
     for (const comment of comments ?? []) {
         const body = String(comment?.body ?? "");
-        if (comment?.user?.login !== FACTORY_BOT_LOGIN || !sha || !body.includes(sha)) {
+        if (comment?.user?.login !== FACTORY_BOT_LOGIN || !body.split(/\r?\n/).includes(`Head: ${sha}`) || !body.split(/\r?\n/).includes(`Run: ${runId}`)) {
             continue;
         }
         const pass = body.includes(QA_PASS_MARKER);
@@ -327,20 +452,8 @@ export function requiredChecksState(requiredContexts, checkRuns, statuses) {
     return { state, failing, pending };
 }
 
-/** Latest `pull_request` run of a workflow; `done` once completed and not skipped. */
-export function latestRunState(runs) {
-    const latest = (runs ?? [])
-        .filter((run) => run.event === "pull_request")
-        .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || a.id - b.id)
-        .at(-1);
-    if (!latest) {
-        return { done: false, run: null };
-    }
-    return { done: latest.status === "completed" && latest.conclusion !== "skipped", run: latest };
-}
-
 export function quote(text, limit = MAX_QUOTE_LENGTH) {
-    const clean = stripHtmlComments(text).trim();
+    const clean = neutralizeMentions(stripHtmlComments(text).trim());
     const clipped = clean.length > limit ? `${clean.slice(0, limit)}\n…(truncated)` : clean;
     return clipped
         .split(/\r?\n/)
@@ -348,8 +461,18 @@ export function quote(text, limit = MAX_QUOTE_LENGTH) {
         .join("\n");
 }
 
-export function gateMarker(kind, sha) {
-    return `<!-- agent-gate:${kind} sha=${sha} -->`;
+export function gateMarker(kind, value) {
+    return kind === "bound" ? `<!-- agent-gate:bound pr=${value} -->` : `<!-- agent-gate:${kind} sha=${value} -->`;
+}
+
+/** True when `comments` contain `marker` in a comment authored by the PAT user. */
+export function hasTrustedMarker(comments, marker, patLogin) {
+    return Boolean(patLogin) && (comments ?? []).some((comment) => comment?.user?.login === patLogin && String(comment.body ?? "").includes(marker));
+}
+
+export function followUpTitle(prNumber, text) {
+    const clean = neutralizeMentions(text.replace(/\s+/g, " "));
+    return `Follow-up from #${prNumber}: ${clean.length > 80 ? `${clean.slice(0, 77)}...` : clean}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -393,6 +516,8 @@ export function fixInstructions({ blockers, cycleLabel, steps, sha }) {
         `@copilot Review/QA found blockers on ${sha.slice(0, 7)} (${cycleLabel}, D050). Fix only these, acting as the role agent from the spec's Delegation section that owns the affected files (${owners}). Run \`npm run check\` before you finish and keep the pull request template filled.`,
         "",
         ...blockers.flatMap(({ source, details }) => [`**${source}**`, "", details, ""]),
+        "The pull request is back in draft with a `[WIP]` title. As your final step, after the fixes are pushed and checks pass, remove the `[WIP]` prefix from the title; the pipeline then requests one fresh review and QA.",
+        "",
         gateMarker("fix", sha),
     ].join("\n");
 }
@@ -406,6 +531,7 @@ export function createPatClient(token, fetchImpl = globalThis.fetch) {
     if (!token) {
         throw new Error("The COPILOT_ASSIGN_TOKEN secret is not configured.");
     }
+    let cachedLogin = null;
     async function request(method, path, body) {
         const response = await fetchImpl(`https://api.github.com${path}`, {
             method,
@@ -437,14 +563,30 @@ export function createPatClient(token, fetchImpl = globalThis.fetch) {
         }
         return data?.data;
     }
-    return { request, graphql };
+    async function login() {
+        cachedLogin ??= (await request("GET", "/user"))?.login ?? null;
+        if (!cachedLogin) {
+            throw new Error("Could not resolve the COPILOT_ASSIGN_TOKEN user.");
+        }
+        return cachedLogin;
+    }
+    return { request, graphql, login };
 }
+
+const MUTATIONS = Object.freeze({
+    markReady: "mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { number } } }",
+    toDraft: "mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { number } } }",
+    enableAutoMerge:
+        "mutation($id: ID!, $sha: GitObjectID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH, expectedHeadOid: $sha }) { pullRequest { number } } }",
+    disableAutoMerge: "mutation($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { pullRequest { number } } }",
+});
 
 function ops({ github, context }) {
     const { owner, repo } = context.repo;
     return {
         owner,
         repo,
+        fullName: `${owner}/${repo}`,
         async role(username) {
             try {
                 const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username });
@@ -465,7 +607,7 @@ function ops({ github, context }) {
             }
         },
         async removeLabels(issue_number, labels, current) {
-            for (const name of labels) {
+            for (const name of new Set(labels)) {
                 if (current && !current.has(name)) {
                     continue;
                 }
@@ -487,35 +629,71 @@ function ops({ github, context }) {
         async files(pull_number) {
             return github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number, per_page: 100 });
         },
+        /** Net diff files plus the files of every commit in the PR. */
+        async allFiles(pull_number) {
+            const files = [...(await this.files(pull_number))];
+            const commits = await github.paginate(github.rest.pulls.listCommits, { owner, repo, pull_number, per_page: 100 });
+            for (const commit of commits) {
+                const { data } = await github.rest.repos.getCommit({ owner, repo, ref: commit.sha });
+                files.push(...(data.files ?? []));
+            }
+            return files;
+        },
         async fileAt(path, ref) {
             const { data } = await github.rest.repos.getContent({ owner, repo, path, ref });
             return Buffer.from(data.content ?? "", data.encoding === "base64" ? "base64" : "utf8").toString("utf8");
         },
+        async setTitle(pull_number, title) {
+            await github.rest.pulls.update({ owner, repo, pull_number, title });
+        },
     };
 }
 
-/** Resolve a Copilot-authored PR whose linked issue carries `agent:active`, or null. */
+/**
+ * Resolve a pipeline PR (Copilot bot, same-repo branch) with exactly one linked
+ * issue carrying `agent:active`. More than one such issue stops the pipeline.
+ */
 async function resolvePipelinePr({ github, context, core }, pullNumber) {
     const api = ops({ github, context });
     const { data: pr } = await github.rest.pulls.get({ owner: api.owner, repo: api.repo, pull_number: pullNumber });
-    if (!isCopilotAuthor(pr.user?.login)) {
-        core.info(`PR #${pullNumber} is not authored by Copilot; ignoring.`);
+    if (!isPipelinePr(pr, api.fullName)) {
+        core.info(`PR #${pullNumber} is not a Copilot PR from this repository; ignoring.`);
         return null;
     }
+    const active = [];
     for (const number of parseLinkedIssues(pr.body)) {
         const issue = await api.issue(number);
         const labels = labelNames(issue.labels);
         if (!issue.pull_request && labels.has(LABEL.active)) {
-            return { api, pr, issue, labels };
+            active.push({ issue, labels });
         }
     }
-    core.info(`PR #${pullNumber} has no linked issue with ${LABEL.active}; ignoring.`);
-    return null;
+    if (active.length === 0) {
+        core.info(`PR #${pullNumber} has no linked issue with ${LABEL.active}; ignoring.`);
+        return null;
+    }
+    if (active.length > 1) {
+        const unflagged = active.filter(({ labels }) => !labels.has(LABEL.needsHuman));
+        if (unflagged.length > 0) {
+            for (const { issue } of unflagged) {
+                await api.addLabels(issue.number, [LABEL.needsHuman]);
+            }
+            const list = active.map(({ issue }) => `#${issue.number}`).join(", ");
+            await api.comment(pr.number, `**Agent pipeline stopped** (\`${LABEL.needsHuman}\`): this PR links ${active.length} issues with \`${LABEL.active}\` (${list}); a pipeline PR must close exactly one.`);
+        }
+        core.info(`PR #${pullNumber} links more than one ${LABEL.active} issue; stopped.`);
+        return null;
+    }
+    return { api, pr, issue: active[0].issue, labels: active[0].labels };
 }
 
 async function stopForHuman(api, { issueNumber, commentOn, message }) {
     await api.addLabels(issueNumber, [LABEL.needsHuman]);
     await api.comment(commentOn ?? issueNumber, `**Agent pipeline stopped** (\`${LABEL.needsHuman}\`): ${message}`);
+}
+
+function roleLabelsOn(labels) {
+    return [...labels].filter((name) => name.startsWith("role:"));
 }
 
 // ---------------------------------------------------------------------------
@@ -528,7 +706,10 @@ export async function handleDispatch({ github, context, core, env = process.env 
     if (payload.label?.name !== LABEL.go || !payload.issue || payload.issue.pull_request) {
         return core.info("Not an agent:go label on an issue; ignoring.");
     }
-    const sender = payload.sender?.login;
+    if (!isHumanActor(payload.sender)) {
+        return core.info(`Labeler @${payload.sender?.login} is not a human account; ignoring.`);
+    }
+    const sender = payload.sender.login;
     const role = await api.role(sender);
     if (!hasRole(role, "triage")) {
         return core.info(`@${sender} has role "${role}"; triage or higher is required. Ignoring.`);
@@ -567,10 +748,12 @@ export async function handleDispatch({ github, context, core, env = process.env 
         }
         const specPath = specPathFor(issue);
         const pat = createPatClient(env.COPILOT_ASSIGN_TOKEN);
+        // Clear state from any earlier run before starting again.
+        await api.removeLabels(issue.number, [...CYCLE_LABELS, LABEL.ready, LABEL.review, ...roleLabelsOn(labels)], labels);
         await pat.request("POST", `/repos/${api.owner}/${api.repo}/issues/${issue.number}/assignees`, {
             assignees: [COPILOT_ASSIGNEE],
             agent_assignment: {
-                target_repo: `${api.owner}/${api.repo}`,
+                target_repo: api.fullName,
                 base_branch: payload.repository?.default_branch ?? "main",
                 custom_agent: "factory-orchestrator",
                 model: "auto",
@@ -599,8 +782,11 @@ export async function handleApproveSpec({ github, context, core, env = process.e
     if (!payload.issue?.pull_request || !/^\/approve-spec(?:\s|$)/.test(body)) {
         return core.info("Not an /approve-spec comment on a pull request; ignoring.");
     }
+    if (!isHumanActor(payload.comment.user)) {
+        return core.info(`Commenter @${payload.comment.user?.login} is not a human account; ignoring.`);
+    }
     const api = ops({ github, context });
-    const commenter = payload.comment.user?.login;
+    const commenter = payload.comment.user.login;
     const role = await api.role(commenter);
     if (!hasRole(role, "write")) {
         return core.info(`@${commenter} has role "${role}"; write or higher is required. Ignoring.`);
@@ -616,6 +802,15 @@ export async function handleApproveSpec({ github, context, core, env = process.e
     }
     if (!labels.has(LABEL.spec)) {
         return core.info(`Issue #${issue.number} is not at the spec gate (${LABEL.spec}); ignoring.`);
+    }
+    if (isWipTitle(pr.title)) {
+        await api.comment(pr.number, "Not approving: Copilot is still working on the spec (`[WIP]` title). Wait until it finishes, review the final spec, then comment `/approve-spec`.");
+        return;
+    }
+    const command = parseApproveCommand(body, pr.head.sha);
+    if (!command.ok) {
+        await api.comment(pr.number, `Not approving: ${command.reason}`);
+        return;
     }
     try {
         const specs = (await api.files(pr.number)).filter((file) => file.status !== "removed" && SPEC_FILE.test(file.filename));
@@ -636,14 +831,15 @@ export async function handleApproveSpec({ github, context, core, env = process.e
             });
         }
         const pat = createPatClient(env.COPILOT_ASSIGN_TOKEN);
-        if (!isWipTitle(pr.title)) {
-            // Mark the PR as work in progress again so the ready check waits for the build to finish.
-            await github.rest.pulls.update({ owner: api.owner, repo: api.repo, pull_number: pr.number, title: `[WIP] ${pr.title}` });
-        }
+        // Mark the PR as work in progress again so the ready check waits for the build to finish.
+        await api.setTitle(pr.number, `[WIP] ${pr.title}`);
         const roles = roleLabelsFor(delegation.steps);
         const staleRoles = Object.values(BUILD_PROFILES).filter((label) => !roles.includes(label));
         await api.removeLabels(issue.number, [LABEL.spec, ...staleRoles], labels);
         await api.addLabels(issue.number, [LABEL.ready, ...roles]);
+        await pat.request("POST", `/repos/${api.owner}/${api.repo}/issues/${issue.number}/comments`, {
+            body: `Spec approved by @${commenter} at \`${pr.head.sha.slice(0, 7)}\`; this issue is bound to PR #${pr.number}.\n\n${gateMarker("bound", pr.number)}`,
+        });
         await pat.request("POST", `/repos/${api.owner}/${api.repo}/issues/${pr.number}/comments`, {
             body: buildInstructions({ issueNumber: issue.number, specPath, steps: delegation.steps, qaDepth: delegation.qaDepth }),
         });
@@ -670,24 +866,34 @@ export async function handlePullRequestEvent({ github, context, core, env = proc
         return;
     }
     const { api, pr, issue, labels } = resolved;
-    if (labels.has(LABEL.needsHuman) || !labels.has(LABEL.ready) || pr.state !== "open") {
-        return core.info(`Issue #${issue.number} is not waiting for the build to finish; nothing to do.`);
-    }
     try {
+        if (payload.action === "synchronize" && pr.auto_merge) {
+            // Auto-merge was enabled for a reviewed head; a new push needs fresh review and QA.
+            await createPatClient(env.COPILOT_ASSIGN_TOKEN).graphql(MUTATIONS.disableAutoMerge, { id: pr.node_id });
+            await api.comment(pr.number, `New commits after auto-merge was enabled: auto-merge disabled. Factory review and QA must pass again for \`${pr.head.sha.slice(0, 7)}\`.`);
+        }
+        if (labels.has(LABEL.needsHuman) || !labels.has(LABEL.ready) || pr.state !== "open") {
+            return core.info(`Issue #${issue.number} is not waiting for the build to finish; nothing to do.`);
+        }
         if (pr.draft) {
             if (isWipTitle(pr.title)) {
                 return core.info(`PR #${pr.number} is still [WIP]; waiting.`);
             }
-            const pat = createPatClient(env.COPILOT_ASSIGN_TOKEN);
-            await pat.graphql("mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { number } } }", { id: pr.node_id });
-            await api.comment(pr.number, "Build finished: marked ready for review. Copilot code review, factory review, and factory QA run next.");
         } else if (payload.action !== "ready_for_review") {
             return core.info(`PR #${pr.number} is not a draft but was not just marked ready; waiting.`);
+        }
+        const pat = createPatClient(env.COPILOT_ASSIGN_TOKEN);
+        if (!hasTrustedMarker(await api.comments(issue.number), gateMarker("bound", pr.number), await pat.login())) {
+            return await stopForHuman(api, { issueNumber: issue.number, commentOn: pr.number, message: `PR #${pr.number} was not bound to issue #${issue.number} by \`/approve-spec\`.` });
+        }
+        if (pr.draft) {
+            await pat.graphql(MUTATIONS.markReady, { id: pr.node_id });
+            await api.comment(pr.number, "Build finished: marked ready for review. Copilot code review, factory review, and factory QA run next.");
         }
         await api.removeLabels(issue.number, [LABEL.ready], labels);
         await api.addLabels(issue.number, [LABEL.review]);
     } catch (error) {
-        await stopForHuman(api, { issueNumber: issue.number, commentOn: pr.number, message: `could not mark the PR ready: ${error.message}` });
+        await stopForHuman(api, { issueNumber: issue.number, commentOn: pr.number, message: `pull request update failed: ${error.message}` });
         core.setFailed(error.message);
     }
 }
@@ -699,19 +905,19 @@ async function handleClosed({ github, context, core }) {
     }
     const { api, pr, issue, labels } = resolved;
     if (!pr.merged) {
-        await api.removeLabels(issue.number, [LABEL.active], labels);
+        await api.removeLabels(issue.number, [LABEL.active, ...CYCLE_LABELS, LABEL.ready, LABEL.review, ...roleLabelsOn(labels)], labels);
         await api.addLabels(issue.number, [LABEL.needsHuman]);
         await api.comment(issue.number, `PR #${pr.number} was closed without merging; the agent pipeline stopped (\`${LABEL.needsHuman}\`).`);
         return;
     }
-    await api.removeLabels(issue.number, [LABEL.active, ...STATUS_LABELS], labels);
+    await api.removeLabels(issue.number, [LABEL.active, LABEL.needsHuman, ...STATUS_LABELS, ...CYCLE_LABELS], labels);
     const { items, skipped } = parseFollowUps(pr.body);
     const created = [];
     for (const text of items) {
         const { data } = await github.rest.issues.create({
             owner: api.owner,
             repo: api.repo,
-            title: `Follow-up from #${pr.number}: ${text.length > 80 ? `${text.slice(0, 77)}...` : text}`,
+            title: followUpTitle(pr.number, text),
             labels: ["follow-up"],
             body: `Deferred from PR #${pr.number} (issue #${issue.number}).\n\n${quote(text)}`,
         });
@@ -758,9 +964,9 @@ async function requiredContexts(github, owner, repo, branch) {
     return [...new Set(contexts)];
 }
 
-async function latestWorkflowRun(github, owner, repo, workflow_id, head_sha) {
-    const { data } = await github.rest.actions.listWorkflowRuns({ owner, repo, workflow_id, head_sha, per_page: 20 });
-    return latestRunState(data.workflow_runs);
+async function latestWorkflowRun(github, owner, repo, file, head_sha) {
+    const { data } = await github.rest.actions.listWorkflowRuns({ owner, repo, workflow_id: file, head_sha, per_page: 20 });
+    return latestRunState(data.workflow_runs, file);
 }
 
 async function evaluatePullRequest({ github, context, core, env }, pullNumber, expectedSha) {
@@ -777,6 +983,11 @@ async function evaluatePullRequest({ github, context, core, env }, pullNumber, e
         return core.info(`Run is for ${expectedSha}, but the PR head is ${sha}; waiting for the current head.`);
     }
     try {
+        const pat = createPatClient(env.COPILOT_ASSIGN_TOKEN);
+        const patLogin = await pat.login();
+        if (!hasTrustedMarker(await api.comments(issue.number), gateMarker("bound", pr.number), patLogin)) {
+            return await stopForHuman(api, { issueNumber: issue.number, commentOn: pr.number, message: `PR #${pr.number} was not bound to issue #${issue.number} by \`/approve-spec\`.` });
+        }
         const [review, qa] = await Promise.all([
             latestWorkflowRun(github, api.owner, api.repo, REVIEW_WORKFLOW_FILE, sha),
             latestWorkflowRun(github, api.owner, api.repo, QA_WORKFLOW_FILE, sha),
@@ -786,8 +997,8 @@ async function evaluatePullRequest({ github, context, core, env }, pullNumber, e
         }
         const reviews = await github.paginate(github.rest.pulls.listReviews, { owner: api.owner, repo: api.repo, pull_number: pr.number, per_page: 100 });
         const comments = await api.comments(pr.number);
-        const factoryReview = pickFactoryReview(reviews, sha);
-        const qaVerdict = findQaVerdict(comments, sha);
+        const factoryReview = review.run.conclusion === "success" ? pickFactoryReview(reviews, sha, review.run.run_started_at ?? review.run.created_at) : null;
+        const qaVerdict = findQaVerdict(comments, sha, qa.run.id);
         const contexts = await requiredContexts(github, api.owner, api.repo, pr.base.ref);
         const checkRuns = await github.paginate(github.rest.checks.listForRef, { owner: api.owner, repo: api.repo, ref: sha, per_page: 100 });
         const { data: combined } = await github.rest.repos.getCombinedStatusForRef({ owner: api.owner, repo: api.repo, ref: sha });
@@ -805,7 +1016,7 @@ async function evaluatePullRequest({ github, context, core, env }, pullNumber, e
             blockers.push({ source: "Required checks failing", details: checks.failing.map((name) => `- ${name}`).join("\n") });
         }
         if (blockers.length > 0) {
-            if (comments.some((comment) => String(comment.body ?? "").includes(gateMarker("fix", sha)))) {
+            if (hasTrustedMarker(comments, gateMarker("fix", sha), patLogin)) {
                 return core.info(`Fix request for ${sha} already posted.`);
             }
             const cycle = nextCycle(labels);
@@ -817,8 +1028,13 @@ async function evaluatePullRequest({ github, context, core, env }, pullNumber, e
                 });
             }
             const steps = await delegationSteps(api, pr);
-            const pat = createPatClient(env.COPILOT_ASSIGN_TOKEN);
-            await api.addLabels(issue.number, [cycle.label]);
+            // Back to draft + [WIP] so one fresh review/QA runs only after Copilot finishes the fix.
+            await pat.graphql(MUTATIONS.toDraft, { id: pr.node_id });
+            if (!isWipTitle(pr.title)) {
+                await api.setTitle(pr.number, `[WIP] ${pr.title}`);
+            }
+            await api.removeLabels(issue.number, [LABEL.review], labels);
+            await api.addLabels(issue.number, [LABEL.ready, cycle.label]);
             await pat.request("POST", `/repos/${api.owner}/${api.repo}/issues/${pr.number}/comments`, {
                 body: fixInstructions({ blockers, cycleLabel: cycle.label, steps, sha }),
             });
@@ -827,10 +1043,10 @@ async function evaluatePullRequest({ github, context, core, env }, pullNumber, e
 
         const missing = [];
         if (factoryReview?.state !== "APPROVED") {
-            missing.push(`factory review approval (got ${factoryReview?.state ?? "no review"})`);
+            missing.push(`factory review approval (got ${factoryReview?.state ?? "no trusted review"})`);
         }
         if (!qaVerdict) {
-            missing.push("a factory QA verdict");
+            missing.push("a trusted factory QA verdict");
         }
         if (missing.length > 0) {
             return await stopForHuman(api, {
@@ -846,13 +1062,13 @@ async function evaluatePullRequest({ github, context, core, env }, pullNumber, e
             return core.info("Waiting for Copilot code review.");
         }
 
-        const decision = mergeDecision({ labels, files: await api.files(pr.number) });
+        const decision = mergeDecision({ labels, files: await api.allFiles(pr.number) });
         if (decision.action === "auto-merge") {
             if (pr.auto_merge) {
                 return core.info(`Auto-merge is already enabled on PR #${pr.number}.`);
             }
-            await enableAutoMerge(createPatClient(env.COPILOT_ASSIGN_TOKEN), api, pr);
-            await api.comment(pr.number, "All gates green (required checks, Copilot code review, factory review, factory QA). Low-risk type: squash auto-merge enabled (D056).");
+            await enableAutoMerge(pat, api, pr);
+            await api.comment(pr.number, `All gates green for \`${sha.slice(0, 7)}\` (required checks, Copilot code review, factory review, factory QA). Low-risk type: squash auto-merge enabled for this head only (D056).`);
             return;
         }
         const reason =
@@ -882,14 +1098,11 @@ async function delegationSteps(api, pr) {
     }
 }
 
+/** Enable squash auto-merge bound to the reviewed head; merge directly (same SHA) if the PR is already clean. */
 async function enableAutoMerge(pat, api, pr) {
     try {
-        await pat.graphql(
-            "mutation($id: ID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) { pullRequest { number } } }",
-            { id: pr.node_id },
-        );
+        await pat.graphql(MUTATIONS.enableAutoMerge, { id: pr.node_id, sha: pr.head.sha });
     } catch (error) {
-        // GitHub refuses auto-merge when the PR can already merge ("clean status"); merge directly instead.
         if (!/clean status/i.test(error.message)) {
             throw error;
         }
