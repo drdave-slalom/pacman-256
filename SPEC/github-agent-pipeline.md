@@ -86,7 +86,23 @@ Report results; adjust this spec before Phase 1.
    `package*.json`, `factory-control/server/`) get `agent:needs-human` and never auto-merge.
    The gate workflow marks the PR ready (the agent leaves it as a draft), which triggers
    Copilot code review.
-5. **Orchestrator delegation in-session: not yet tested.**
+5. **Orchestrator delegation in-session: attempted, fails (2026-11-11, issue #48 → PR #58).**
+   Copilot running `factory-orchestrator` (model `auto` → gpt-6-luna) followed the build
+   comment and used the `task` tool to start the `docs-writer` subagent. The subagent used
+   its profile's pinned `model: Claude Haiku 5.5` and the session died with
+   `CAPIError: 400 "thinking.type.enabled" is not supported for this model`. In-session
+   delegation fails for profiles that pin a model, so cloud mode now forbids subagents:
+   the gate's build/fix comments tell Copilot to act as each profile itself (reading
+   `.github/agents/<profile>.agent.md` and `.github/skills/<profile>/SKILL.md`). Profile
+   `model:` frontmatter stays unchanged (local defaults, PR #25).
+   Same run: Copilot left `[WIP]` on the spec PR title after finishing, so `/approve-spec`
+   was refused until a human removed it. Dispatch instructions now ask Copilot to remove
+   `[WIP]` last; the refusal comment tells the approver to remove it and re-comment if
+   Copilot has finished.
+   **`copilot` environment:** the cloud agent job runs in the repo's `copilot` environment,
+   whose deployment branch policy allowed only `main`, so the job was rejected
+   (`deployment_rejected`). The Lead added `copilot/*` to the policy; it is now a setup
+   prerequisite in `docs/FACTORY.md`.
 
 **Phase 1: build the chain** (files below). **Phase 2: docs + D057.**
 

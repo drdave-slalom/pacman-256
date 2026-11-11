@@ -297,9 +297,14 @@ test("instruction text names the spec, profiles, and required rules", () => {
     assert.match(spec, /SPEC\/issue-9-x\.md/);
     assert.match(spec, /## Delegation/);
     assert.match(spec, /Closes #9/);
+    assert.match(spec, /remove the `\[WIP\]` prefix/);
+    assert.match(spec, /Do not use the task\/subagent tool/);
     const build = buildInstructions({ issueNumber: 9, specPath: "SPEC/a.md", steps: [{ profile: "artist", task: "Draw" }], qaDepth: "fast" });
     assert.match(build, /^@copilot /);
     assert.match(build, /\.github\/agents\/artist\.agent\.md/);
+    assert.match(build, /\.github\/skills\/artist\/SKILL\.md/);
+    assert.match(build, /Do NOT use the task\/subagent tool or start custom agents/);
+    assert.doesNotMatch(build, /delegate to that custom agent/);
     assert.match(build, /npm run check/);
     assert.match(build, /Closes #9/);
     assert.match(build, /auto-generated-pr-description:start/);
@@ -307,6 +312,7 @@ test("instruction text names the spec, profiles, and required rules", () => {
     const fix = fixInstructions({ blockers: [{ source: "QA", details: "> boom" }], cycleLabel: "cycle:1", steps: [], sha: SHA });
     assert.match(fix, /^@copilot /);
     assert.match(fix, /remove the `\[WIP\]` prefix/);
+    assert.match(fix, /Do NOT use the task\/subagent tool/);
     assert.ok(fix.endsWith(gateMarker("fix", SHA)));
 });
 
@@ -792,7 +798,8 @@ test("/approve-spec refuses while [WIP], on a SHA mismatch, and ignores bots and
     const wip = approveWorld({ title: "[WIP] Spec: docs fix" });
     await run(wip, handleApproveSpec, approvePayload());
     assert.deepEqual(wip.pat, []);
-    assert.match(wip.writes.at(-1)[2], /still working/);
+    assert.match(wip.writes.at(-1)[2], /still be working/);
+    assert.match(wip.writes.at(-1)[2], /remove the `\[WIP\]` prefix yourself and comment `\/approve-spec` again/);
     assert.ok(wip.labelsOf(10).includes("status:spec"));
 
     const mismatch = approveWorld();

@@ -486,14 +486,19 @@ export function specInstructions({ issueNumber, specPath }) {
         `2. Write ${specPath}: goal, acceptance criteria, validation commands, and out-of-scope items. Keep it short.`,
         "3. Include a `## Delegation` section listing the ordered build steps, one per line, as `- <profile>: <task>`. Use only these profiles: builder, artist, gameplay-designer, docs-writer. Add one line `- QA depth: fast` or `- QA depth: slow`.",
         `4. Open a draft pull request that contains only the spec. Fill .github/pull_request_template.md and put \`Closes #${issueNumber}\` under "Linked issue".`,
-        "5. Stop. Do not write code. A human approves the spec by commenting /approve-spec on the pull request.",
+        "5. Work in this session yourself. Do not use the task/subagent tool or start custom agents (their pinned models fail in the cloud).",
+        "6. As your last step, when the spec pull request is complete, remove the `[WIP]` prefix from its title.",
+        "7. Stop. Do not write code. A human approves the spec by commenting /approve-spec on the pull request.",
     ].join("\n");
 }
+
+const NO_SUBAGENTS_RULE =
+    "- Work in this session yourself. Do NOT use the task/subagent tool or start custom agents; their pinned models fail in the cloud.";
 
 export function buildInstructions({ issueNumber, specPath, steps, qaDepth }) {
     const stepLines = steps.map(
         ({ profile, task }, index) =>
-            `${index + 1}. **${profile}**: ${task}\n   Act as \`.github/agents/${profile}.agent.md\` for this step (delegate to that custom agent if it is available).`,
+            `${index + 1}. **${profile}**: ${task}\n   Act as this profile yourself: read \`.github/agents/${profile}.agent.md\` and \`.github/skills/${profile}/SKILL.md\` and follow them for this step.`,
     );
     return [
         `@copilot The spec is approved. Implement \`${specPath}\` on this pull request by following its \`## Delegation\` section in order:`,
@@ -504,6 +509,7 @@ export function buildInstructions({ issueNumber, specPath, steps, qaDepth }) {
         "",
         "Rules:",
         "- Read AGENTS.md first and stay within the spec's scope.",
+        NO_SUBAGENTS_RULE,
         "- Run `npm run check` after each step; it must pass before you finish.",
         `- Fill \`.github/pull_request_template.md\` in the pull request body, with \`Closes #${issueNumber}\` under "Linked issue". Keep the empty \`<!-- auto-generated-pr-description:start -->\` and \`<!-- auto-generated-pr-description:end -->\` markers.`,
         "- Leave the pull request as a draft. As your final step, when the build is complete and checks pass, remove the `[WIP]` prefix from the pull request title; the pipeline then marks it ready for review.",
@@ -513,7 +519,7 @@ export function buildInstructions({ issueNumber, specPath, steps, qaDepth }) {
 export function fixInstructions({ blockers, cycleLabel, steps, sha }) {
     const owners = steps.length > 0 ? [...new Set(steps.map(({ profile }) => `\`${profile}\``))].join(", ") : "the profile that owns the affected files";
     return [
-        `@copilot Review/QA found blockers on ${sha.slice(0, 7)} (${cycleLabel}, D050). Fix only these, acting as the role agent from the spec's Delegation section that owns the affected files (${owners}). Run \`npm run check\` before you finish and keep the pull request template filled.`,
+        `@copilot Review/QA found blockers on ${sha.slice(0, 7)} (${cycleLabel}, D050). Fix only these yourself in this session, acting as the role from the spec's Delegation section that owns the affected files (${owners}): read its \`.github/agents/<profile>.agent.md\` and \`.github/skills/<profile>/SKILL.md\` and follow them. Do NOT use the task/subagent tool or start custom agents; their pinned models fail in the cloud. Run \`npm run check\` before you finish and keep the pull request template filled.`,
         "",
         ...blockers.flatMap(({ source, details }) => [`**${source}**`, "", details, ""]),
         "The pull request is back in draft with a `[WIP]` title. As your final step, after the fixes are pushed and checks pass, remove the `[WIP]` prefix from the title; the pipeline then requests one fresh review and QA.",
@@ -804,7 +810,7 @@ export async function handleApproveSpec({ github, context, core, env = process.e
         return core.info(`Issue #${issue.number} is not at the spec gate (${LABEL.spec}); ignoring.`);
     }
     if (isWipTitle(pr.title)) {
-        await api.comment(pr.number, "Not approving: Copilot is still working on the spec (`[WIP]` title). Wait until it finishes, review the final spec, then comment `/approve-spec`.");
+        await api.comment(pr.number, "Not approving: the spec pull request still has a `[WIP]` title, so Copilot may still be working on it. Wait until it finishes and review the final spec. If Copilot has finished (no new spec commits) but left `[WIP]` in the title, remove the `[WIP]` prefix yourself and comment `/approve-spec` again.");
         return;
     }
     const command = parseApproveCommand(body, pr.head.sha);
