@@ -23,7 +23,6 @@ function makeOps() {
     startServer: () => calls.push("startServer"),
     openQueue: () => calls.push("openQueue"),
     copyLeadPrompt: () => calls.push("copyLeadPrompt"),
-    toggleClosedIssues: () => calls.push("toggleClosedIssues"),
   };
   return { calls, ops };
 }
@@ -49,7 +48,7 @@ test("page keys route to pageSelection", () => {
   assert.deepEqual(calls, ["page:-1", "page:1"]);
 });
 
-test("direct keys route to agents/actions/refresh/server/queue/copy/closed", () => {
+test("direct keys route to agents/actions/refresh/server/queue/copy", () => {
   const { calls, ops } = makeOps();
   handleKey("a", kbThat({}, "a"), ops);
   handleKey("x", kbThat({}, "x"), ops);
@@ -66,8 +65,6 @@ test("direct keys route to agents/actions/refresh/server/queue/copy/closed", () 
     "startServer",
     "openQueue",
     "copyLeadPrompt",
-    "toggleClosedIssues",
-    "toggleClosedIssues",
   ]);
 });
 

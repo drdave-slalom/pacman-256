@@ -15,6 +15,7 @@ import {
   renderClosedIssues,
   renderDetail,
   renderHeader,
+  renderHelp,
   renderOfflineBanner,
   renderPipelineStrip,
 } from "./render.ts";
@@ -32,6 +33,13 @@ test("renderHeader shows branch, age and attention counts", () => {
   assert.ok(joined.includes("main"));
   assert.ok(joined.includes("attn 4"));
   assertLinesFit(lines, 80);
+});
+
+test("renderHelp has no closed-issues toggle hint", () => {
+  const lines = renderHelp("board", plainStyle, 100);
+  const joined = lines.join("\n");
+  assert.ok(!joined.includes("i closed"), `no toggle hint expected, got:\n${joined}`);
+  assert.ok(joined.includes("esc close"), `expected close hint, got:\n${joined}`);
 });
 
 test("renderOfflineBanner shows retry/start hints", () => {
@@ -160,7 +168,7 @@ test("renderPipelineStrip excludes Unknown/Orphaned stages", () => {
 
 test("renderBoardBody renders columns, cards, badges and dirty marker", () => {
   const model = buildBoard(fixtureSnapshot());
-  const lines = renderBoardBody(model, 1, plainStyle, 100);
+  const lines = renderBoardBody(model, 1, plainStyle, 100, []);
   const joined = lines.join("\n");
   for (const title of ["Spec", "Execute", "Review", "Done", "Unknown", "Orphaned"]) {
     assert.ok(joined.includes(title), `missing column ${title}`);
@@ -197,7 +205,7 @@ test("renderDetail shows spec/git/pr/trail/next-action", () => {
 
 test("renderBoardBody shows issue cards as #n + title + status", () => {
   const model = buildBoard(fixtureSnapshotWithIssues());
-  const lines = renderBoardBody(model, 0, plainStyle, 120);
+  const lines = renderBoardBody(model, 0, plainStyle, 120, []);
   const joined = lines.join("\n");
   assert.ok(joined.includes("#12 Mobile touch controls feel laggy [ready] [GitHub]"));
   assert.ok(joined.includes("#7 Add sound effects [review] [GitHub]"));
@@ -218,7 +226,7 @@ test("renderClosedIssues is hidden when the list is empty", () => {
   assert.deepEqual(renderClosedIssues([], plainStyle, 200), []);
 });
 
-test("renderBoardBody appends the Closed issues section after Orphaned when passed", () => {
+test("renderBoardBody always appends the Closed issues section after Orphaned", () => {
   const snapshot = fixtureSnapshotWithClosedIssues();
   const model = buildBoard(snapshot);
   const lines = renderBoardBody(model, 0, plainStyle, 200, closedUnmatchedIssues(snapshot));
@@ -232,19 +240,16 @@ test("renderBoardBody appends the Closed issues section after Orphaned when pass
   assertLinesFit(lines, 200);
 });
 
-test("renderBoardBody shows no Closed issues section when not passed or empty", () => {
+test("renderBoardBody hides the Closed issues section when empty", () => {
   const snapshot = fixtureSnapshotWithClosedIssues();
   const model = buildBoard(snapshot);
-  const without = renderBoardBody(model, 0, plainStyle, 200);
-  assert.ok(!without.join("\n").includes("Closed issues"));
   const empty = renderBoardBody(model, 0, plainStyle, 200, []);
   assert.ok(!empty.join("\n").includes("Closed issues"));
-  assert.deepEqual(without, empty);
 });
 
 test("renderBoardBody shows [GitHub] badge on issue-seeded and hybrid cards, none on spec-only", () => {
   const model = buildBoard(fixtureSnapshotWithIssues());
-  const lines = renderBoardBody(model, 0, plainStyle, 120);
+  const lines = renderBoardBody(model, 0, plainStyle, 120, []);
   // issue-seeded (standalone) card carries the badge
   const issueLine = lines.find((l) => l.includes("#12"));
   assert.ok(issueLine !== undefined, "missing issue-seeded card line");

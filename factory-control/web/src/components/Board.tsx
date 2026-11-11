@@ -1,37 +1,16 @@
-import { useState } from "react";
 import type { FactorySnapshot } from "@maze/factory-control-shared";
 import { buildBoard, closedUnmatchedIssues, issueStatusLabel, totalOrphaned } from "../state/selectors";
 import { UnitCard } from "./UnitCard";
 
 /**
- * Presentational board (controlled by the `showClosed` toggle). Extracted so
- * tests can render the ON/OFF states directly; the interactive `Board`
- * wrapper owns the toggle state.
+ * Presentational board. Closed-unmatched issues are always visible in a
+ * trailing column (after Orphaned) when any exist — no toggle.
  */
-export function BoardContent({
-  snapshot,
-  showClosed,
-  onToggleShowClosed,
-}: {
-  snapshot: FactorySnapshot;
-  showClosed: boolean;
-  onToggleShowClosed: () => void;
-}) {
+export function BoardContent({ snapshot }: { snapshot: FactorySnapshot }) {
   const board = buildBoard(snapshot);
-  const closed = showClosed ? closedUnmatchedIssues(snapshot) : [];
+  const closed = closedUnmatchedIssues(snapshot);
   return (
     <main className="board" data-testid="board">
-      <div className="board-toolbar">
-        <label className="toolbar-toggle">
-          <input
-            type="checkbox"
-            checked={showClosed}
-            onChange={onToggleShowClosed}
-            aria-label="Show closed issues"
-          />
-          Show closed issues
-        </label>
-      </div>
       <div className="board-scroll">
         {board.columns.map((column) => (
           <section key={column.key} className={`column column-${column.key}`}>
@@ -81,12 +60,5 @@ export function BoardContent({
 }
 
 export function Board({ snapshot }: { snapshot: FactorySnapshot }) {
-  const [showClosed, setShowClosed] = useState(false);
-  return (
-    <BoardContent
-      snapshot={snapshot}
-      showClosed={showClosed}
-      onToggleShowClosed={() => setShowClosed((value) => !value)}
-    />
-  );
+  return <BoardContent snapshot={snapshot} />;
 }
