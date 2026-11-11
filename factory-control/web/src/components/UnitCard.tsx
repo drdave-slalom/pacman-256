@@ -1,5 +1,5 @@
 import type { CheckState, Unit } from "@maze/factory-control-shared";
-import { formatDiff, showBranch } from "../state/selectors";
+import { formatDiff, issueStatusLabel, showBranch } from "../state/selectors";
 import { Link } from "../router";
 import { ActionBadges } from "./ActionBadges";
 
@@ -19,6 +19,9 @@ export function UnitCard({ unit }: { unit: Unit }) {
       </div>
       {unit.title ? <h3 className="card-title">{unit.title}</h3> : null}
       <div className="chips">
+        {unit.issue ? <span className="chip chip-issue">{`#${unit.issue.number}`}</span> : null}
+        {unit.issue ? <span className="chip chip-status">{issueStatusLabel(unit.issue)}</span> : null}
+        {unit.issue?.labels.blocked ? <span className="chip chip-blocked" title="issue blocked">⛔ blocked</span> : null}
         {unit.branch ? <span className="chip chip-branch">{`@${showBranch(unit.branch)}`}</span> : null}
         {unit.agents.map((agent) => (
           <span key={agent.label} className="chip chip-agent" title={agent.definition}>

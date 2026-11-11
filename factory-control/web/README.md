@@ -38,16 +38,22 @@ npm test           # pure selector unit tests + SSR rendering integration test
 npm run smoke      # build + live end-to-end smoke against a fixture snapshot
 ```
 
-## Read-only contract
+## Read/write contract
 
-- The app performs exactly one network call: `GET /api/snapshot` (polled every
-  ~5 s). No UI element writes anything.
-- The server rejects mutating methods on the web surface with 405 (`Allow:
-  GET, HEAD`) and mutations on the snapshot API with 404 (verified by
-  `factory-control/server/src/http.static.test.ts`).
-- Exception: the pre-existing M0 endpoint `POST /api/refresh` (server-side
-  snapshot cache re-read) still returns 200. It mutates no state and the web
-  UI never calls it — the M1 surface itself remains strictly read-only.
+- The app reads `GET /api/snapshot` (polled every ~5 s) and renders it.
+- Issue-backed units (issue-seeded or hybrid) expose a guarded **action menu**
+  on the detail page: `github/issue-comment`, `github/issue-label`,
+  `github/issue-state`, and `factory/start-work`. Each action follows the M2
+  protocol — `POST /api/actions/<name>/prepare` (gate preconditions + plan)
+  then `POST /api/actions/<name>/execute` with `confirm: true` (re-evaluates
+  preconditions; 409 responses surface the exact guard reasons). No command
+  runs until confirm.
+- The server rejects unguarded mutating methods on the web surface with 405
+  (`Allow: GET, HEAD`) and mutations on the snapshot API with 404 (verified by
+  `factory-control/server/src/http.static.test.ts`). `POST /api/refresh`
+  (cache re-read) remains server-side only.
+- Action endpoints are token-gated on non-loopback binds (see the factory-control
+  server README); on localhost they are open like the rest of the M1 surface.
 
 ## Snapshot types
 

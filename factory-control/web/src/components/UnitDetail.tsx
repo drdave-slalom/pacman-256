@@ -1,7 +1,8 @@
 import type { FactorySnapshot } from "@maze/factory-control-shared";
-import { formatDiff, showBranch, suggestNextAction, unitById } from "../state/selectors";
+import { formatDiff, issueLabelChips, showBranch, suggestNextAction, unitById } from "../state/selectors";
 import { Link } from "../router";
 import { ActionBadges } from "./ActionBadges";
+import { ActionMenu } from "./ActionMenu";
 
 function CheckLabel({ checks }: { checks: string }) {
   if (checks === "green") return <span className="checks checks-green">✓ green</span>;
@@ -38,6 +39,48 @@ export function UnitDetail({ snapshot, id }: { snapshot: FactorySnapshot; id: st
         {unit.parseError ? <p className="parse-error">spec parse error: {unit.parseError}</p> : null}
         <p className="muted">spec: {unit.specPath ?? "—"}</p>
       </section>
+
+      {unit.issue ? (
+        <section className="panel" data-testid="issue-panel">
+          <h2>Issue</h2>
+          <dl className="kv">
+            <dt>number</dt>
+            <dd>{`#${unit.issue.number}`}</dd>
+            <dt>state</dt>
+            <dd>
+              <span className={`issue-state issue-state-${unit.issue.state}`}>{unit.issue.state}</span>
+            </dd>
+            <dt>url</dt>
+            <dd>
+              <a href={unit.issue.url} target="_blank" rel="noreferrer">{unit.issue.url}</a>
+            </dd>
+            <dt>labels</dt>
+            <dd className="issue-labels">
+              <div className="chips">
+                {issueLabelChips(unit.issue).map((chip) => (
+                  <span key={chip.text} className={`chip ${chip.cls}`}>{chip.text}</span>
+                ))}
+              </div>
+            </dd>
+            <dt>assignees</dt>
+            <dd>{unit.issue.assignees.length > 0 ? unit.issue.assignees.join(", ") : <span className="muted">none</span>}</dd>
+            <dt>milestone</dt>
+            <dd>{unit.issue.milestone ?? <span className="muted">—</span>}</dd>
+            <dt>updated</dt>
+            <dd>{unit.issue.updatedAt ?? <span className="muted">—</span>}</dd>
+          </dl>
+          {unit.issue.bodyExcerpt ? (
+            <p className="goal issue-excerpt">{unit.issue.bodyExcerpt}</p>
+          ) : null}
+        </section>
+      ) : null}
+
+      {unit.issue ? (
+        <section className="panel" data-testid="actions-panel">
+          <h2>Actions</h2>
+          <ActionMenu unit={unit} snapshot={snapshot} />
+        </section>
+      ) : null}
 
       <section className="panel">
         <h2>Git</h2>
@@ -88,7 +131,7 @@ export function UnitDetail({ snapshot, id }: { snapshot: FactorySnapshot; id: st
         <div className="next-action">
           <div>
             <span className="next-label">{action.label}</span>
-            <span className="muted">{action.note} — display-only</span>
+            <span className="muted">{action.note}{unit.issue ? " — see Actions panel" : " — display-only"}</span>
           </div>
         </div>
       </section>

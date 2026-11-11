@@ -640,9 +640,10 @@ test("unknown action is 404; web mirror has no route to action endpoints", async
     const del = await fetch(`${h.base}/api/actions/audit`, { method: "DELETE" });
     assert.equal(del.status, 404);
 
-    // The web app source never references the action endpoints.
+    // M1 (web mirror) drives the M2 action API for issue-backed units: comment,
+    // label, state, and start-work all prepare/execute via /api/actions.
     const apiSource = readFileSync(FIXTURE_WEB_API, "utf8");
-    assert.equal(apiSource.includes("/api/actions"), false);
+    assert.ok(apiSource.includes("/api/actions"));
   });
 });
 

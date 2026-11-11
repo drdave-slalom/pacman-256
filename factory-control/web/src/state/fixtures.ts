@@ -1,4 +1,4 @@
-import type { AgentRecord, FactorySnapshot, Unit } from "@maze/factory-control-shared";
+import type { AgentRecord, FactorySnapshot, IssueCard, IssueLabels, Unit } from "@maze/factory-control-shared";
 
 /**
  * A deterministic fixture snapshot covering every stage column, attention
@@ -172,6 +172,86 @@ export function fixtureSnapshot(): FactorySnapshot {
     attention: ["parse-error"],
   };
 
+  const i16: Unit = {
+    id: "I16-issue",
+    kind: "issue",
+    title: "Fix lane inference for hybrid units",
+    stage: "spec",
+    flags: {
+      reviewPending: false,
+      qaPending: false,
+      ciRed: false,
+      readyToMerge: false,
+      readyForCleanup: false,
+      needsDispatch: false,
+      blockedAgent: false,
+    },
+    agents: [],
+    handoffs: [],
+    attention: [],
+    issue: issueCard({
+      number: 16,
+      title: "Fix lane inference for hybrid units",
+      state: "open",
+      url: "https://github.com/x/pacman-256/issues/16",
+      bodyExcerpt: "When a unit links both a spec and an issue, lane inference should prefer the issue's lane.",
+      labels: labelSet({
+        type: "bug",
+        role: ["builder"],
+        lane: "B",
+        status: "spec",
+        blocked: true,
+        followUp: false,
+        playtest: false,
+        raw: ["type:bug", "role:builder", "lane:B", "status:spec", "blocked", "priority:high"],
+      }),
+      assignees: ["@chase"],
+      milestone: "M2",
+      createdAt: "2026-01-05T10:00:00Z",
+      updatedAt: "2026-01-12T14:30:00Z",
+    }),
+  };
+
+  const t17: Unit = {
+    id: "T17-hybrid",
+    kind: "hybrid",
+    specPath: "SPEC/T17-hybrid.md",
+    title: "T17: hybrid issue + spec",
+    stage: "review",
+    flags: {
+      reviewPending: false,
+      qaPending: false,
+      ciRed: false,
+      readyToMerge: false,
+      readyForCleanup: false,
+      needsDispatch: false,
+      blockedAgent: false,
+    },
+    agents: [],
+    handoffs: [],
+    attention: [],
+    issue: issueCard({
+      number: 17,
+      title: "T17: hybrid issue + spec",
+      state: "closed",
+      url: "https://github.com/x/pacman-256/issues/17",
+      bodyExcerpt: "Closes #17; carries the spec and links the issue.",
+      labels: labelSet({
+        type: "feature",
+        role: ["qa", "review"],
+        lane: "A",
+        status: "review",
+        blocked: false,
+        followUp: true,
+        playtest: true,
+        raw: ["type:feature", "role:qa", "role:review", "lane:A", "status:review", "follow-up", "playtest"],
+      }),
+      assignees: ["@lead"],
+      createdAt: "2026-02-01T09:00:00Z",
+      updatedAt: "2026-02-03T11:20:00Z",
+    }),
+  };
+
   const agents: AgentRecord[] = [
     workingAgent("builder-fc-t10-execute", "builder"),
     blockedAgent("builder-fc-t07-blocked", "builder"),
@@ -184,8 +264,8 @@ export function fixtureSnapshot(): FactorySnapshot {
   return {
     generatedAt: new Date().toISOString(),
     repo: { root: "/repo/pacman-256", branch: "main", dirty: false },
-    units: [t10, t11, t12, t13, t14, t15],
-    issues: [],
+    units: [t10, t11, t12, t13, t14, t15, i16, t17],
+    issues: [i16.issue!, t17.issue!],
     agents,
     prs: [
       { number: 42, title: "T10: execute fixture", state: "OPEN", headRefName: "factory/t10-execute", url: "https://github.com/x/pacman-256/pull/42", checks: "green" },
@@ -238,4 +318,54 @@ function idleAgent(label: string, definition: string): AgentRecord {
     availableTools: ["read", "grep"],
     source: "result",
   };
+}
+
+function labelSet(p: {
+  type?: string;
+  role?: string[];
+  lane?: string;
+  status?: string;
+  blocked?: boolean;
+  followUp?: boolean;
+  playtest?: boolean;
+  raw: string[];
+}): IssueLabels {
+  const labels: IssueLabels = {
+    role: p.role ?? [],
+    blocked: p.blocked ?? false,
+    followUp: p.followUp ?? false,
+    playtest: p.playtest ?? false,
+    raw: p.raw,
+  };
+  if (p.type !== undefined) labels.type = p.type;
+  if (p.lane !== undefined) labels.lane = p.lane;
+  if (p.status !== undefined) labels.status = p.status;
+  return labels;
+}
+
+function issueCard(p: {
+  number: number;
+  title: string;
+  state: "open" | "closed" | "unknown";
+  url: string;
+  labels: IssueLabels;
+  assignees: string[];
+  bodyExcerpt?: string;
+  milestone?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}): IssueCard {
+  const card: IssueCard = {
+    number: p.number,
+    title: p.title,
+    state: p.state,
+    url: p.url,
+    labels: p.labels,
+    assignees: p.assignees,
+  };
+  if (p.bodyExcerpt !== undefined) card.bodyExcerpt = p.bodyExcerpt;
+  if (p.milestone !== undefined) card.milestone = p.milestone;
+  if (p.createdAt !== undefined) card.createdAt = p.createdAt;
+  if (p.updatedAt !== undefined) card.updatedAt = p.updatedAt;
+  return card;
 }

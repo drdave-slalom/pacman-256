@@ -3,6 +3,7 @@ import type {
   DiffTotals,
   FactorySnapshot,
   HandoffRef,
+  IssueCard,
   Lifecycle,
   PullRequest,
   Stage,
@@ -119,6 +120,72 @@ export function totalOrphaned(board: BoardModel): number {
 
 export function unitById(snapshot: FactorySnapshot, id: string): Unit | undefined {
   return snapshot.units.find((u) => u.id === id);
+}
+
+/** True when a unit is seeded from or linked to a GitHub issue. */
+export function isIssueUnit(unit: Unit): boolean {
+  return unit.issue !== undefined;
+}
+
+/** Issue number display, e.g. `#16`. */
+export function issueRef(unit: Unit): string | undefined {
+  return unit.issue !== undefined ? `#${unit.issue.number}` : undefined;
+}
+
+/**
+ * Status display: prefer the structured `status:*` label, falling back to the
+ * GitHub issue state. Used on cards and in the detail header.
+ */
+export function issueStatusLabel(issue: IssueCard): string {
+  return issue.labels.status ?? issue.state;
+}
+
+export interface IssueChip {
+  text: string;
+  cls: string;
+}
+
+/**
+ * Label chips for an issue: structured type/role/lane/status plus flag labels
+ * (blocked/follow-up/playtest) and any verbatim raw labels not already
+ * represented structurally.
+ */
+export function issueLabelChips(issue: IssueCard): IssueChip[] {
+  const chips: IssueChip[] = [];
+  if (issue.labels.type !== undefined) {
+    chips.push({ text: `type: ${issue.labels.type}`, cls: "chip-issue-type" });
+  }
+  for (const role of issue.labels.role ?? []) {
+    chips.push({ text: `role: ${role}`, cls: "chip-issue-role" });
+  }
+  if (issue.labels.lane !== undefined) {
+    chips.push({ text: `lane: ${issue.labels.lane}`, cls: "chip-issue-lane" });
+  }
+  if (issue.labels.status !== undefined) {
+    chips.push({ text: `status: ${issue.labels.status}`, cls: "chip-issue-status" });
+  }
+  if (issue.labels.blocked) {
+    chips.push({ text: "blocked", cls: "chip-blocked" });
+  }
+  if (issue.labels.followUp) {
+    chips.push({ text: "follow-up", cls: "chip-issue-followup" });
+  }
+  if (issue.labels.playtest) {
+    chips.push({ text: "playtest", cls: "chip-issue-playtest" });
+  }
+
+  const represented = new Set<string>();
+  if (issue.labels.type !== undefined) represented.add(`type:${issue.labels.type}`);
+  for (const role of issue.labels.role ?? []) represented.add(`role:${role}`);
+  if (issue.labels.lane !== undefined) represented.add(`lane:${issue.labels.lane}`);
+  if (issue.labels.status !== undefined) represented.add(`status:${issue.labels.status}`);
+  if (issue.labels.blocked) represented.add("blocked");
+  if (issue.labels.followUp) represented.add("follow-up");
+  if (issue.labels.playtest) represented.add("playtest");
+  for (const raw of issue.labels.raw) {
+    if (!represented.has(raw)) chips.push({ text: raw, cls: "chip-issue-raw" });
+  }
+  return chips;
 }
 
 /** Short branch display: strip a remote `origin/` prefix. */

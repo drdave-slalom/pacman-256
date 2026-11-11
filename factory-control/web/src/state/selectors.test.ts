@@ -10,6 +10,10 @@ import {
   formatAge,
   formatDiff,
   formatElapsed,
+  isIssueUnit,
+  issueLabelChips,
+  issueRef,
+  issueStatusLabel,
   showBranch,
   stageToColumn,
   suggestNextAction,
@@ -38,12 +42,12 @@ test("buildBoard places every unit in its inferred column and keeps orphans", ()
   const board = buildBoard(fixtureSnapshot());
   const byKey = new Map(board.columns.map((c) => [c.key, c.units]));
   assert.deepEqual(byKey.get("execute")?.map((u) => u.id), ["T10-execute"]);
-  assert.deepEqual(byKey.get("review")?.map((u) => u.id), ["T11-review"]);
+  assert.deepEqual(byKey.get("review")?.map((u) => u.id), ["T11-review", "T17-hybrid"]);
   assert.deepEqual(byKey.get("integrate")?.map((u) => u.id), ["T12-integrate"]);
   assert.deepEqual(byKey.get("done")?.map((u) => u.id), ["T14-done"]);
-  assert.deepEqual(byKey.get("spec")?.map((u) => u.id), ["T15-parse"]);
+  assert.deepEqual(byKey.get("spec")?.map((u) => u.id), ["I16-issue", "T15-parse"]);
   assert.deepEqual(byKey.get("unknown")?.map((u) => u.id), ["T13-unknown"]);
-  assert.equal(board.columns.reduce((n, c) => n + c.units.length, 0), 6);
+  assert.equal(board.columns.reduce((n, c) => n + c.units.length, 0), 8);
   assert.equal(totalOrphaned(board), 4);
 });
 
@@ -88,9 +92,45 @@ test("formatAge is finite and labelled", () => {
   assert.equal(formatAge("not-a-date"), "unknown");
 });
 
+test("issue selectors expose issue cards for issue/hybrid units", () => {
+  const snap = fixtureSnapshot();
+  const issueUnit = snap.units.find((u) => u.id === "I16-issue");
+  const hybridUnit = snap.units.find((u) => u.id === "T17-hybrid");
+  const specUnit = snap.units.find((u) => u.id === "T15-parse");
+  assert.ok(issueUnit);
+  assert.ok(hybridUnit);
+  assert.ok(specUnit);
+  assert.equal(isIssueUnit(issueUnit), true);
+  assert.equal(isIssueUnit(hybridUnit), true);
+  assert.equal(isIssueUnit(specUnit), false);
+  assert.equal(issueRef(issueUnit), "#16");
+  assert.equal(issueRef(hybridUnit), "#17");
+  assert.equal(issueRef(specUnit), undefined);
+  // status label prefers the status:* label over the GitHub state
+  if (issueUnit.issue === undefined) throw new Error("fixture I16 missing issue");
+  if (hybridUnit.issue === undefined) throw new Error("fixture T17 missing issue");
+  assert.equal(issueStatusLabel(issueUnit.issue), "spec");
+  assert.equal(issueStatusLabel(hybridUnit.issue), "review");
+});
+
+test("issueLabelChips covers structured labels and raw extras", () => {
+  const snap = fixtureSnapshot();
+  const issueUnit = snap.units.find((u) => u.id === "I16-issue");
+  if (issueUnit?.issue === undefined) throw new Error("fixture I16 missing issue");
+  const chips = issueLabelChips(issueUnit.issue);
+  const texts = chips.map((c) => c.text);
+  for (const expected of ["type: bug", "role: builder", "lane: B", "status: spec", "blocked", "priority:high"]) {
+    assert.ok(texts.includes(expected), `missing chip ${expected}`);
+  }
+  const blocked = chips.find((c) => c.cls === "chip-blocked");
+  assert.equal(blocked?.text, "blocked");
+  // structured raw entries are not duplicated
+  assert.equal(texts.filter((t) => t === "type: bug").length, 1);
+});
+
 test("summarize counts units, agents, and attention", () => {
   const s = summarize(fixtureSnapshot());
-  assert.equal(s.units, 6);
+  assert.equal(s.units, 8);
   assert.equal(s.agents, 6);
   assert.equal(s.working, 1);
   assert.equal(s.blocked, 1);

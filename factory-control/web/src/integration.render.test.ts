@@ -50,6 +50,8 @@ test("board renders every unit card with stage columns and attention badges", as
   for (const expected of [
     "Spec", "Dispatch", "Execute", "Review", "QA", "Integrate", "CI", "Done", "Unknown", "Orphaned",
     "T10-execute", "T11-review", "T12-integrate", "T13-unknown", "T14-done", "T15-parse",
+    "I16-issue", "T17-hybrid", "Fix lane inference for hybrid units", "T17: hybrid issue + spec",
+    "#16", "#17", "⛔ blocked",
     "Review pending", "Ready to merge", "Ready for cleanup", "Parse error",
     "PR #42", "@factory/t10-execute", "+42 −7", "● dirty",
   ]) {
@@ -74,6 +76,55 @@ test("unit detail renders spec, git, PR/checks, and the handoff trail", async ()
     "Review pending",
     "Assign PR review",
     "display-only",
+  ]) {
+    assert.ok(html.includes(expected), `detail missing ${expected}`);
+  }
+});
+
+test("unit detail renders issue fields, GitHub URL, and the new action menu", async () => {
+  const mod = await compileSsr();
+  const renderPage = renderPageOf(mod);
+  const html = renderPage(fixtureSnapshot(), "/unit/I16-issue");
+  for (const expected of [
+    "Issue",
+    "#16",
+    "open",
+    "https://github.com/x/pacman-256/issues/16",
+    "type: bug", "role: builder", "lane: B", "status: spec",
+    "blocked",
+    "priority:high",
+    "@chase",
+    "M2",
+    "2026-01-12T14:30:00Z",
+    "When a unit links both a spec and an issue",
+    "lane inference should prefer the issue",
+    "Actions",
+    "Comment on issue", "Relabel issue", "Close/reopen issue", "Start work",
+  ]) {
+    assert.ok(html.includes(expected), `detail missing ${expected}`);
+  }
+});
+
+test("unit detail renders hybrid issue fields and the new action menu", async () => {
+  const mod = await compileSsr();
+  const renderPage = renderPageOf(mod);
+  const html = renderPage(fixtureSnapshot(), "/unit/T17-hybrid");
+  for (const expected of [
+    "Issue",
+    "#17",
+    "closed",
+    "https://github.com/x/pacman-256/issues/17",
+    "type: feature",
+    "role: qa",
+    "role: review",
+    "lane: A",
+    "status: review",
+    "follow-up",
+    "playtest",
+    "@lead",
+    "2026-02-03T11:20:00Z",
+    "Actions",
+    "Comment on issue", "Relabel issue", "Close/reopen issue", "Start work",
   ]) {
     assert.ok(html.includes(expected), `detail missing ${expected}`);
   }
