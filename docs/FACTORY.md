@@ -291,10 +291,16 @@ is not a completion signal. When Copilot replies on a pipeline PR (it posts a
 comment as `Copilot` when a comment-triggered session ends), `agent-gate.yml`
 asks the Copilot agent tasks API (`GET /agents/repos/{owner}/{repo}/tasks`,
 with `COPILOT_ASSIGN_TOKEN`) for the task linked to the PR (pull artifact id
-or head branch). If no session is in progress or queued, it strips `[WIP]`
-and, at `status:ready`, marks the PR ready (`status:review`). It re-checks a
-few times while a session still looks active. API errors count as unknown:
-the gate logs them and does nothing. A manual `agent-gate.yml` run with
+or head branch). If every session has ended (`completed`, `failed`,
+`cancelled`, `timed_out`; any other state is unknown), it strips `[WIP]`. At
+`status:ready` it marks the PR ready (`status:review`) only if a session
+started after the gate's latest build or fix hand-off comment (hidden
+`agent-gate:build`/`agent-gate:fix` marker), so the earlier spec or build
+session never counts. A draft is never marked ready just because its title
+lacks `[WIP]`; only this check or an explicit "Ready for review" does that.
+It re-checks a few times while a session still looks active. API errors count
+as unknown: the gate logs them and does nothing. The gate also does not
+enable auto-merge while a Copilot session is active. A manual `agent-gate.yml` run with
 `pr_number` runs the same check before evaluating gates.
 
 **Delegation section.** The spec's `## Delegation` lists one line per step,
@@ -358,8 +364,10 @@ untrusted input.
 - The factory reviewer may miss changes to instruction files such as
   `AGENTS.md` in its diff view; its prompt now requires checking blockers
   against the head commit with git. A repeated blocker on an unchanged head
-  stops at `agent:needs-human`; dismiss a false `CHANGES_REQUESTED` review so
-  the ruleset no longer blocks merge.
+  stops at `agent:needs-human`. For a false positive, dismiss the factory
+  review, remove `agent:needs-human`, then re-run that head's Factory Review
+  run (`gh run rerun <id>`), which re-triggers the gate; dismissing the review
+  alone does not restart the pipeline.
 - **Accepted secret risk until issue #47:** `DO_API_TOKEN` and the
   `COPILOT_ASSIGN_TOKEN` PAT are repo-level, and workflow-run approval for
   Copilot branches is off, so an agent PR that edits a `pull_request` workflow

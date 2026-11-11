@@ -305,7 +305,8 @@ test("instruction text names the spec, profiles, and required rules, and never a
     assert.match(spec, /## Delegation/);
     assert.match(spec, /Do not use the task\/subagent tool/);
     assert.match(spec, /final step, post a pull request comment summarising/);
-    const build = buildInstructions({ specPath: "SPEC/a.md", steps: [{ profile: "artist", task: "Draw" }], qaDepth: "fast" });
+    const build = buildInstructions({ specPath: "SPEC/a.md", steps: [{ profile: "artist", task: "Draw" }], qaDepth: "fast", sha: SHA });
+    assert.ok(build.endsWith(gateMarker("build", SHA)));
     assert.match(build, /^@copilot /);
     assert.match(build, /\.github\/agents\/artist\.agent\.md/);
     assert.match(build, /\.github\/skills\/artist\/SKILL\.md/);
@@ -557,7 +558,17 @@ function reviewWorld(overrides = {}) {
 }
 
 const workflowRun = (head_sha = SHA) => ({ workflow_run: { event: "pull_request", head_sha, pull_requests: [{ number: 20 }] } });
-const copilotTask = (sessionState, artifacts = [{ type: "pull", data: { id: 9020 } }], id = "task-1") => ({ id, state: sessionState, artifacts, sessions: [{ state: "completed" }, { state: sessionState, error: null }] });
+// One old (spec) session, then the latest session created after the default hand-off at 01:00.
+const copilotTask = (sessionState, artifacts = [{ type: "pull", data: { id: 9020 } }], id = "task-1", latestAt = "2026-01-01T02:00:00Z") => ({
+    id,
+    state: sessionState,
+    artifacts,
+    sessions: [
+        { state: "completed", created_at: "2026-01-01T00:30:00Z" },
+        { state: sessionState, error: null, created_at: latestAt },
+    ],
+});
+const handoff = (kind, created_at = "2026-01-01T01:00:00Z", login = PAT_LOGIN) => ({ user: { login, type: "User" }, created_at, body: `@copilot ...\n\n${gateMarker(kind, SHA)}` });
 
 test("evaluate: all gates green on a docs PR enables auto-merge bound to the head SHA", async () => {
     const world = reviewWorld();
@@ -565,6 +576,13 @@ test("evaluate: all gates green on a docs PR enables auto-merge bound to the hea
     assert.deepEqual(world.pat.filter(([kind]) => kind === "graphql"), [["graphql", "enablePullRequestAutoMerge", { id: "PR_20", sha: SHA }]]);
     assert.match(world.writes.at(-1)[2], /auto-merge enabled for this head only/);
     assert.ok(!world.labelsOf(10).includes("agent:needs-human"));
+});
+
+test("evaluate: no auto-merge while a Copilot session is active", async () => {
+    const world = reviewWorld({ tasks: [copilotTask("in_progress")] });
+    await run(world, handleWorkflowRun, workflowRun());
+    assert.deepEqual([world.writes, world.pat], [[], []]);
+    assert.match(world.logs.at(-1), /not enabling auto-merge yet/);
 });
 
 test("evaluate: a PR that is already clean merges directly with the reviewed SHA", async () => {
@@ -636,6 +654,7 @@ test("evaluate: blockers repeated on a head whose fix session ended without comm
         assert.match(message, /raised again on `0123456`/, name);
         assert.match(message, /false positive/, name);
         assert.match(message, /AGENTS\.md:38 unchanged/, name);
+        assert.match(message, /dismiss the factory review, remove `agent:needs-human`, then re-run the Factory Review run.*gh run rerun <id>/, name);
     }
 });
 
@@ -737,17 +756,26 @@ test("pull request events: synchronize disables auto-merge; a finished build is 
     await run(syncNeedsHuman, handlePullRequestEvent, { action: "synchronize", pull_request: { number: 20 } });
     assert.deepEqual(syncNeedsHuman.pat, [["graphql", "disablePullRequestAutoMerge", { id: "PR_20" }]]);
 
-    const ready = reviewWorld({ pr: { draft: true }, labels: ["agent:active", "status:ready", "type:docs"] });
-    await run(ready, handlePullRequestEvent, { action: "edited", pull_request: { number: 20 } });
-    assert.deepEqual(ready.pat, [["graphql", "markPullRequestReadyForReview", { id: "PR_20" }]]);
+    // During a build, a draft without [WIP] is not finished by synchronize or edited events.
+    for (const action of ["synchronize", "edited"]) {
+        const draft = reviewWorld({ pr: { draft: true }, labels: ["agent:active", "status:ready", "type:docs"] });
+        await run(draft, handlePullRequestEvent, { action, pull_request: { number: 20 } });
+        assert.deepEqual([draft.writes, draft.pat], [[], []], action);
+        assert.ok(draft.labelsOf(10).includes("status:ready"), action);
+    }
+
+    // An explicit "Ready for review" moves the issue to review without another mutation.
+    const ready = reviewWorld({ labels: ["agent:active", "status:ready", "type:docs"] });
+    await run(ready, handlePullRequestEvent, { action: "ready_for_review", pull_request: { number: 20 } });
+    assert.deepEqual(ready.pat, []);
     assert.ok(ready.labelsOf(10).includes("status:review") && !ready.labelsOf(10).includes("status:ready"));
 
     const wip = reviewWorld({ pr: { draft: true, title: "[WIP] Docs fix" }, labels: ["agent:active", "status:ready"] });
     await run(wip, handlePullRequestEvent, { action: "edited", pull_request: { number: 20 } });
     assert.deepEqual([wip.writes, wip.pat], [[], []]);
 
-    const unbound = reviewWorld({ pr: { draft: true }, labels: ["agent:active", "status:ready"], issueComments: [] });
-    await run(unbound, handlePullRequestEvent, { action: "edited", pull_request: { number: 20 } });
+    const unbound = reviewWorld({ labels: ["agent:active", "status:ready"], issueComments: [] });
+    await run(unbound, handlePullRequestEvent, { action: "ready_for_review", pull_request: { number: 20 } });
     assert.deepEqual(unbound.pat, []);
     assert.ok(unbound.labelsOf(10).includes("agent:needs-human"));
 });
@@ -923,6 +951,11 @@ test("Copilot activity: matching by PR id or branch; working, done, and unknown"
     assert.equal(copilotActivity([copilotTask("completed"), copilotTask("failed")]).state, "done");
     assert.equal(copilotActivity([{ id: "t", state: "queued", sessions: [] }]).state, "working");
     assert.equal(copilotActivity([{ id: "t", state: "completed", sessions: [] }]).state, "unknown");
+    assert.equal(copilotActivity([{ id: "t", sessions: [{ state: "completed" }, { state: "waiting_for_user" }] }]).state, "unknown");
+    for (const ended of ["completed", "failed", "cancelled", "canceled", "timed_out"]) {
+        assert.equal(copilotActivity([{ id: "t", sessions: [{ state: ended, created_at: "2026-01-01T02:00:00Z" }] }], { since: "2026-01-01T01:00:00Z" }).state, "done", ended);
+    }
+    assert.equal(copilotActivity([copilotTask("completed", undefined, "t", "2026-01-01T00:40:00Z")], { since: "2026-01-01T01:00:00Z" }).state, "pending");
     assert.equal(stripWipTitle("[WIP] [wip]  Docs fix"), "Docs fix");
     assert.equal(stripWipTitle("Docs fix [WIP]"), "Docs fix [WIP]");
     assert.equal(isCopilotBotUser({ login: "Copilot", type: "Bot" }), true);
@@ -933,7 +966,42 @@ test("Copilot activity: matching by PR id or branch; working, done, and unknown"
 
 const copilotCommentPayload = (user = { login: "Copilot", type: "Bot" }, action = "created") => ({ action, issue: { number: 20, pull_request: {} }, comment: { body: "Done: updated docs; npm run check passed.", user } });
 const buildWorld = (overrides = {}) =>
-    reviewWorld({ pr: { draft: true, title: "[WIP] Docs fix", ...overrides.pr }, labels: overrides.labels ?? ["agent:active", "status:ready", "type:docs", "role:docs"], ...overrides, prComments: [] });
+    reviewWorld({ pr: { draft: true, title: "[WIP] Docs fix", ...overrides.pr }, labels: overrides.labels ?? ["agent:active", "status:ready", "type:docs", "role:docs"], ...overrides, prComments: overrides.prComments ?? [handoff("build")] });
+
+test("completion: only a session started after the latest build or fix hand-off finishes it", async () => {
+    for (const kind of ["build", "fix"]) {
+        // The earlier (spec or build) session ended before the hand-off: not finished.
+        const stale = buildWorld({ prComments: [handoff(kind)], tasks: [copilotTask("completed", undefined, "task-1", "2026-01-01T00:40:00Z")] });
+        await run(stale, handleCopilotComment, copilotCommentPayload());
+        assert.deepEqual([stale.writes, stale.pat], [[], []], kind);
+        assert.match(stale.logs.at(-1), /is pending/, kind);
+
+        // A session created after the hand-off has completed: finished.
+        const fresh = buildWorld({ prComments: [handoff(kind)], tasks: [copilotTask("completed")] });
+        await run(fresh, handleCopilotComment, copilotCommentPayload());
+        assert.deepEqual(fresh.pat, [["graphql", "markPullRequestReadyForReview", { id: "PR_20" }]], kind);
+        assert.ok(fresh.labelsOf(10).includes("status:review"), kind);
+    }
+
+    // The latest hand-off wins: a session after the build but before a later fix request does not count.
+    const refixed = buildWorld({ prComments: [handoff("build"), handoff("fix", "2026-01-01T03:00:00Z")], tasks: [copilotTask("completed")] });
+    await run(refixed, handleCopilotComment, copilotCommentPayload());
+    assert.deepEqual([refixed.writes, refixed.pat], [[], []]);
+
+    // Hand-off markers from anyone but the PAT user, or none at all, are ignored.
+    for (const prComments of [[], [handoff("build", undefined, "mallory")]]) {
+        const world = buildWorld({ prComments, tasks: [copilotTask("completed")] });
+        await run(world, handleCopilotComment, copilotCommentPayload());
+        assert.deepEqual([world.writes, world.pat, world.agentReads], [[], [], []]);
+        assert.match(world.logs.at(-1), /no build or fix hand-off/);
+    }
+
+    // An unrecognised session state is unknown.
+    const odd = buildWorld({ tasks: [{ ...copilotTask("completed"), sessions: [{ state: "waiting_for_user", created_at: "2026-01-01T02:00:00Z" }] }] });
+    await run(odd, handleCopilotComment, copilotCommentPayload());
+    assert.deepEqual([odd.writes, odd.pat], [[], []]);
+    assert.match(odd.logs.at(-1), /is unknown/);
+});
 
 test("completion: a Copilot reply after the session ended strips [WIP] and marks the build ready", async () => {
     const world = buildWorld({ tasks: [copilotTask("completed")] });

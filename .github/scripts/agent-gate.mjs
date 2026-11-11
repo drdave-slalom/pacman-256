@@ -536,6 +536,17 @@ export function fillLinkedIssue(body, issueNumber) {
 // ---------------------------------------------------------------------------
 
 const ACTIVE_SESSION_STATES = new Set(["in_progress", "queued"]);
+const ENDED_SESSION_STATES = new Set(["completed", "failed", "cancelled", "canceled", "timed_out"]);
+const HANDOFF_MARKER = /<!-- agent-gate:(?:build|fix) sha=/;
+
+/** `created_at` of the latest PAT-authored build or fix hand-off comment, or null. */
+export function latestHandoffAt(comments, patLogin) {
+    const times = (comments ?? [])
+        .filter((comment) => Boolean(patLogin) && comment?.user?.login === patLogin && HANDOFF_MARKER.test(String(comment.body ?? "")))
+        .map((comment) => String(comment.created_at ?? ""))
+        .sort();
+    return times.at(-1) || null;
+}
 
 /** A Copilot agent task belongs to a PR when it has the PR (by database id) or its head branch as an artifact. */
 export function taskMatchesPr(task, pr) {
@@ -548,27 +559,45 @@ export function taskMatchesPr(task, pr) {
 
 /**
  * Copilot activity across the PR's tasks (each with `sessions`): `working` when
- * any session (or a task without sessions) is in progress or queued, `done`
- * when every session has ended, otherwise `unknown`.
+ * any session (or a task without sessions) is in progress or queued; `unknown`
+ * for a task without sessions or a session in an unrecognised state; `done`
+ * when every session has ended and, with `since`, at least one session was
+ * created after it (the current hand-off); otherwise `pending`.
  */
-export function copilotActivity(tasks) {
+export function copilotActivity(tasks, { since = null } = {}) {
     if (!tasks || tasks.length === 0) {
         return { state: "unknown", reason: "no Copilot task is linked to this pull request" };
     }
-    let unknown = false;
+    let unknown = null;
+    let afterHandoff = false;
     for (const task of tasks) {
         const sessions = task?.sessions ?? [];
-        if (sessions.length > 0) {
-            if (sessions.some((session) => ACTIVE_SESSION_STATES.has(String(session?.state).toLowerCase()))) {
-                return { state: "working", reason: `task ${task.id} has a session in progress or queued` };
+        if (sessions.length === 0) {
+            if (ACTIVE_SESSION_STATES.has(String(task?.state).toLowerCase())) {
+                return { state: "working", reason: `task ${task.id} is ${task.state}` };
             }
-        } else if (ACTIVE_SESSION_STATES.has(String(task?.state).toLowerCase())) {
-            return { state: "working", reason: `task ${task.id} is ${task.state}` };
-        } else {
-            unknown = true;
+            unknown ??= `task ${task.id} reports no sessions`;
+            continue;
+        }
+        for (const session of sessions) {
+            const state = String(session?.state).toLowerCase();
+            if (ACTIVE_SESSION_STATES.has(state)) {
+                return { state: "working", reason: `task ${task.id} has a session ${state}` };
+            }
+            if (!ENDED_SESSION_STATES.has(state)) {
+                unknown ??= `task ${task.id} has a session in state "${session?.state}"`;
+            } else if (since && String(session?.created_at ?? "") > since) {
+                afterHandoff = true;
+            }
         }
     }
-    return unknown ? { state: "unknown", reason: "a linked Copilot task reports no sessions" } : { state: "done", reason: "no Copilot session is in progress or queued" };
+    if (unknown) {
+        return { state: "unknown", reason: unknown };
+    }
+    if (since && !afterHandoff) {
+        return { state: "pending", reason: `no Copilot session has started since the hand-off at ${since}` };
+    }
+    return { state: "done", reason: "every Copilot session has ended" };
 }
 
 // ---------------------------------------------------------------------------
@@ -594,7 +623,7 @@ export function specInstructions({ issueNumber, specPath }) {
 const NO_SUBAGENTS_RULE =
     "- Work in this session yourself. Do NOT use the task/subagent tool or start custom agents; their pinned models fail in the cloud.";
 
-export function buildInstructions({ specPath, steps, qaDepth }) {
+export function buildInstructions({ specPath, steps, qaDepth, sha }) {
     const stepLines = steps.map(
         ({ profile, task }, index) =>
             `${index + 1}. **${profile}**: ${task}\n   Act as this profile yourself: read \`.github/agents/${profile}.agent.md\` and \`.github/skills/${profile}/SKILL.md\` and follow them for this step.`,
@@ -612,6 +641,8 @@ export function buildInstructions({ specPath, steps, qaDepth }) {
         "- Run `npm run check` after each step; it must pass before you finish.",
         "- Leave the pull request as a draft; when your session ends the pipeline marks it ready for review.",
         FINAL_SUMMARY_RULE,
+        "",
+        gateMarker("build", sha),
     ].join("\n");
 }
 
@@ -763,7 +794,7 @@ function ops({ github, context }) {
  * Whether Copilot is still working on a PR, from the agent tasks API (PAT).
  * Any failure is `unknown`, logged, and never thrown.
  */
-async function copilotSessionStatus({ core, env }, api, pr) {
+async function copilotSessionStatus({ core, env }, api, pr, since = null) {
     try {
         const pat = createPatClient(env.COPILOT_ASSIGN_TOKEN);
         const list = await pat.request("GET", `/agents/repos/${api.owner}/${api.repo}/tasks`);
@@ -772,7 +803,7 @@ async function copilotSessionStatus({ core, env }, api, pr) {
         for (const task of matches) {
             tasks.push(await pat.request("GET", `/agents/repos/${api.owner}/${api.repo}/tasks/${encodeURIComponent(task.id)}`));
         }
-        const status = copilotActivity(tasks);
+        const status = copilotActivity(tasks, { since });
         core.info(`Copilot activity on PR #${pr.number}: ${status.state} (${status.reason}).`);
         return status;
     } catch (error) {
@@ -991,7 +1022,7 @@ export async function handleApproveSpec({ github, context, core, env = process.e
             body: `Spec approved by @${commenter} at \`${pr.head.sha.slice(0, 7)}\`; this issue is bound to PR #${pr.number}.\n\n${gateMarker("bound", pr.number)}`,
         });
         await pat.request("POST", `/repos/${api.owner}/${api.repo}/issues/${pr.number}/comments`, {
-            body: buildInstructions({ specPath, steps: delegation.steps, qaDepth: delegation.qaDepth }),
+            body: buildInstructions({ specPath, steps: delegation.steps, qaDepth: delegation.qaDepth, sha: pr.head.sha }),
         });
         for (const warning of delegation.warnings) {
             core.warning(warning);
@@ -1024,12 +1055,10 @@ export async function handlePullRequestEvent({ github, context, core, env = proc
         if (labels.has(LABEL.needsHuman) || !labels.has(LABEL.ready) || pr.state !== "open") {
             return core.info(`Issue #${issue.number} is not waiting for the build to finish; nothing to do.`);
         }
-        if (pr.draft) {
-            if (isWipTitle(pr.title)) {
-                return core.info(`PR #${pr.number} is still [WIP]; waiting.`);
-            }
-        } else if (payload.action !== "ready_for_review") {
-            return core.info(`PR #${pr.number} is not a draft but was not just marked ready; waiting.`);
+        // Only an explicit ready_for_review counts here; a draft is finished by detectCompletion
+        // (Copilot session state), never because its title lacks [WIP].
+        if (pr.draft || payload.action !== "ready_for_review") {
+            return core.info(`PR #${pr.number} was not just marked ready for review; waiting for the Copilot session to end.`);
         }
         const pat = createPatClient(env.COPILOT_ASSIGN_TOKEN);
         await markBuildReady({ api, pat, pr, issue, labels });
@@ -1066,26 +1095,46 @@ const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * at `status:ready`, mark the build ready. `unknown` and `working` do nothing.
  */
 async function detectCompletion({ github, context, core, env, sleep = defaultSleep, retries = 0 }, pullNumber) {
-    const resolved = await resolvePipelinePr({ github, context, core }, pullNumber);
-    if (!resolved) {
-        return;
+    for (let attempt = 0; ; attempt++) {
+        // Re-read the PR and labels on every attempt so writes never use state from before a sleep.
+        const resolved = await resolvePipelinePr({ github, context, core }, pullNumber);
+        if (!resolved) {
+            return;
+        }
+        const { api, pr, issue, labels } = resolved;
+        if (pr.state !== "open" || labels.has(LABEL.needsHuman)) {
+            return core.info(`PR #${pr.number} is closed or issue #${issue.number} has ${LABEL.needsHuman}; not checking completion.`);
+        }
+        const awaitingBuild = labels.has(LABEL.ready) && (pr.draft || isWipTitle(pr.title));
+        if (!isWipTitle(pr.title) && !awaitingBuild) {
+            return core.info(`PR #${pr.number} has no [WIP] title and is not waiting for a build; nothing to do.`);
+        }
+        let since = null;
+        if (awaitingBuild) {
+            // Only a session started after the latest build/fix hand-off can finish it.
+            try {
+                since = latestHandoffAt(await api.comments(pr.number), await createPatClient(env.COPILOT_ASSIGN_TOKEN).login());
+            } catch (error) {
+                core.warning(`Could not read the hand-off comments for PR #${pr.number}: ${error.message}`);
+                return;
+            }
+            if (!since) {
+                return core.info(`PR #${pr.number} has no build or fix hand-off comment; not marking it finished.`);
+            }
+        }
+        const session = await copilotSessionStatus({ core, env }, api, pr, since);
+        if (session.state === "working" && attempt < retries) {
+            await sleep(COMPLETION_RETRY_MS);
+            continue;
+        }
+        if (session.state !== "done") {
+            return core.info(`Copilot session on PR #${pr.number} is ${session.state}; not marking it finished.`);
+        }
+        return await finishCompletion({ api, core, env, pr, issue, labels, awaitingBuild });
     }
-    const { api, pr, issue, labels } = resolved;
-    if (pr.state !== "open" || labels.has(LABEL.needsHuman)) {
-        return core.info(`PR #${pr.number} is closed or issue #${issue.number} has ${LABEL.needsHuman}; not checking completion.`);
-    }
-    const awaitingBuild = labels.has(LABEL.ready) && (pr.draft || isWipTitle(pr.title));
-    if (!isWipTitle(pr.title) && !awaitingBuild) {
-        return core.info(`PR #${pr.number} has no [WIP] title and is not waiting for a build; nothing to do.`);
-    }
-    let session = await copilotSessionStatus({ core, env }, api, pr);
-    for (let attempt = 0; session.state === "working" && attempt < retries; attempt++) {
-        await sleep(COMPLETION_RETRY_MS);
-        session = await copilotSessionStatus({ core, env }, api, pr);
-    }
-    if (session.state !== "done") {
-        return core.info(`Copilot session on PR #${pr.number} is ${session.state}; not marking it finished.`);
-    }
+}
+
+async function finishCompletion({ api, core, env, pr, issue, labels, awaitingBuild }) {
     try {
         if (isWipTitle(pr.title)) {
             await api.setTitle(pr.number, stripWipTitle(pr.title));
@@ -1283,7 +1332,7 @@ async function evaluatePullRequest({ github, context, core, env }, pullNumber, e
                     commentOn: pr.number,
                     message: [
                         `blockers were raised again on \`${sha.slice(0, 7)}\`, the head a fix was already requested for, and Copilot's session ended without new commits (session state: ${session.state}).`,
-                        "This may be a false positive (for example a review finding that the head commit already resolves). Check each blocker against the head; then dismiss the review or push a fix, remove the label, and re-run `agent-gate.yml` for this PR.",
+                        "This may be a false positive (for example a review finding that the head commit already resolves). Check each blocker against the head. If it is false: dismiss the factory review, remove `agent:needs-human`, then re-run the Factory Review run for this head (`gh run rerun <id>`), which re-triggers the gate. Dismissing the review alone does not restart the pipeline. If it is real, push a fix or comment `@copilot` with the change.",
                         "",
                         ...blockers.flatMap(({ source, details }) => [`**${source}**`, "", details, ""]),
                     ].join("\n"),
@@ -1336,6 +1385,9 @@ async function evaluatePullRequest({ github, context, core, env }, pullNumber, e
         if (decision.action === "auto-merge") {
             if (pr.auto_merge) {
                 return core.info(`Auto-merge is already enabled on PR #${pr.number}.`);
+            }
+            if ((await copilotSessionStatus({ core, env }, api, pr)).state === "working") {
+                return core.info(`Copilot is still working on PR #${pr.number}; not enabling auto-merge yet.`);
             }
             await enableAutoMerge(pat, api, pr);
             await api.comment(pr.number, `All gates green for \`${sha.slice(0, 7)}\` (required checks, Copilot code review, factory review, factory QA). Low-risk type: squash auto-merge enabled for this head only (D057).`);

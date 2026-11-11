@@ -39,7 +39,7 @@ jobs:
       issues: write
       pull-requests: write
     concurrency:
-      group: agent-gate-approve-${{ github.event.issue.number }}
+      group: agent-gate-pr-${{ github.event.issue.number }}
       cancel-in-progress: false
     steps:
       - name: Check out pipeline scripts from the default branch
@@ -75,7 +75,7 @@ jobs:
       issues: write
       pull-requests: write
     concurrency:
-      group: agent-gate-copilot-${{ github.event.issue.number }}
+      group: agent-gate-pr-${{ github.event.issue.number }}
       cancel-in-progress: false
     steps:
       - name: Check out pipeline scripts from the default branch
