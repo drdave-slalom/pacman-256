@@ -140,6 +140,21 @@ export function issueStatusLabel(issue: IssueCard): string {
   return issue.labels.status ?? issue.state;
 }
 
+/**
+ * Closed issues not attached to any unit card (`state === "closed"` and no
+ * `unit.issue.number` match across `snapshot.units`), sorted ascending by
+ * number. Pure selection shared by the "show closed issues" toggle on the
+ * TUI and web board surfaces.
+ */
+export function closedUnmatchedIssues(snapshot: FactorySnapshot): IssueCard[] {
+  const linkedNumbers = new Set(
+    snapshot.units.map((u) => u.issue?.number).filter((n): n is number => n !== undefined),
+  );
+  return snapshot.issues
+    .filter((i) => i.state === "closed" && !linkedNumbers.has(i.number))
+    .sort((a, b) => a.number - b.number);
+}
+
 export interface IssueChip {
   text: string;
   cls: string;

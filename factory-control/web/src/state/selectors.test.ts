@@ -7,6 +7,7 @@ import {
   LIFECYCLE_META,
   attentionBadges,
   buildBoard,
+  closedUnmatchedIssues,
   formatAge,
   formatDiff,
   formatElapsed,
@@ -20,7 +21,7 @@ import {
   summarize,
   totalOrphaned,
 } from "./selectors.ts";
-import { fixtureSnapshot } from "./fixtures.ts";
+import { fixtureSnapshot, fixtureSnapshotWithClosedIssues } from "./fixtures.ts";
 
 test("stageToColumn maps every shared stage to its column key", () => {
   assert.equal(stageToColumn("spec"), "spec");
@@ -126,6 +127,24 @@ test("issueLabelChips covers structured labels and raw extras", () => {
   assert.equal(blocked?.text, "blocked");
   // structured raw entries are not duplicated
   assert.equal(texts.filter((t) => t === "type: bug").length, 1);
+});
+
+test("closedUnmatchedIssues selects closed issues not attached to any unit, sorted ascending", () => {
+  const snapshot = fixtureSnapshotWithClosedIssues();
+  const closed = closedUnmatchedIssues(snapshot);
+  assert.deepEqual(
+    closed.map((i) => i.number),
+    [53, 60],
+  );
+  assert.deepEqual(
+    closed.map((i) => i.title),
+    ["Closed issue without a unit", "Another closed orphan issue"],
+  );
+  // A closed issue linked to a unit (#17) is excluded; #16 is open/linked.
+});
+
+test("closedUnmatchedIssues returns empty when there are no closed-unmatched issues", () => {
+  assert.deepEqual(closedUnmatchedIssues(fixtureSnapshot()), []);
 });
 
 test("summarize counts units, agents, and attention", () => {

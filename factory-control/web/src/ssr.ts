@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import type { FactorySnapshot, Unit } from "@maze/factory-control-shared";
-import { Board } from "./components/Board";
+import { Board, BoardContent } from "./components/Board";
 import { UnitCard } from "./components/UnitCard";
 import { AgentsPanel } from "./components/AgentsPanel";
 import { UnitDetail } from "./components/UnitDetail";
@@ -24,6 +24,17 @@ export function renderPage(snapshot: FactorySnapshot, path: string): string {
     element = createElement(Board, { snapshot });
   }
   return renderToString(element);
+}
+
+/** Render the board with the show-closed toggle in a given state (test helper). */
+export function renderBoardContent(snapshot: FactorySnapshot, showClosed: boolean): string {
+  return renderToString(
+    createElement(BoardContent, {
+      snapshot,
+      showClosed,
+      onToggleShowClosed: () => {},
+    }),
+  );
 }
 
 /** Render a single unit card (used by the integration tests). */

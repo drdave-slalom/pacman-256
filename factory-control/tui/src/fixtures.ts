@@ -103,6 +103,66 @@ export function fixtureSnapshotWithIssues(overrides: Partial<FactorySnapshot> = 
   };
 }
 
+/**
+ * Snapshot variant with closed issues: the hybrid issue (#7) is closed and
+ * linked (must be excluded from closed-unmatched), and two closed issues
+ * (#53, #60) are unattached. Used by the show-closed toggle tests.
+ */
+export function fixtureSnapshotWithClosedIssues(overrides: Partial<FactorySnapshot> = {}): FactorySnapshot {
+  const base = fixtureSnapshotWithIssues();
+  const units = base.units.map((u) =>
+    u.id === "T3-review" && u.issue !== undefined
+      ? { ...u, issue: { ...u.issue, state: "closed" as const } }
+      : u,
+  );
+  const closedUnmatched: IssueCard[] = [
+    {
+      number: 53,
+      title: "Closed issue without a unit",
+      state: "closed",
+      url: "https://github.com/example/repo/issues/53",
+      bodyExcerpt: "Resolved in #41.",
+      labels: {
+        type: "bug",
+        role: [],
+        status: "done",
+        blocked: false,
+        followUp: false,
+        playtest: false,
+        raw: ["type:bug", "status:done"],
+      },
+      assignees: [],
+      milestone: "MVP",
+      createdAt: "2026-01-01T09:00:00.000Z",
+      updatedAt: "2026-01-20T10:00:00.000Z",
+    },
+    {
+      number: 60,
+      title: "Another closed orphan issue",
+      state: "closed",
+      url: "https://github.com/example/repo/issues/60",
+      labels: {
+        type: "feature",
+        role: [],
+        blocked: false,
+        followUp: true,
+        playtest: false,
+        raw: ["type:feature", "follow-up"],
+      },
+      assignees: [],
+    },
+  ];
+  const issues = base.issues
+    .map((iss) => (iss.number === 7 ? { ...iss, state: "closed" as const } : iss))
+    .concat(closedUnmatched);
+  return {
+    ...base,
+    units,
+    issues,
+    ...overrides,
+  };
+}
+
 export function fixtureSnapshot(overrides: Partial<FactorySnapshot> = {}): FactorySnapshot {
   return {
     generatedAt: new Date(Date.now() - 90_000).toISOString(),

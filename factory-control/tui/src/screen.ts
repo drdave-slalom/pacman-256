@@ -65,7 +65,14 @@ import {
   type OfflineBannerState,
   type ViewKind,
 } from "./render.ts";
-import { buildBoard, flattenUnits, formatAge, summarizeAttention, type BoardModel } from "./selectors.ts";
+import {
+  buildBoard,
+  closedUnmatchedIssues,
+  flattenUnits,
+  formatAge,
+  summarizeAttention,
+  type BoardModel,
+} from "./selectors.ts";
 import { candidateTriggers, type TriggerCandidate } from "./triggers.ts";
 
 const POLL_MS = 5000;
@@ -173,6 +180,7 @@ export class FactoryScreen implements Component {
   private queueEntries: DispatchEntryLike[] = [];
   private selectedQueue = 0;
   private activeQueueEntry: DispatchEntryLike | undefined;
+  private showClosed = false;
   private scroll = new ScrollView(new Text(""));
   private lastHeadLen = 0;
   private lastRegion = 0;
@@ -266,7 +274,14 @@ export class FactoryScreen implements Component {
       void this.openQueue();
     },
     copyLeadPrompt: () => this.copyLeadPrompt(),
+    toggleClosedIssues: () => this.toggleClosedIssues(),
   };
+
+  /** Toggle the "show closed issues" section on the board (keybinding `i`). */
+  private toggleClosedIssues(): void {
+    this.showClosed = !this.showClosed;
+    this.bump();
+  }
 
   private moveSelection(delta: number): void {
     switch (this.view) {
@@ -819,7 +834,9 @@ export class FactoryScreen implements Component {
       case "board": {
         const model = this.model;
         if (model === null) return ["  no snapshot yet"];
-        const body = renderBoardBody(model, this.selectedUnit, style, width);
+        const closed =
+          this.showClosed && this.snapshot !== null ? closedUnmatchedIssues(this.snapshot) : undefined;
+        const body = renderBoardBody(model, this.selectedUnit, style, width, closed);
         this.rebuildRowMap(body);
         return body;
       }

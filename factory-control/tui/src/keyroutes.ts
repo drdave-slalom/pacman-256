@@ -23,6 +23,7 @@ export interface FactoryScreenOps {
   startServer(): void;
   openQueue(): void;
   copyLeadPrompt(): void;
+  toggleClosedIssues(): void;
 }
 
 export function handleKey(data: string, kb: KeyMatcher, ops: FactoryScreenOps): void {
@@ -72,6 +73,10 @@ export function handleKey(data: string, kb: KeyMatcher, ops: FactoryScreenOps): 
   }
   if (data === "c" || data === "C") {
     ops.copyLeadPrompt();
+    return;
+  }
+  if (data === "i" || data === "I") {
+    ops.toggleClosedIssues();
     return;
   }
 }
