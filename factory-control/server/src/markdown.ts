@@ -11,7 +11,26 @@ export interface SpecUnit {
   title?: string;
   goal?: string;
   lane?: string;
+  /** GitHub issue numbers referenced in this spec (`#N` / `Closes #N`). */
+  issueRefs?: number[];
   parseError?: string;
+}
+
+/**
+ * Collect GitHub issue numbers referenced as `#N` (or `Closes #N`) in a
+ * markdown body. Markdown ATX headings (`# Title`) and word-embedded `#`
+ * (e.g. `result:fc-issue-sync-shared#1`) are excluded, so only standalone
+ * `#<digits>` tokens are captured. Returns unique numbers in ascending order.
+ */
+export function referencedIssueNumbers(content: string): number[] {
+  const numbers: number[] = [];
+  const re = /(?:^|[^\w#])#(\d+)\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    const n = Number.parseInt(m[1]!, 10);
+    if (!numbers.includes(n)) numbers.push(n);
+  }
+  return numbers.sort((a, b) => a - b);
 }
 
 /**
@@ -61,6 +80,10 @@ export function readSpecUnit(repoRoot: string, relPath: string): SpecUnit {
     unit.parseError = error instanceof Error ? error.message : String(error);
     return unit;
   }
+
+  // Referenced issue numbers are collected from the whole file (including any
+  // frontmatter tracker fields); headings are excluded by the matcher.
+  unit.issueRefs = referencedIssueNumbers(content);
 
   // Strip optional frontmatter so it cannot masquerade as an H1.
   if (content.startsWith("---")) {

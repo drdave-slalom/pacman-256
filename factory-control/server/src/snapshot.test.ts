@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { buildSnapshot } from "./snapshot.ts";
+import type { RunResult } from "./git.ts";
 import type { FactorySnapshot, Unit } from "./types.ts";
 
 function git(cwd: string, ...args: string[]): string {
@@ -202,6 +203,156 @@ test("integration: remote origin/factory/* branches join units, dedupe, and orph
 
   // (c) remote-only branch with no unit lands in the orphan bucket.
   assert.ok(snapshot.orphaned.branches.includes("origin/factory/orphan-only"));
+});
+
+function okResult(stdout: string): RunResult {
+  return { ok: true, stdout, stderr: "", status: 0 };
+}
+
+type FnRunner = (command: string, args: string[]) => Promise<RunResult>;
+
+interface FakeGh {
+  prList?: RunResult;
+  prChecks?: RunResult;
+  issueList?: RunResult;
+}
+
+/** A fake gh runner keyed on subcommand: pr list / pr checks / issue list. */
+function ghRunner(fake: FakeGh): FnRunner {
+  return async (_command: string, args: string[]) => {
+    if (args.includes("issue") && args.includes("list")) {
+      return fake.issueList ?? okResult("[]");
+    }
+    if (args.includes("checks")) {
+      return fake.prChecks ?? okResult("[]");
+    }
+    if (args.includes("list")) {
+      return fake.prList ?? okResult("[]");
+    }
+    return okResult("[]");
+  };
+}
+
+function issueRecord(number: number, title: string, state: string, labels: string[]): unknown {
+  return {
+    number,
+    title,
+    state,
+    labels: labels.map((name) => ({ name })),
+    assignees: [],
+    milestone: null,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+    url: `https://github.com/o/r/issues/${number}`,
+    body: "",
+  };
+}
+
+function withHerdr<T>(root: string, fn: () => Promise<T>): Promise<T> {
+  const previous = process.env.FACTORY_HERDR_ROOT;
+  process.env.FACTORY_HERDR_ROOT = root;
+  return fn().finally(() => {
+    if (previous === undefined) delete process.env.FACTORY_HERDR_ROOT;
+    else process.env.FACTORY_HERDR_ROOT = previous;
+  });
+}
+
+test("integration: issue reader seeds standalone cards and links spec refs as hybrid", async (t) => {
+  const harness = makeFixtureRepo();
+  t.after(harness.cleanup);
+  const { repo } = harness;
+
+  // T3 spec references issue #20 via Closes #20.
+  writeFileSync(join(repo, "SPEC", "T3-foo.md"), "# T3 spec: private rooms\n\nCloses #20.\n\n## Goal\n\nT3 goal.\n");
+
+  const issues = JSON.stringify([
+    issueRecord(20, "Issue twenty", "OPEN", ["status:spec"]),
+    issueRecord(10, "Issue ten", "OPEN", []),
+    issueRecord(30, "Closed thirty", "CLOSED", []),
+  ]);
+
+  const snapshot = await withHerdr(join(harness.parent, "nope"), () =>
+    buildSnapshot({ root: repo, noGh: false, runner: ghRunner({ issueList: okResult(issues) }) }),
+  );
+
+  // Raw issues hold open + closed.
+  assert.equal(snapshot.issues.length, 3);
+
+  const t3 = snapshot.units.find((unit) => unit.id === "t3foo");
+  assert.ok(t3, "T3 unit present");
+  assert.equal(t3.kind, "hybrid");
+  assert.equal(t3.issue?.number, 20);
+  // Hybrid keeps the existing spec-unit inference (rule 9: spec + needsDispatch).
+  assert.equal(t3.stage, "spec");
+  assert.equal(t3.flags.needsDispatch, true);
+  // No duplicate standalone card for #20.
+  assert.equal(snapshot.units.filter((unit) => unit.issue?.number === 20).length, 1);
+
+  // Unmatched open issue → standalone card.
+  const issue10 = snapshot.units.find((unit) => unit.id === "issue10");
+  assert.ok(issue10, "issue10 card present");
+  assert.equal(issue10.kind, "issue");
+  assert.equal(issue10.title, "Issue ten");
+  assert.equal(issue10.stage, "spec");
+  assert.equal(issue10.flags.needsDispatch, true);
+  assert.ok(issue10.attention.includes("needs-dispatch"));
+
+  // Closed issue with no link appears only in `issues`, not as a unit.
+  assert.equal(snapshot.units.some((unit) => unit.issue?.number === 30), false);
+});
+
+test("integration: PR body references link an issue to the matched unit (hybrid)", async (t) => {
+  const harness = makeFixtureRepo();
+  t.after(harness.cleanup);
+  const { repo } = harness;
+
+  const prs = JSON.stringify([
+    { number: 61, title: "T5 PR", state: "OPEN", headRefName: "factory/t5", url: "https://github.com/o/r/pull/61", body: "Closes #40." },
+  ]);
+  const checks = okResult(JSON.stringify([{ state: "PENDING", bucket: "pending" }]));
+  const issues = JSON.stringify([issueRecord(40, "Issue forty", "OPEN", [])]);
+
+  const snapshot = await withHerdr(join(harness.parent, "nope"), () =>
+    buildSnapshot({
+      root: repo,
+      noGh: false,
+      runner: ghRunner({ prList: okResult(prs), prChecks: checks, issueList: okResult(issues) }),
+    }),
+  );
+
+  const t5 = snapshot.units.find((unit) => unit.id === "t5bar");
+  assert.ok(t5, "T5 unit present");
+  assert.equal(t5.kind, "hybrid");
+  assert.equal(t5.issue?.number, 40);
+  assert.ok(t5.pr, "PR joined via bestMatch");
+  assert.equal(t5.pr?.number, 61);
+  // Open PR (pending) → integrate (existing PR rule).
+  assert.equal(t5.stage, "integrate");
+  assert.equal(snapshot.units.filter((unit) => unit.issue?.number === 40).length, 1);
+});
+
+test("integration: issue cards join matching factory branches and PRs", async (t) => {
+  const harness = makeFixtureRepo();
+  t.after(harness.cleanup);
+  const { repo } = harness;
+
+  // factory/issue10 branch matches the standalone issue #10 card.
+  git(repo, "checkout", "-q", "-b", "factory/issue10");
+  writeFileSync(join(repo, "feature.txt"), "issue10 change\n");
+  git(repo, "add", ".");
+  git(repo, "commit", "-q", "-m", "issue10 work");
+  git(repo, "checkout", "-q", "main");
+
+  const issues = JSON.stringify([issueRecord(10, "Issue ten", "OPEN", ["status:in-progress"])]);
+  const snapshot = await withHerdr(join(harness.parent, "nope"), () =>
+    buildSnapshot({ root: repo, noGh: false, runner: ghRunner({ issueList: okResult(issues) }) }),
+  );
+
+  const issue10 = snapshot.units.find((unit) => unit.id === "issue10");
+  assert.ok(issue10, "issue10 card present");
+  assert.equal(issue10.branch, "factory/issue10");
+  // status:in-progress with a branch but no PR → execute.
+  assert.equal(issue10.stage, "execute");
 });
 
 test("integration: current-branch facts reflect the repo", async (t) => {

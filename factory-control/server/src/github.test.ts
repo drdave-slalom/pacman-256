@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { checkStateFromResult, readGitHub, summarizeChecks, type GhCheck } from "./github.ts";
+import {
+  checkStateFromResult,
+  issueBodyExcerpt,
+  parseIssueCard,
+  parseIssueLabels,
+  readGitHub,
+  readGitHubIssues,
+  summarizeChecks,
+  type GhCheck,
+} from "./github.ts";
 import { run } from "./git.ts";
 import type { RunResult } from "./git.ts";
 
@@ -123,4 +132,160 @@ test("readGitHub: noGh → unavailable without invoking gh", async () => {
   const read = await readGitHub({ noGh: true });
   assert.equal(read.unavailable, true);
   assert.deepEqual(read.prs, []);
+});
+
+test("readGitHub: collects referenced issue numbers from PR bodies", async () => {
+  const list = okResult(JSON.stringify([
+    { number: 60, title: "PR", state: "OPEN", headRefName: "factory/t1", url: "u", body: "Part of #59, Closes #12" },
+    { number: 61, title: "No refs", state: "OPEN", headRefName: "factory/t2", url: "u", body: "nothing here" },
+  ]));
+  const checks = okResult(JSON.stringify([{ state: "SUCCESS", bucket: "pass" }]));
+  const read = await readGitHub({ noGh: false }, runnerFor(list, checks));
+  assert.deepEqual(read.prIssueRefs[60], [12, 59]);
+  assert.equal(read.prIssueRefs[61], undefined);
+});
+
+test("parseIssueLabels: maps type/role/lane/status and boolean labels", () => {
+  const labels = parseIssueLabels([
+    { name: "type:feature" },
+    { name: "role:builder" },
+    { name: "role:docs" },
+    { name: "lane:A" },
+    { name: "status:ready" },
+    { name: "blocked" },
+    { name: "follow-up" },
+    { name: "playtest" },
+    { name: "weird" },
+  ]);
+  assert.equal(labels.type, "feature");
+  assert.deepEqual(labels.role, ["builder", "docs"]);
+  assert.equal(labels.lane, "A");
+  assert.equal(labels.status, "ready");
+  assert.equal(labels.blocked, true);
+  assert.equal(labels.followUp, true);
+  assert.equal(labels.playtest, true);
+  assert.deepEqual(labels.raw, ["type:feature", "role:builder", "role:docs", "lane:A", "status:ready", "blocked", "follow-up", "playtest", "weird"]);
+});
+
+test("parseIssueLabels: tolerates missing/garbage label arrays", () => {
+  const labels = parseIssueLabels(undefined);
+  assert.equal(labels.type, undefined);
+  assert.deepEqual(labels.role, []);
+  assert.equal(labels.lane, undefined);
+  assert.equal(labels.status, undefined);
+  assert.equal(labels.blocked, false);
+  assert.deepEqual(labels.raw, []);
+});
+
+test("issueBodyExcerpt: trims and collapses whitespace to ~200 chars", () => {
+  const excerpt = issueBodyExcerpt("   Long body   with\nnewlines and extra spaces.  ");
+  assert.equal(excerpt, "Long body with newlines and extra spaces.");
+  const long = issueBodyExcerpt("x".repeat(500));
+  assert.equal(long.length, 200);
+});
+
+function issueJson(): string {
+  return JSON.stringify([
+    {
+      number: 59,
+      title: "Factory-control: bidirectional GitHub issue sync",
+      state: "OPEN",
+      labels: [
+        { name: "type:feature" },
+        { name: "role:builder" },
+        { name: "status:spec" },
+        { name: "blocked" },
+      ],
+      assignees: [{ login: "alice" }, { login: "bob" }],
+      milestone: { title: "M0" },
+      createdAt: "2026-11-11T16:06:33Z",
+      updatedAt: "2026-11-11T16:11:45Z",
+      url: "https://github.com/o/r/issues/59",
+      body: "  Long body   with spaces.  ",
+    },
+    {
+      number: 12,
+      title: "",
+      state: "CLOSED",
+      labels: [],
+      assignees: [],
+      milestone: null,
+      createdAt: "2026-11-11T15:00:00Z",
+      updatedAt: "2026-11-11T15:00:00Z",
+      url: "https://github.com/o/r/issues/12",
+      body: "",
+    },
+  ]);
+}
+
+function issuesRunner(issueList: RunResult): Runner {
+  return async (_command: string, args: string[]) => {
+    if (args.includes("issue") && args.includes("list")) return issueList;
+    return okResult("[]");
+  };
+}
+
+test("readGitHubIssues: parses issue cards with field/label mapping", async () => {
+  const read = await readGitHubIssues({ noGh: false }, issuesRunner(okResult(issueJson())));
+  assert.equal(read.unavailable, false);
+  assert.equal(read.issues.length, 2);
+  const first = read.issues[0];
+  assert.ok(first);
+  assert.equal(first.number, 59);
+  assert.equal(first.title, "Factory-control: bidirectional GitHub issue sync");
+  assert.equal(first.state, "open"); // normalized from “OPEN”
+  assert.equal(first.labels.type, "feature");
+  assert.deepEqual(first.labels.role, ["builder"]);
+  assert.equal(first.labels.status, "spec");
+  assert.equal(first.labels.blocked, true);
+  assert.deepEqual(first.assignees, ["alice", "bob"]);
+  assert.equal(first.milestone, "M0");
+  assert.equal(first.createdAt, "2026-11-11T16:06:33Z");
+  assert.equal(first.updatedAt, "2026-11-11T16:11:45Z");
+  assert.equal(first.url, "https://github.com/o/r/issues/59");
+  assert.equal(first.bodyExcerpt, "Long body with spaces.");
+  // Malformed record (missing title) → retained with state unknown + error entry.
+  const second = read.issues[1];
+  assert.ok(second);
+  assert.equal(second.number, 12);
+  assert.equal(second.state, "unknown");
+  assert.ok(read.errors.some((e) => e.includes("record #12 parse failed")));
+});
+
+test("readGitHubIssues: non-object record retained with state unknown + error entry", async () => {
+  const payload = JSON.stringify([
+    { number: 1, title: "ok", state: "open", labels: [], assignees: [], milestone: null, url: "u", body: "" },
+    42,
+  ]);
+  const read = await readGitHubIssues({ noGh: false }, issuesRunner(okResult(payload)));
+  assert.equal(read.issues.length, 2);
+  assert.equal(read.issues[0]?.state, "open");
+  assert.equal(read.issues[1]?.state, "unknown");
+  assert.ok(read.errors.some((e) => e.includes("record is not an object")));
+});
+
+test("readGitHubIssues: gh failure → unavailable + errors entry", async () => {
+  const read = await readGitHubIssues({ noGh: false }, issuesRunner(failResult("gh: not logged in\n")));
+  assert.equal(read.unavailable, true);
+  assert.deepEqual(read.issues, []);
+  assert.ok(read.errors.some((e) => e.includes("gh unavailable")));
+});
+
+test("readGitHubIssues: invalid JSON → not unavailable, errors entry", async () => {
+  const read = await readGitHubIssues({ noGh: false }, issuesRunner(okResult("not json")));
+  assert.equal(read.unavailable, false);
+  assert.deepEqual(read.issues, []);
+  assert.ok(read.errors.some((e) => e.includes("invalid JSON")));
+});
+
+test("readGitHubIssues: noGh → unavailable without invoking gh", async () => {
+  const read = await readGitHubIssues({ noGh: true });
+  assert.equal(read.unavailable, true);
+  assert.deepEqual(read.issues, []);
+});
+
+test("parseIssueCard: malformed required fields force state unknown", () => {
+  const parsed = parseIssueCard({ number: "nope", title: "", state: "open", labels: [], assignees: [], milestone: null, url: "u", body: "" });
+  assert.equal(parsed.card.state, "unknown");
+  assert.ok(parsed.error);
 });

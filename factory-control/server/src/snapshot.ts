@@ -1,9 +1,9 @@
 import { resolve } from "node:path";
 import { bestMatch, canonicalId, tokensOf } from "./canonical.ts";
 import { diffTotals, isDirty, listFactoryBranches, parseWorktrees, repoFacts, run } from "./git.ts";
-import { readGitHub } from "./github.ts";
+import { readGitHub, readGitHubIssues } from "./github.ts";
 import { readHerdr } from "./herdr.ts";
-import { inferUnit, isImplementationDefinition, type Evidence } from "./infer.ts";
+import { inferIssueUnit, inferUnit, isImplementationDefinition, type Evidence, type IssueEvidence } from "./infer.ts";
 import { findSpecFiles, readSpecUnit } from "./markdown.ts";
 import type {
   AgentRecord,
@@ -11,6 +11,7 @@ import type {
   DiffTotals,
   FactorySnapshot,
   HandoffRef,
+  IssueCard,
   PullRequest,
   Unit,
   WorktreeFacts,
@@ -19,6 +20,8 @@ import type {
 export interface SnapshotOptions {
   root: string;
   noGh: boolean;
+  /** Runner override (tests inject a fake gh); defaults to the real runner. */
+  runner?: typeof run;
 }
 
 const ACTING_STATES = new Set(["working", "blocked", "settling", "starting"]);
@@ -160,6 +163,45 @@ function decideUnit(unit: Unit): void {
   }
 }
 
+function makeIssueUnit(issue: IssueCard): Unit {
+  return {
+    id: canonicalId("issue" + String(issue.number)),
+    kind: "issue",
+    title: issue.title,
+    issue,
+    stage: "unknown",
+    flags: {
+      reviewPending: false,
+      qaPending: false,
+      ciRed: false,
+      readyToMerge: false,
+      readyForCleanup: false,
+      needsDispatch: false,
+      blockedAgent: false,
+    },
+    agents: [],
+    handoffs: [],
+    attention: [],
+  };
+}
+
+function decideIssueUnit(unit: Unit): void {
+  if (unit.issue === undefined) return;
+  const evidence: IssueEvidence = {
+    hasBranch: unit.branch !== undefined,
+    hasWorktree: unit.worktree !== undefined,
+    liveAgentActing: unit.agents.some(isActing),
+    blockedAgent: unit.agents.some((agent) => agent.state === "blocked"),
+  };
+  const prState = prStateOf(unit);
+  if (prState !== undefined) evidence.prState = prState;
+  if (unit.pr?.checks !== undefined) evidence.checks = unit.pr.checks;
+  const inferred = inferIssueUnit(unit.issue, evidence);
+  unit.stage = inferred.stage;
+  unit.flags = inferred.flags;
+  unit.attention = inferred.attention;
+}
+
 async function collectDifferences(repoRoot: string, branches: BranchFacts[]): Promise<Map<string, DiffTotals>> {
   const map = new Map<string, DiffTotals>();
   for (const branch of branches) {
@@ -184,8 +226,14 @@ export async function buildSnapshot(opts: SnapshotOptions): Promise<FactorySnaps
   const worktrees: WorktreeFacts[] = gitWorktreeResult.ok ? parseWorktrees(gitWorktreeResult.stdout) : [];
   if (!gitWorktreeResult.ok) errors.push("gitUnavailable: worktree list failed");
 
-  // Specs → units.
-  const units: Unit[] = findSpecFiles(repoRoot).map((relPath) => {
+  // GitHub (via gh CLI): PRs + issues are read once, early, so issue cards
+  // can participate in branch/PR matching like spec units.
+  const github = await readGitHub({ noGh: opts.noGh }, opts.runner);
+  const githubIssues = await readGitHubIssues({ noGh: opts.noGh }, opts.runner);
+  errors.push(...github.errors, ...githubIssues.errors);
+
+  // Specs → units (spec source refs are collected for issue linking).
+  const specUnits = findSpecFiles(repoRoot).map((relPath) => {
     const spec = readSpecUnit(repoRoot, relPath);
     const unit: Unit = {
       id: spec.id,
@@ -212,8 +260,41 @@ export async function buildSnapshot(opts: SnapshotOptions): Promise<FactorySnaps
       unit.parseError = spec.parseError;
       errors.push(`spec ${spec.path}: ${spec.parseError}`);
     }
-    return unit;
-  }).sort((a, b) => a.id.localeCompare(b.id));
+    return { unit, refs: spec.issueRefs ?? [] };
+  });
+  const units: Unit[] = specUnits.map((s) => s.unit);
+
+  // Issue ↔ unit linking: spec-file references first, then PR-body references
+  // (PRs join units via the existing bestMatch machinery). First-wins keeps
+  // the mapping deterministic.
+  const linkByIssue = new Map<number, Unit>();
+  for (const { unit, refs } of specUnits) {
+    for (const ref of refs) {
+      if (!linkByIssue.has(ref)) linkByIssue.set(ref, unit);
+    }
+  }
+  for (const pr of github.prs) {
+    const refs = github.prIssueRefs[pr.number];
+    if (refs === undefined || refs.length === 0) continue;
+    const match = bestMatch(canonicalId(pr.headRefName), tokensOf(pr.headRefName), units, unitCanon, unitTokens);
+    if (match === undefined) continue;
+    for (const ref of refs) {
+      if (!linkByIssue.has(ref)) linkByIssue.set(ref, match.value);
+    }
+  }
+
+  // Attach referenced issues to their linked unit (hybrid — closes issues are
+  // attached too, for history); unmatched OPEN issues become standalone cards.
+  for (const issue of githubIssues.issues) {
+    const linked = linkByIssue.get(issue.number);
+    if (linked !== undefined) {
+      linked.kind = "hybrid";
+      linked.issue = issue;
+    } else if (issue.state === "open") {
+      units.push(makeIssueUnit(issue));
+    }
+  }
+  units.sort((a, b) => a.id.localeCompare(b.id));
 
   attachBranches(units, branches, diffByBranch, orphaned);
   await attachWorktrees(units, worktrees, diffByBranch, orphaned, repoRoot);
@@ -224,19 +305,18 @@ export async function buildSnapshot(opts: SnapshotOptions): Promise<FactorySnaps
   attachAgents(units, herdr.agents);
   attachHandoffs(units, herdr.handoffs, orphaned);
 
-  // GitHub (via gh CLI).
-  const github = await readGitHub({ noGh: opts.noGh });
-  errors.push(...github.errors);
   attachPullRequests(units, github.prs, orphaned);
 
-  for (const unit of units) decideUnit(unit);
+  for (const unit of units) {
+    if (unit.kind === "issue") decideIssueUnit(unit);
+    else decideUnit(unit);
+  }
 
   return {
     generatedAt: new Date().toISOString(),
     repo,
     units,
-    // No GitHub reader yet (U2); issue cards arrive with the reader unit.
-    issues: [],
+    issues: githubIssues.issues,
     agents: herdr.agents,
     prs: github.prs,
     orphaned: {
