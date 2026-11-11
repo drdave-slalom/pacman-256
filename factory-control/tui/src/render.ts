@@ -69,7 +69,10 @@ function cardLine(unit: Unit, selected: boolean, style: LineStyle): string {
     ? `#${unit.issue.number} ${unit.issue.title} [${issueDisplayStatus(unit.issue)}]`
     : unit.id;
   const id = selected ? style.accent(style.bold(label)) : label;
-  return `${marker}${id}${attentionLetters(unit)}${dirty}`;
+  // Source badge: any issue-backed card (standalone or hybrid) gets a prominent
+  // `[GitHub]` tag, styled distinctly from the title/status text.
+  const source = unit.issue !== undefined ? ` ${style.accent("[GitHub]")}` : "";
+  return `${marker}${id}${source}${attentionLetters(unit)}${dirty}`;
 }
 
 export function renderHeader(snapshot: FactorySnapshot | null, style: LineStyle, width: number): string[] {

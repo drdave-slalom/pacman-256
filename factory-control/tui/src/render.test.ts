@@ -198,8 +198,28 @@ test("renderBoardBody shows issue cards as #n + title + status", () => {
   const model = buildBoard(fixtureSnapshotWithIssues());
   const lines = renderBoardBody(model, 0, plainStyle, 120);
   const joined = lines.join("\n");
-  assert.ok(joined.includes("#12 Mobile touch controls feel laggy [ready]"));
-  assert.ok(joined.includes("#7 Add sound effects [review]"));
+  assert.ok(joined.includes("#12 Mobile touch controls feel laggy [ready] [GitHub]"));
+  assert.ok(joined.includes("#7 Add sound effects [review] [GitHub]"));
+  assertLinesFit(lines, 120);
+});
+
+test("renderBoardBody shows [GitHub] badge on issue-seeded and hybrid cards, none on spec-only", () => {
+  const model = buildBoard(fixtureSnapshotWithIssues());
+  const lines = renderBoardBody(model, 0, plainStyle, 120);
+  // issue-seeded (standalone) card carries the badge
+  const issueLine = lines.find((l) => l.includes("#12"));
+  assert.ok(issueLine !== undefined, "missing issue-seeded card line");
+  assert.ok(issueLine.includes("[GitHub]"), `issue-seeded card must show [GitHub], got: ${issueLine}`);
+  // hybrid card carries the badge
+  const hybridLine = lines.find((l) => l.includes("#7"));
+  assert.ok(hybridLine !== undefined, "missing hybrid card line");
+  assert.ok(hybridLine.includes("[GitHub]"), `hybrid card must show [GitHub], got: ${hybridLine}`);
+  // spec-only cards show no badge
+  for (const id of ["T1-spec", "T2-execute", "T4-merged"]) {
+    const specLine = lines.find((l) => l.includes(id));
+    assert.ok(specLine !== undefined, `missing spec-only card line ${id}`);
+    assert.ok(!specLine.includes("[GitHub]"), `spec-only card ${id} must not show [GitHub], got: ${specLine}`);
+  }
   assertLinesFit(lines, 120);
 });
 
