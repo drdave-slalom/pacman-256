@@ -1,0 +1,63 @@
+name: Bug report
+description: Something in the game or tooling behaves incorrectly.
+labels: ["type:bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Include enough detail to reproduce the problem on the same device and room setup.
+  - type: input
+    id: device-browser
+    attributes:
+      label: Device and browser
+      description: Device model, OS version, and browser with version.
+      placeholder: "iPhone 15, iOS 18.1, Safari"
+    validations:
+      required: true
+  - type: input
+    id: room
+    attributes:
+      label: Room and player count
+      description: Match size and team setup, and whether players were local-network or hosted.
+      placeholder: "2v2, 4 players, local network"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: Frequency
+      options:
+        - Always
+        - Often
+        - Sometimes
+        - Once
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Screenshots, recordings, console or server logs, commit SHA. Do not paste secrets.
+    validations:
+      required: false
