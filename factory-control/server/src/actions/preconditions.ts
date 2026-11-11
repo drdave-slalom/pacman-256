@@ -10,6 +10,7 @@
 import { existsSync } from "node:fs";
 import { canonicalId } from "../canonical.ts";
 import type { AgentRecord, FactorySnapshot, Unit } from "../types.ts";
+import { deriveIssueUnitId, issueSpecPath } from "./issue-work.ts";
 import type { ActionContext, Precondition } from "./types.ts";
 
 const ACTING_STATES = new Set(["working", "blocked", "settling", "starting"]);
@@ -80,6 +81,77 @@ function noLiveAgentGuard(unit: Unit | undefined): Precondition {
     return fail("no-live-agent", "a live agent is still acting on this unit");
   }
   return ok("no-live-agent", "no live agent acting on this unit");
+}
+
+function issuePresentGuard(unit: Unit | undefined): Precondition {
+  if (
+    unit !== undefined &&
+    unit.issue !== undefined &&
+    Number.isInteger(unit.issue.number) &&
+    unit.issue.number > 0
+  ) {
+    return ok("issue-present", `issue #${unit.issue.number} present on unit ${unit.id}`);
+  }
+  return fail("issue-present", "unit does not carry a valid GitHub issue (IssueCard)");
+}
+
+/** Fail when the snapshot's GitHub read is unavailable (gh missing or failed). */
+function ghAvailableGuard(snapshot: FactorySnapshot): Precondition {
+  const unavailable = snapshot.errors.some((error) => /^gh unavailable:/i.test(error));
+  if (unavailable) {
+    return fail("gh-available", "GitHub read unavailable in snapshot (gh failed or missing); refusing GitHub write-back");
+  }
+  return ok("gh-available", "GitHub read available in snapshot");
+}
+
+/** Any attached or orphaned branch whose canonical id matches `id`. */
+function branchExistsForId(snapshot: FactorySnapshot, id: string): boolean {
+  const canon = canonicalId(id);
+  if (snapshot.units.some((unit) => unit.branch !== undefined && canonicalId(unit.branch) === canon)) {
+    return true;
+  }
+  return snapshot.orphaned.branches.some((branch) => canonicalId(branch) === canon);
+}
+
+/** Guards for the GitHub write-back actions (U4): issue + no live agent + gh available. */
+function issueActionGuards(ctx: ActionContext, unit: Unit | undefined): Precondition[] {
+  const guards: Precondition[] = [unitFoundGuard(unit)];
+  if (unit === undefined) return guards;
+  guards.push(issuePresentGuard(unit));
+  guards.push(noLiveAgentGuard(unit));
+  guards.push(ghAvailableGuard(ctx.snapshot));
+  return guards;
+}
+
+/** Guards for `factory/start-work` (U5): issue, gh available, no live agent, no existing spec/branch for the derived id. */
+function startWorkGuards(ctx: ActionContext, unit: Unit | undefined): Precondition[] {
+  const guards: Precondition[] = [unitFoundGuard(unit)];
+  if (unit === undefined) return guards;
+  guards.push(issuePresentGuard(unit));
+  guards.push(ghAvailableGuard(ctx.snapshot));
+  guards.push(noLiveAgentGuard(unit));
+
+  const issue = unit.issue;
+  const id = issue !== undefined ? deriveIssueUnitId(issue) : "";
+  const specPath = issue !== undefined ? issueSpecPath(issue) : "";
+
+  if (unit.specPath !== undefined) {
+    guards.push(fail("no-spec", `unit ${unit.id} already has a SPEC at ${unit.specPath}`));
+  } else if (specPath !== "" && ctx.snapshot.units.some((candidate) => candidate.specPath === specPath)) {
+    guards.push(fail("no-spec", `a spec already exists at ${specPath}`));
+  } else {
+    guards.push(ok("no-spec", specPath !== "" ? `no spec at ${specPath}` : "no existing spec for the derived unit"));
+  }
+
+  if (unit.branch !== undefined) {
+    guards.push(fail("no-branch", `unit ${unit.id} already has branch ${unit.branch}`));
+  } else if (id !== "" && branchExistsForId(ctx.snapshot, id)) {
+    guards.push(fail("no-branch", `a factory/${id} branch already exists`));
+  } else {
+    guards.push(ok("no-branch", id !== "" ? `no factory/${id} branch exists` : "no existing branch for the derived unit"));
+  }
+
+  return guards;
 }
 
 function worktreeCreateGuards(ctx: ActionContext, unit: Unit | undefined): Precondition[] {
@@ -253,6 +325,12 @@ export function guardFor(action: string, ctx: ActionContext): Precondition[] {
       return prMergeGuards(ctx, unit);
     case "main/merge":
       return mainMergeGuards(ctx, unit);
+    case "github/issue-comment":
+    case "github/issue-label":
+    case "github/issue-state":
+      return issueActionGuards(ctx, unit);
+    case "factory/start-work":
+      return startWorkGuards(ctx, unit);
     default:
       return [fail("action", `unknown action: ${action}`)];
   }

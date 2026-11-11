@@ -17,17 +17,22 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
 import { canonicalId } from "../canonical.ts";
-import type { FactorySnapshot } from "../types.ts";
+import { DispatchService, buildDelegationPrompt } from "../dispatch/service.ts";
+import type { DispatchEnqueuePort, DispatchEntry } from "../dispatch/types.ts";
+import type { FactorySnapshot, IssueCard } from "../types.ts";
 import { guardFor, preconditionsPass } from "./preconditions.ts";
+import { deriveIssueUnitId, issueRole, issueSpecPath, scaffoldSpecContent, slugifyTitle, startWorkAcceptance } from "./issue-work.ts";
 import { AuditLog, type AuditLine } from "./audit.ts";
 import { LockManager, type LockInfo } from "./locks.ts";
 import type {
   ActionContext,
   ActionPlan,
   ActionResult,
+  ActionStep,
   CommandSpec,
   ExecuteMeta,
   ExecuteRequest,
@@ -80,7 +85,7 @@ export interface ActionDef {
   mutates: boolean;
   guard: (ctx: ActionContext) => Precondition[];
   plan: (ctx: ActionContext) => ActionPlan;
-  steps: (ctx: ActionContext) => CommandSpec[];
+  steps: (ctx: ActionContext) => ActionStep[];
 }
 
 interface PreparedRecord {
@@ -94,6 +99,10 @@ interface PreparedRecord {
   ip?: string;
   createdAt: number;
   preconditions: Precondition[];
+  comment?: string;
+  addLabels?: string[];
+  removeLabels?: string[];
+  issueState?: "close" | "reopen";
 }
 
 export interface ActionsOptions {
@@ -102,6 +111,8 @@ export interface ActionsOptions {
   runner?: CommandRunner;
   audit?: AuditLog;
   locks?: LockManager;
+  /** Dispatch enqueue port (start-work); defaults to a DispatchService over the same snapshot. */
+  dispatch?: DispatchEnqueuePort;
   prepareTtlMs?: number;
   clock?: () => number;
 }
@@ -125,6 +136,25 @@ function validatePr(input: number): number | undefined {
   return undefined;
 }
 
+function validateComment(input: unknown): string | undefined {
+  if (typeof input !== "string") return undefined;
+  const text = input.trim();
+  if (text === "" || text.length > 2000) return undefined;
+  return text;
+}
+
+function validateLabelList(input: unknown): string[] | undefined {
+  if (!Array.isArray(input)) return undefined;
+  const labels: string[] = [];
+  for (const raw of input) {
+    if (typeof raw !== "string") return undefined;
+    const label = raw.trim();
+    if (label === "" || /[\x00-\x1f\x7f]/.test(label)) return undefined;
+    labels.push(label);
+  }
+  return labels;
+}
+
 export type ExecuteOutcome =
   | { kind: "result"; result: ActionResult }
   | { kind: "no-prepare" }
@@ -140,13 +170,14 @@ function unitOf(ctx: ActionContext): string {
   return "unit";
 }
 
-function findUnit(ctx: ActionContext): { id: string; specPath?: string; title?: string; prNumber?: number } | undefined {
+function findUnit(ctx: ActionContext): { id: string; specPath?: string; title?: string; prNumber?: number; issue?: IssueCard } | undefined {
   const unit = ctx.snapshot.units.find((candidate) => candidate.id === unitOf(ctx));
   if (unit === undefined) return undefined;
-  const result: { id: string; specPath?: string; title?: string; prNumber?: number } = { id: unit.id };
+  const result: { id: string; specPath?: string; title?: string; prNumber?: number; issue?: IssueCard } = { id: unit.id };
   if (unit.specPath !== undefined) result.specPath = unit.specPath;
   if (unit.title !== undefined) result.title = unit.title;
   if (unit.pr?.number !== undefined) result.prNumber = unit.pr.number;
+  if (unit.issue !== undefined) result.issue = unit.issue;
   return result;
 }
 
@@ -162,6 +193,67 @@ function prOpenBody(unit: { id: string; specPath?: string }): string {
     "- Three-way reconciliation (spec ↔ change ↔ tests): documented in the builder handoff; `npm run check` passes.",
   ];
   return lines.join("\n");
+}
+
+function issueNumber(ctx: ActionContext): number {
+  return findUnit(ctx)?.issue?.number ?? 0;
+}
+
+function ghIssueCommentStep(ctx: ActionContext, root: string): CommandSpec {
+  return { command: "gh", args: ["issue", "comment", String(issueNumber(ctx)), "--body", ctx.comment ?? ""], cwd: root };
+}
+
+function ghIssueEditStep(ctx: ActionContext, root: string): CommandSpec {
+  const args: string[] = ["issue", "edit", String(issueNumber(ctx))];
+  for (const label of ctx.addLabels ?? []) args.push("--add-label", label);
+  for (const label of ctx.removeLabels ?? []) args.push("--remove-label", label);
+  return { command: "gh", args, cwd: root };
+}
+
+function ghIssueStateStep(ctx: ActionContext, root: string): CommandSpec {
+  const state = ctx.issueState ?? "close";
+  return { command: "gh", args: ["issue", state === "close" ? "close" : "reopen", String(issueNumber(ctx))], cwd: root };
+}
+
+function startWorkPlan(ctx: ActionContext, root: string): ActionPlan {
+  const issue = findUnit(ctx)?.issue;
+  if (issue === undefined) {
+    return { summary: "start-work: target unit carries no GitHub issue", steps: [] };
+  }
+  const id = deriveIssueUnitId(issue);
+  const specPath = issueSpecPath(issue);
+  const role = issueRole(issue);
+  const acceptance = startWorkAcceptance(id, specPath);
+  const preview: DispatchEntry = {
+    id: "(prepare)",
+    at: "",
+    unit: id,
+    specPath,
+    worktree: `factory/${id}`,
+    role,
+    acceptance,
+    status: "queued",
+  };
+  return {
+    summary: `Start work on ${id} from issue #${issue.number}: scaffold ${specPath}, create worktree factory/${id}, enqueue ${role} dispatch`,
+    steps: [{ command: "scripts/factory-worktree.sh", args: ["create", id], cwd: root }],
+    files: [{ path: specPath, summary: `Scaffold ${specPath} from issue #${issue.number}` }],
+    prompt: buildDelegationPrompt(preview, root),
+  };
+}
+
+function startWorkSteps(ctx: ActionContext, root: string): ActionStep[] {
+  const issue = findUnit(ctx)?.issue;
+  if (issue === undefined) return [];
+  const id = deriveIssueUnitId(issue);
+  const specPath = issueSpecPath(issue);
+  const role = issueRole(issue);
+  const acceptance = startWorkAcceptance(id, specPath);
+  return [
+    { kind: "write", path: specPath, content: scaffoldSpecContent(issue) },
+    { command: "scripts/factory-worktree.sh", args: ["create", id], cwd: root },
+    { kind: "dispatch", sourceUnit: unitOf(ctx), unit: id, specPath, worktree: `factory/${id}`, role, acceptance },
+  ];
 }
 
 function buildDefs(o: ActionsOptions): Map<string, ActionDef> {
@@ -305,7 +397,58 @@ function buildDefs(o: ActionsOptions): Map<string, ActionDef> {
         { command: "git", args: ["push", "origin", "main"], cwd: root },
       ],
     },
-  ];
+    {
+      name: "github/issue-comment",
+      mutates: true,
+      guard: (ctx) => guardFor("github/issue-comment", ctx),
+      plan: (ctx) => {
+        const n = issueNumber(ctx);
+        const raw = ctx.comment ?? "";
+        const excerpt = raw.length > 40 ? `${raw.slice(0, 40)}…` : raw;
+        return {
+          summary: `Comment on GitHub issue #${n}: ${excerpt}`,
+          steps: [ghIssueCommentStep(ctx, root)],
+        };
+      },
+      steps: (ctx) => [ghIssueCommentStep(ctx, root)],
+    },
+    {
+      name: "github/issue-label",
+      mutates: true,
+      guard: (ctx) => guardFor("github/issue-label", ctx),
+      plan: (ctx) => {
+        const n = issueNumber(ctx);
+        const add = ctx.addLabels ?? [];
+        const remove = ctx.removeLabels ?? [];
+        const summary: string[] = [`Update GitHub issue #${n} labels`];
+        if (add.length > 0) summary.push(`+${add.join(",+")}`);
+        if (remove.length > 0) summary.push(`-${remove.join(",-")}`);
+        return { summary: summary.join(" "), steps: [ghIssueEditStep(ctx, root)] };
+      },
+      steps: (ctx) => [ghIssueEditStep(ctx, root)],
+    },
+    {
+      name: "github/issue-state",
+      mutates: true,
+      guard: (ctx) => guardFor("github/issue-state", ctx),
+      plan: (ctx) => {
+        const n = issueNumber(ctx);
+        const close = (ctx.issueState ?? "close") === "close";
+        return {
+          summary: close ? `Close GitHub issue #${n}` : `Reopen GitHub issue #${n}`,
+          steps: [ghIssueStateStep(ctx, root)],
+        };
+      },
+      steps: (ctx) => [ghIssueStateStep(ctx, root)],
+    },
+    {
+      name: "factory/start-work",
+      mutates: true,
+      guard: (ctx) => guardFor("factory/start-work", ctx),
+      plan: (ctx) => startWorkPlan(ctx, root),
+      steps: (ctx) => startWorkSteps(ctx, root),
+    },
+  ]
   return new Map(defs.map((def) => [def.name, def]));
 }
 
@@ -315,6 +458,7 @@ export class ActionsService {
   private readonly audit: AuditLog;
   private readonly locks: LockManager;
   private readonly runner: CommandRunner;
+  private readonly dispatch: DispatchEnqueuePort;
   private readonly prepared = new Map<string, PreparedRecord>();
   private readonly now: () => number;
 
@@ -326,6 +470,7 @@ export class ActionsService {
       o.audit ??
       new AuditLog({ file: join(o.factoryRoot, "factory-control", "state", "audit.log.jsonl") });
     this.locks = o.locks ?? new LockManager({ dir: join(o.factoryRoot, "factory-control", "state", "locks") });
+    this.dispatch = o.dispatch ?? new DispatchService({ snapshot: o.snapshot, factoryRoot: o.factoryRoot });
     this.now = o.clock ?? (() => Date.now());
   }
 
@@ -352,6 +497,53 @@ export class ActionsService {
     }
     if (unit !== undefined) ctx.unitId = unit;
     if (pr !== undefined) ctx.prNumber = pr;
+
+    let comment: string | undefined;
+    let addLabels: string[] | undefined;
+    let removeLabels: string[] | undefined;
+    let issueState: "close" | "reopen" | undefined;
+    if (def.name === "github/issue-comment") {
+      const c = validateComment(req.comment);
+      if (c === undefined) {
+        return { kind: "invalid-input", error: "comment is required (non-empty string, ≤2000 chars)" };
+      }
+      comment = c;
+    } else if (def.name === "github/issue-label") {
+      if (req.addLabels !== undefined) {
+        const a = validateLabelList(req.addLabels);
+        if (a === undefined) {
+          return { kind: "invalid-input", error: "addLabels must be an array of non-empty label strings" };
+        }
+        addLabels = a;
+      }
+      if (req.removeLabels !== undefined) {
+        const r = validateLabelList(req.removeLabels);
+        if (r === undefined) {
+          return { kind: "invalid-input", error: "removeLabels must be an array of non-empty label strings" };
+        }
+        removeLabels = r;
+      }
+      if ((addLabels === undefined || addLabels.length === 0) && (removeLabels === undefined || removeLabels.length === 0)) {
+        return { kind: "invalid-input", error: "issue-label requires at least one addLabels/removeLabels label" };
+      }
+    } else if (def.name === "github/issue-state") {
+      if (req.state === undefined) {
+        issueState = "close";
+      } else if (typeof req.state !== "string") {
+        return { kind: "invalid-input", error: 'state must be "close" or "reopen"' };
+      } else {
+        const state = req.state.toLowerCase();
+        if (state !== "close" && state !== "reopen") {
+          return { kind: "invalid-input", error: 'state must be "close" or "reopen"' };
+        }
+        issueState = state;
+      }
+    }
+    if (comment !== undefined) ctx.comment = comment;
+    if (addLabels !== undefined) ctx.addLabels = addLabels;
+    if (removeLabels !== undefined) ctx.removeLabels = removeLabels;
+    if (issueState !== undefined) ctx.issueState = issueState;
+
     const preconditions = def.guard(ctx);
     const plan = def.plan(ctx);
     const requestId = randomUUID();
@@ -370,6 +562,10 @@ export class ActionsService {
     };
     if (ctx.unitId !== undefined) record.unitId = ctx.unitId;
     if (ctx.prNumber !== undefined) record.prNumber = ctx.prNumber;
+    if (ctx.comment !== undefined) record.comment = ctx.comment;
+    if (ctx.addLabels !== undefined) record.addLabels = ctx.addLabels;
+    if (ctx.removeLabels !== undefined) record.removeLabels = ctx.removeLabels;
+    if (ctx.issueState !== undefined) record.issueState = ctx.issueState;
     if (meta.ip !== undefined) record.ip = meta.ip;
     this.prepared.set(requestId, record);
 
@@ -418,6 +614,10 @@ export class ActionsService {
       };
       if (rec.unitId !== undefined) ctx.unitId = rec.unitId;
       if (rec.prNumber !== undefined) ctx.prNumber = rec.prNumber;
+      if (rec.comment !== undefined) ctx.comment = rec.comment;
+      if (rec.addLabels !== undefined) ctx.addLabels = rec.addLabels;
+      if (rec.removeLabels !== undefined) ctx.removeLabels = rec.removeLabels;
+      if (rec.issueState !== undefined) ctx.issueState = rec.issueState;
       const preconditions = def.guard(ctx);
       if (!preconditionsPass(preconditions)) {
         this.audit.append(this.auditLine(rec, operator, meta, preconditions, "rejected"));
@@ -489,12 +689,49 @@ export class ActionsService {
   }
 
   private async runSteps(def: ActionDef, ctx: ActionContext, requestId: string): Promise<ActionResult> {
-    const steps: PlanStep[] = def.steps(ctx);
+    const steps: ActionStep[] = def.steps(ctx);
     const commands: string[] = [];
     const tails: string[] = [];
     let exit: number | null = null;
     let failed = false;
+    let prompt: string | undefined;
     for (const step of steps) {
+      if ("kind" in step) {
+        if (step.kind === "write") {
+          commands.push(`write ${step.path}`);
+          try {
+            const abs = join(this.o.factoryRoot, step.path);
+            mkdirSync(dirname(abs), { recursive: true });
+            writeFileSync(abs, step.content, "utf8");
+            exit = 0;
+          } catch (error) {
+            exit = 1;
+            failed = true;
+            tails.push(error instanceof Error ? error.message : String(error));
+            break;
+          }
+        } else if (step.kind === "dispatch") {
+          commands.push(`dispatch enqueue ${step.unit}`);
+          const outcome = await this.dispatch.enqueueStartWork({
+            sourceUnit: step.sourceUnit,
+            unit: step.unit,
+            specPath: step.specPath,
+            worktree: step.worktree,
+            role: step.role,
+            acceptance: step.acceptance,
+          });
+          if (outcome.kind !== "ok") {
+            exit = 1;
+            failed = true;
+            tails.push(`dispatch enqueue rejected: ${outcome.reason}`);
+            break;
+          }
+          prompt = outcome.prompt;
+          if (prompt !== "") tails.push(prompt);
+          exit = 0;
+        }
+        continue;
+      }
       commands.push([step.command, ...step.args].join(" "));
       const result = await this.runner(step);
       if (result.stdout !== "") tails.push(result.stdout);
@@ -506,13 +743,15 @@ export class ActionsService {
       }
       exit = 0;
     }
-    return {
+    const result: ActionResult = {
       requestId,
       outcome: failed ? "failed" : "success",
       command: commands,
       exit,
       outputTail: tails.join("\n").slice(-4000),
     };
+    if (prompt !== undefined) result.prompt = prompt;
+    return result;
   }
 
   private prune(): void {

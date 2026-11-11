@@ -13,7 +13,8 @@ import { createApiServer } from "../http.ts";
 import { SnapshotService } from "../service.ts";
 import { buildSnapshot } from "../snapshot.ts";
 import type { CommandSpec } from "./types.ts";
-import type { CheckState, FactorySnapshot, Unit, UnitPr } from "../types.ts";
+import type { DispatchEnqueuePort, StartWorkEnqueueOutcome, StartWorkEnqueueRequest } from "../dispatch/types.ts";
+import type { CheckState, FactorySnapshot, IssueCard, Unit, UnitPr } from "../types.ts";
 
 function prOf(number: number, state: string, checks: CheckState): UnitPr {
   return { number, state, checks, url: "" };
@@ -61,6 +62,70 @@ function makeSnapshot(units: Unit[]): FactorySnapshot {
 
 const reviewHandoff = { source: "result" as const, agent: "t1fx-review", definition: "pr-reviewer" };
 const qaHandoff = { source: "result" as const, agent: "t1fx-qa", definition: "qa-tester" };
+
+function issueFixture(number = 42, title = "Test issue", extra: Partial<IssueCard> = {}): Unit {
+  return {
+    id: `issue${number}`,
+    kind: "issue",
+    stage: "unknown",
+    flags: {
+      reviewPending: false,
+      qaPending: false,
+      ciRed: false,
+      readyToMerge: false,
+      readyForCleanup: false,
+      needsDispatch: false,
+      blockedAgent: false,
+    },
+    agents: [],
+    handoffs: [],
+    attention: [],
+    title,
+    issue: {
+      number,
+      title,
+      state: "open",
+      url: `https://github.com/acme/demo/issues/${number}`,
+      labels: { blocked: false, followUp: false, playtest: false, raw: [] },
+      assignees: [],
+      ...extra,
+    },
+  };
+}
+
+class StubDispatch implements DispatchEnqueuePort {
+  calls: StartWorkEnqueueRequest[] = [];
+  outcome: StartWorkEnqueueOutcome;
+  constructor(outcome?: StartWorkEnqueueOutcome) {
+    this.outcome =
+      outcome ??
+      {
+        kind: "ok",
+        entry: {
+          id: "req-stub0001",
+          at: "2026-01-01T00:00:00.000Z",
+          unit: "stub",
+          specPath: "SPEC/stub.md",
+          worktree: "factory/stub",
+          role: "builder",
+          acceptance: "stub acceptance",
+          status: "queued",
+        },
+        prompt: [
+          "LEAD DELEGATION PROMPT — queue req-stub0001",
+          "====================================",
+          "Unit:       stub",
+          "Spec:       SPEC/stub.md",
+          "Role:       builder",
+          "delegate_agent({",
+        ].join("\n"),
+      };
+  }
+  async enqueueStartWork(req: StartWorkEnqueueRequest): Promise<StartWorkEnqueueOutcome> {
+    this.calls.push(req);
+    return this.outcome;
+  }
+}
 
 class StubSnapshotService extends SnapshotService {
   private readonly snap: FactorySnapshot;
@@ -127,20 +192,29 @@ interface Harness {
 
 async function withActionsServer(
   snap: FactorySnapshot,
-  opts: { runner?: CommandRunner; factoryRoot?: string; log?: CommandSpec[] } = {},
+  opts: { runner?: CommandRunner; factoryRoot?: string; log?: CommandSpec[]; dispatch?: DispatchEnqueuePort } = {},
   run: (h: Harness) => Promise<void>,
 ): Promise<void> {
   const log = opts.log ?? [];
   const service = new StubSnapshotService(snap);
   const auditFile = join(tempDir("factory-act-audit-"), "audit.log.jsonl");
   const lockDir = join(tempDir("factory-act-locks-"), "locks");
-  const actions = new ActionsService({
+  const actionsOpts: {
+    snapshot: () => Promise<FactorySnapshot>;
+    factoryRoot: string;
+    runner: CommandRunner;
+    audit: AuditLog;
+    locks: LockManager;
+    dispatch?: DispatchEnqueuePort;
+  } = {
     snapshot: () => service.get(),
     factoryRoot: opts.factoryRoot ?? process.cwd(),
     runner: opts.runner ?? recordingRunner(log),
     audit: new AuditLog({ file: auditFile }),
     locks: new LockManager({ dir: lockDir }),
-  });
+  };
+  if (opts.dispatch !== undefined) actionsOpts.dispatch = opts.dispatch;
+  const actions = new ActionsService(actionsOpts);
   const server = createApiServer(service, {
     webRoot: join(tempDir("factory-act-web-"), "dist"),
     actions,
@@ -570,4 +644,454 @@ test("unknown action is 404; web mirror has no route to action endpoints", async
     const apiSource = readFileSync(FIXTURE_WEB_API, "utf8");
     assert.equal(apiSource.includes("/api/actions"), false);
   });
+});
+
+// ---- GitHub write-back actions (U4) ------------------------------------------
+
+test("github/issue-comment: plan + execute run exact gh argv", async () => {
+  const unit = issueFixture(42, "Fix the bug");
+  await withActionsServer(makeSnapshot([unit]), {}, async (h) => {
+    const prep = await fetch(`${h.base}/api/actions/github/issue-comment/prepare`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ unit: "issue42", comment: "Plz update" }),
+    });
+    assert.equal(prep.status, 200);
+    const pb = (await prep.json()) as { requestId: string; ok: boolean; plan: { steps: { command: string; args: string[] }[] } };
+    assert.equal(pb.ok, true);
+    assert.equal(pb.plan.steps[0]?.command, "gh");
+    assert.deepEqual(pb.plan.steps[0]?.args, ["issue", "comment", "42", "--body", "Plz update"]);
+
+    const ex = await fetch(`${h.base}/api/actions/github/issue-comment/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId: pb.requestId, confirm: true, approvedBy: "lead" }),
+    });
+    assert.equal(ex.status, 200);
+    const body = (await ex.json()) as { outcome: string; exit: number | null };
+    assert.equal(body.outcome, "success");
+    assert.equal(body.exit, 0);
+    assert.equal(h.log.length, 1);
+    assert.equal(h.log[0]?.command, "gh");
+    assert.deepEqual(h.log[0]?.args, ["issue", "comment", "42", "--body", "Plz update"]);
+  });
+});
+
+test("github/issue-label: gh issue edit argv includes only used flags", async () => {
+  const unit = issueFixture(42, "Fix the bug");
+  await withActionsServer(makeSnapshot([unit]), {}, async (h) => {
+    const prep = await fetch(`${h.base}/api/actions/github/issue-label/prepare`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ unit: "issue42", addLabels: ["type:feature"], removeLabels: ["status:ready"] }),
+    });
+    assert.equal(prep.status, 200);
+    const pb = (await prep.json()) as { requestId: string; ok: boolean; plan: { steps: { args: string[] }[] } };
+    assert.equal(pb.ok, true);
+    assert.deepEqual(pb.plan.steps[0]?.args, [
+      "issue",
+      "edit",
+      "42",
+      "--add-label",
+      "type:feature",
+      "--remove-label",
+      "status:ready",
+    ]);
+
+    const ex = await fetch(`${h.base}/api/actions/github/issue-label/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId: pb.requestId, confirm: true, approvedBy: "lead" }),
+    });
+    assert.equal(ex.status, 200);
+    assert.equal(h.log.length, 1);
+    assert.deepEqual(h.log[0]?.args, [
+      "issue",
+      "edit",
+      "42",
+      "--add-label",
+      "type:feature",
+      "--remove-label",
+      "status:ready",
+    ]);
+  });
+});
+
+test("github/issue-label: add-only and remove-only omit the unused flag", async () => {
+  const unit = issueFixture(42, "Fix the bug");
+  await withActionsServer(makeSnapshot([unit]), {}, async (h) => {
+    const addOnly = await fetch(`${h.base}/api/actions/github/issue-label/prepare`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ unit: "issue42", addLabels: ["lbl-a"] }),
+    });
+    const addBody = (await addOnly.json()) as { requestId: string; ok: boolean; plan: { steps: { args: string[] }[] } };
+    assert.equal(addBody.ok, true);
+    assert.deepEqual(addBody.plan.steps[0]?.args, ["issue", "edit", "42", "--add-label", "lbl-a"]);
+    const addEx = await fetch(`${h.base}/api/actions/github/issue-label/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId: addBody.requestId, confirm: true, approvedBy: "lead" }),
+    });
+    assert.equal(addEx.status, 200);
+    assert.deepEqual(h.log.at(-1)?.args, ["issue", "edit", "42", "--add-label", "lbl-a"]);
+
+    const removeOnly = await fetch(`${h.base}/api/actions/github/issue-label/prepare`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ unit: "issue42", removeLabels: ["lbl-r"] }),
+    });
+    const removeBody = (await removeOnly.json()) as { requestId: string; ok: boolean; plan: { steps: { args: string[] }[] } };
+    assert.equal(removeBody.ok, true);
+    assert.deepEqual(removeBody.plan.steps[0]?.args, ["issue", "edit", "42", "--remove-label", "lbl-r"]);
+    const removeEx = await fetch(`${h.base}/api/actions/github/issue-label/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId: removeBody.requestId, confirm: true, approvedBy: "lead" }),
+    });
+    assert.equal(removeEx.status, 200);
+    assert.deepEqual(h.log.at(-1)?.args, ["issue", "edit", "42", "--remove-label", "lbl-r"]);
+  });
+});
+
+test("github/issue-state: default close; reopen on state input", async () => {
+  const unit = issueFixture(42, "Fix the bug");
+  await withActionsServer(makeSnapshot([unit]), {}, async (h) => {
+    const close = await fetch(`${h.base}/api/actions/github/issue-state/prepare`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ unit: "issue42" }),
+    });
+    const closeBody = (await close.json()) as { requestId: string; ok: boolean; plan: { summary: string; steps: { args: string[] }[] } };
+    assert.equal(closeBody.ok, true);
+    assert.match(closeBody.plan.summary, /Close GitHub issue #42/);
+    assert.deepEqual(closeBody.plan.steps[0]?.args, ["issue", "close", "42"]);
+    const closeEx = await fetch(`${h.base}/api/actions/github/issue-state/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId: closeBody.requestId, confirm: true, approvedBy: "lead" }),
+    });
+    assert.equal(closeEx.status, 200);
+    assert.deepEqual(h.log.at(-1)?.args, ["issue", "close", "42"]);
+
+    const reopen = await fetch(`${h.base}/api/actions/github/issue-state/prepare`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ unit: "issue42", state: "reopen" }),
+    });
+    const reopenBody = (await reopen.json()) as { requestId: string; ok: boolean; plan: { summary: string; steps: { args: string[] }[] } };
+    assert.equal(reopenBody.ok, true);
+    assert.match(reopenBody.plan.summary, /Reopen GitHub issue #42/);
+    assert.deepEqual(reopenBody.plan.steps[0]?.args, ["issue", "reopen", "42"]);
+    const reopenEx = await fetch(`${h.base}/api/actions/github/issue-state/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId: reopenBody.requestId, confirm: true, approvedBy: "lead" }),
+    });
+    assert.equal(reopenEx.status, 200);
+    assert.deepEqual(h.log.at(-1)?.args, ["issue", "reopen", "42"]);
+  });
+});
+
+test("github write-back actions: denied paths never invoke gh", async () => {
+  const log: CommandSpec[] = [];
+  // No issue on the target unit.
+  const noIssue = baseUnit();
+  await withActionsServer(makeSnapshot([noIssue]), { log }, async (h) => {
+    const prep = await fetch(`${h.base}/api/actions/github/issue-comment/prepare`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ unit: "t1fx", comment: "hi" }),
+    });
+    const pb = (await prep.json()) as { requestId: string; ok: boolean; preconditions: { name: string; ok: boolean }[] };
+    assert.equal(pb.ok, false);
+    assert.equal(pb.preconditions.find((p) => p.name === "issue-present")?.ok, false);
+    const ex = await fetch(`${h.base}/api/actions/github/issue-comment/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId: pb.requestId, confirm: true, approvedBy: "lead" }),
+    });
+    assert.equal(ex.status, 409);
+    assert.equal(h.log.length, 0, "gh must never be invoked on a denied issue action");
+  });
+
+  // Live agent acting on the issue unit.
+  const live = issueFixture(42, "Fix the bug", {});
+  live.agents = [{ label: "issue42-builder", definition: "builder", state: "working", source: "mailbox", availableTools: [] }];
+  await withActionsServer(makeSnapshot([live]), { log }, async (h) => {
+    const prep = await fetch(`${h.base}/api/actions/github/issue-state/prepare`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ unit: "issue42" }),
+    });
+    const pb = (await prep.json()) as { requestId: string; ok: boolean; preconditions: { name: string; ok: boolean }[] };
+    assert.equal(pb.ok, false);
+    assert.equal(pb.preconditions.find((p) => p.name === "no-live-agent")?.ok, false);
+    const ex = await fetch(`${h.base}/api/actions/github/issue-state/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId: pb.requestId, confirm: true, approvedBy: "lead" }),
+    });
+    assert.equal(ex.status, 409);
+    assert.equal(h.log.length, 0);
+  });
+
+  // GitHub read unavailable in the snapshot.
+  const snap = makeSnapshot([issueFixture(42, "Fix the bug")]);
+  snap.errors = ["gh unavailable: gh: command not found"];
+  await withActionsServer(snap, { log }, async (h) => {
+    const prep = await fetch(`${h.base}/api/actions/github/issue-label/prepare`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ unit: "issue42", addLabels: ["type:feature"] }),
+    });
+    const pb = (await prep.json()) as { requestId: string; ok: boolean; preconditions: { name: string; ok: boolean }[] };
+    assert.equal(pb.ok, false);
+    assert.equal(pb.preconditions.find((p) => p.name === "gh-available")?.ok, false);
+    const ex = await fetch(`${h.base}/api/actions/github/issue-label/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId: pb.requestId, confirm: true, approvedBy: "lead" }),
+    });
+    assert.equal(ex.status, 409);
+    assert.equal(h.log.length, 0);
+  });
+});
+
+test("github write-back actions: invalid input → 400", async () => {
+  const unit = issueFixture(42, "Fix the bug");
+  await withActionsServer(makeSnapshot([unit]), {}, async (h) => {
+    const cases: { name: string; body: Record<string, unknown> }[] = [
+      { name: "github/issue-comment", body: { unit: "issue42" } },
+      { name: "github/issue-comment", body: { unit: "issue42", comment: "   " } },
+      { name: "github/issue-label", body: { unit: "issue42" } },
+      { name: "github/issue-label", body: { unit: "issue42", addLabels: "type:feature" } },
+      { name: "github/issue-label", body: { unit: "issue42", addLabels: [""] } },
+      { name: "github/issue-state", body: { unit: "issue42", state: "reopened" } },
+      { name: "github/issue-state", body: { unit: "issue42", state: 5 } },
+    ];
+    for (const c of cases) {
+      const res = await fetch(`${h.base}/api/actions/${c.name}/prepare`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(c.body),
+      });
+      assert.equal(res.status, 400, `${c.name} ${JSON.stringify(c.body)}`);
+    }
+    assert.equal(h.log.length, 0);
+  });
+});
+
+test("github write-back actions: execute takes the per-unit lock and appends audit", async () => {
+  const unit = issueFixture(42, "Fix the bug");
+  const log: CommandSpec[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const actions = new ActionsService({
+    snapshot: async () => makeSnapshot([unit]),
+    factoryRoot: process.cwd(),
+    runner: blockingRunner(gate, log),
+    audit: new AuditLog({ file: join(tempDir("factory-act-audit-"), "audit.log.jsonl") }),
+    locks: new LockManager({ dir: join(tempDir("factory-act-locks-"), "locks") }),
+  });
+  const prep1 = await actions.prepare("github/issue-comment", { unit: "issue42", comment: "hi" }, {});
+  const prep2 = await actions.prepare("github/issue-comment", { unit: "issue42", comment: "hi again" }, {});
+  assert.ok(prep1.kind === "ok" && prep2.kind === "ok");
+  const first = actions.execute(prep1.requestId, { requestId: prep1.requestId, confirm: true, approvedBy: "lead" }, {});
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const second = await actions.execute(prep2.requestId, { requestId: prep2.requestId, confirm: true, approvedBy: "lead" }, {});
+  assert.equal(second.kind, "lock");
+  release();
+  const firstResult = await first;
+  assert.equal(firstResult.kind, "result");
+  assert.equal(log.length, 1, "only the first mutation ran");
+  assert.deepEqual(log[0]?.args, ["issue", "comment", "42", "--body", "hi"]);
+
+  const audit = actions.recentAudit(10);
+  const preparedLine = audit.find((l) => l.outcome === "prepared" && l.action === "github/issue-comment");
+  const successLine = audit.find((l) => l.outcome === "success" && l.action === "github/issue-comment");
+  assert.ok(preparedLine, "prepared audit line exists");
+  assert.ok(successLine, "success audit line exists");
+  assert.equal(successLine?.operator, "lead");
+});
+
+// ---- start-work (U5) ---------------------------------------------------------
+
+test("factory/start-work: scaffolds spec, creates worktree, enqueues dispatch in order", async () => {
+  const unit = issueFixture(42, "Add leaderboard", { bodyExcerpt: "We need a leaderboard to compare scores." });
+  const root = tempDir("factory-act-startwork-");
+  const dispatch = new StubDispatch();
+  await withActionsServer(makeSnapshot([unit]), { factoryRoot: root, dispatch }, async (h) => {
+    const prep = await fetch(`${h.base}/api/actions/factory/start-work/prepare`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ unit: "issue42" }),
+    });
+    assert.equal(prep.status, 200);
+    const pb = (await prep.json()) as {
+      requestId: string;
+      ok: boolean;
+      plan: { summary: string; steps: { args: string[] }[]; files?: { path: string; summary: string }[]; prompt?: string };
+    };
+    assert.equal(pb.ok, true, JSON.stringify(pb));
+    assert.equal(pb.plan.steps[0]?.args[0], "create");
+    assert.equal(pb.plan.steps[0]?.args[1], "issue42");
+    assert.equal(pb.plan.files?.[0]?.path, "SPEC/issue42-add-leaderboard.md");
+    assert.ok(pb.plan.prompt?.includes("delegate_agent"));
+
+    const ex = await fetch(`${h.base}/api/actions/factory/start-work/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId: pb.requestId, confirm: true, approvedBy: "lead" }),
+    });
+    assert.equal(ex.status, 200);
+    const body = (await ex.json()) as { outcome: string; exit: number | null; prompt?: string; command: string[] };
+    assert.equal(body.outcome, "success");
+    assert.equal(body.exit, 0);
+    assert.equal(body.prompt, dispatch.outcome.kind === "ok" ? dispatch.outcome.prompt : undefined);
+
+    // Runner ran only the factory-worktree.sh create command.
+    assert.equal(h.log.length, 1);
+    assert.deepEqual(h.log[0]?.args, ["create", "issue42"]);
+
+    // Spec file written at the factory root.
+    const spec = readFileSync(join(root, "SPEC", "issue42-add-leaderboard.md"), "utf8");
+    assert.match(spec, /^# Add leaderboard/);
+    assert.match(spec, /Draft — start-work scaffold from #42/);
+    assert.match(spec, /We need a leaderboard to compare scores/);
+    assert.match(spec, /\[#42\]\(https:\/\/github\.com\/acme\/demo\/issues\/42\)/);
+
+    // Dispatch enqueued with derived id / spec path / role / lead prompt.
+    assert.equal(dispatch.calls.length, 1);
+    const call = dispatch.calls[0];
+    assert.ok(call);
+    assert.equal(call.sourceUnit, "issue42");
+    assert.equal(call.unit, "issue42");
+    assert.equal(call.specPath, "SPEC/issue42-add-leaderboard.md");
+    assert.equal(call.worktree, "factory/issue42");
+    assert.equal(call.role, "builder");
+    assert.match(call.acceptance, /issue42/);
+  });
+});
+
+test("factory/start-work: derives id from a unit token and role from labels", async () => {
+  const unit = issueFixture(7, "T7: pickups", {
+    labels: { blocked: false, followUp: false, playtest: false, raw: ["role:qa", "type:feature"], role: ["qa"] },
+  });
+  const root = tempDir("factory-act-startwork-token-");
+  const dispatch = new StubDispatch();
+  await withActionsServer(makeSnapshot([unit]), { factoryRoot: root, dispatch }, async (h) => {
+    const prep = await fetch(`${h.base}/api/actions/factory/start-work/prepare`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ unit: "issue7" }),
+    });
+    const pb = (await prep.json()) as { requestId: string; ok: boolean; plan: { steps: { args: string[] }[]; files?: { path: string }[] } };
+    assert.equal(pb.ok, true, JSON.stringify(pb));
+    assert.equal(pb.plan.steps[0]?.args[1], "t7");
+    assert.equal(pb.plan.files?.[0]?.path, "SPEC/t7-t7-pickups.md");
+
+    const ex = await fetch(`${h.base}/api/actions/factory/start-work/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId: pb.requestId, confirm: true, approvedBy: "lead" }),
+    });
+    assert.equal(ex.status, 200);
+    assert.equal(h.log[0]?.args[1], "t7");
+    assert.equal(dispatch.calls.length, 1);
+    assert.equal(dispatch.calls[0]?.unit, "t7");
+    assert.equal(dispatch.calls[0]?.worktree, "factory/t7");
+    assert.equal(dispatch.calls[0]?.role, "qa");
+    assert.equal(dispatch.calls[0]?.specPath, "SPEC/t7-t7-pickups.md");
+  });
+});
+
+test("factory/start-work: denied paths write nothing and run no commands", async () => {
+  const root = tempDir("factory-act-startwork-deny-");
+  const targetSpec = join(root, "SPEC", "issue42-add-leaderboard.md");
+  const log: CommandSpec[] = [];
+  const dispatch = new StubDispatch();
+
+  // Already has a branch.
+  const withBranch = issueFixture(42, "Add leaderboard");
+  withBranch.branch = "factory/issue42";
+  await withActionsServer(makeSnapshot([withBranch]), { factoryRoot: root, log, dispatch }, async (h) => {
+    const prep = await fetch(`${h.base}/api/actions/factory/start-work/prepare`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ unit: "issue42" }),
+    });
+    const pb = (await prep.json()) as { requestId: string; ok: boolean; preconditions: { name: string; ok: boolean }[] };
+    assert.equal(pb.ok, false);
+    assert.equal(pb.preconditions.find((p) => p.name === "no-branch")?.ok, false);
+    const ex = await fetch(`${h.base}/api/actions/factory/start-work/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId: pb.requestId, confirm: true, approvedBy: "lead" }),
+    });
+    assert.equal(ex.status, 409);
+  });
+  assert.equal(log.length, 0);
+  assert.equal(dispatch.calls.length, 0);
+  assert.throws(() => readFileSync(targetSpec));
+
+  // A spec already exists at the derived path.
+  const existingSpec = baseUnit({ id: "zother", specPath: "SPEC/issue42-add-leaderboard.md" });
+  await withActionsServer(makeSnapshot([issueFixture(42, "Add leaderboard"), existingSpec]), { factoryRoot: root, log, dispatch }, async (h) => {
+    const prep = await fetch(`${h.base}/api/actions/factory/start-work/prepare`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ unit: "issue42" }),
+    });
+    const pb = (await prep.json()) as { requestId: string; ok: boolean; preconditions: { name: string; ok: boolean }[] };
+    assert.equal(pb.ok, false);
+    assert.equal(pb.preconditions.find((p) => p.name === "no-spec")?.ok, false);
+    const ex = await fetch(`${h.base}/api/actions/factory/start-work/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId: pb.requestId, confirm: true, approvedBy: "lead" }),
+    });
+    assert.equal(ex.status, 409);
+  });
+  assert.equal(log.length, 0);
+  assert.equal(dispatch.calls.length, 0);
+  assert.throws(() => readFileSync(targetSpec));
+
+  // GitHub unavailable.
+  const snap = makeSnapshot([issueFixture(42, "Add leaderboard")]);
+  snap.errors = ["gh unavailable: gh: command not found"];
+  await withActionsServer(snap, { factoryRoot: root, log, dispatch }, async (h) => {
+    const prep = await fetch(`${h.base}/api/actions/factory/start-work/prepare`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ unit: "issue42" }),
+    });
+    const pb = (await prep.json()) as { requestId: string; ok: boolean; preconditions: { name: string; ok: boolean }[] };
+    assert.equal(pb.ok, false);
+    assert.equal(pb.preconditions.find((p) => p.name === "gh-available")?.ok, false);
+  });
+  assert.equal(log.length, 0);
+  assert.equal(dispatch.calls.length, 0);
+  assert.throws(() => readFileSync(targetSpec));
+
+  // Unconfirmed execute → 400, nothing written.
+  await withActionsServer(makeSnapshot([issueFixture(42, "Add leaderboard")]), { factoryRoot: root, log, dispatch }, async (h) => {
+    const prep = await fetch(`${h.base}/api/actions/factory/start-work/prepare`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ unit: "issue42" }),
+    });
+    const pb = (await prep.json()) as { requestId: string };
+    const ex = await fetch(`${h.base}/api/actions/factory/start-work/execute`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId: pb.requestId, confirm: false }),
+    });
+    assert.equal(ex.status, 400);
+  });
+  assert.equal(log.length, 0);
+  assert.equal(dispatch.calls.length, 0);
+  assert.throws(() => readFileSync(targetSpec));
 });
