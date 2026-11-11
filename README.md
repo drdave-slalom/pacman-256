@@ -308,8 +308,9 @@ result-summary lines. The DOM and
 Phaser wiring in `main.ts`/`maze-scene.ts` has no automated tests. `npm test`
 also runs the tests for the staged-documentation update script
 (`scripts/update-staged-docs.test.mjs`), the software-factory smoke tests
-(`scripts/factory-smoke.test.mjs`), and the label-sync script tests
-(`scripts/sync-labels.test.mjs`). No cloud account is required.
+(`scripts/factory-smoke.test.mjs`), the label-sync script tests
+(`scripts/sync-labels.test.mjs`), and the agent-pipeline gate tests
+(`.github/scripts/agent-gate.test.mjs`). No cloud account is required.
 `npm run build` emits shared/server JavaScript and client static assets.
 
 After building, `npm start` runs the compiled server. The built client is in

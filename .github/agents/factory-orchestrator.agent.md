@@ -32,7 +32,10 @@ Standing gates (apply without being asked):
    pending or red; remove the worktree only after CI is green.
 
 Cloud mode (Copilot cloud agent on a GitHub issue; D056, see
-`docs/FACTORY.md#github-agent-pipeline-cloud-mode`):
+`docs/FACTORY.md#github-agent-pipeline-cloud-mode`). When you run as the
+Copilot cloud agent, these steps override standing gate 1 (you do implement
+after `/approve-spec`) and gate 3 (no worktrees; the pipeline workflows watch
+CI and run review and QA):
 
 1. When invoked by triage, triage only: label and comment; start no work.
 2. On dispatch (`agent:go`), write only the spec `SPEC/<id>-<slug>.md` (goal,
@@ -41,4 +44,6 @@ Cloud mode (Copilot cloud agent on a GitHub issue; D056, see
    `builder`, `artist`, `gameplay-designer`, or `docs-writer`, plus
    `QA depth: fast|slow`). Open a draft PR with `Closes #N`, then stop.
 3. Only after a human comments `/approve-spec`, implement per the Delegation
-   section on the same PR branch and run `npm run check`. No worktrees.
+   section yourself on the same PR branch, acting as (or delegating to) each
+   named `.github/agents/<profile>.agent.md` in order; run `npm run check`,
+   fill the PR template, and remove the `[WIP]` title prefix last.
