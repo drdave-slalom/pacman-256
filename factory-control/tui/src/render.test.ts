@@ -52,17 +52,17 @@ const FIXTURE_STRIP = [
 // style does. This forces the wrap logic to measure display width, not byte
 // length (regression test for the plainStyle-hidden wrap bug).
 const ANSI_STYLE: LineStyle = {
-  dim: (s) => `[2m${s}[0m`,
-  muted: (s) => `[2m${s}[0m`,
-  accent: (s) => `[36m${s}[0m`,
-  warn: (s) => `[33m${s}[0m`,
-  success: (s) => `[32m${s}[0m`,
-  error: (s) => `[31m${s}[0m`,
-  bold: (s) => `[1m${s}[0m`,
+  dim: (s) => `\u001b[2m${s}\u001b[0m`,
+  muted: (s) => `\u001b[2m${s}\u001b[0m`,
+  accent: (s) => `\u001b[36m${s}\u001b[0m`,
+  warn: (s) => `\u001b[33m${s}\u001b[0m`,
+  success: (s) => `\u001b[32m${s}\u001b[0m`,
+  error: (s) => `\u001b[31m${s}\u001b[0m`,
+  bold: (s) => `\u001b[1m${s}\u001b[0m`,
 };
 
 function stripAnsi(text: string): string {
-  return text.replace(/[[0-9;]*m/g, "");
+  return text.replace(/\u001b[[0-9;]*m/g, "");
 }
 
 function boxesOnRow(line: string): number {
