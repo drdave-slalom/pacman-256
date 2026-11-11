@@ -29,6 +29,9 @@ import {
   spawnDirection,
   stepPlayerMove,
   sweptContact,
+  PICKUP_KINDS, pickupRandom, seededPriority, pickupCell, pickupClaim, pickupTiming,
+  effectActive, contactOutcome, pathContact, pathPosition, pathBlockingContact,
+  type PathPoint, type MovePath, type PickupKind,
   type ActionResultMessage,
   type Direction,
   type ErrorCode,
@@ -52,8 +55,20 @@ const PlayerState = schema({
   direction: t.string<Direction>().default("left"),
   queuedDirection: t.string<QueuedDirection>().default(""),
   lastInputSequence: t.number().default(-1),
+  speedEndsAt: t.number().default(0),
+  shieldEndsAt: t.number().default(0),
 });
 type PlayerState = InstanceType<typeof PlayerState>;
+
+const PickupState = schema({
+  id: t.string().default(""),
+  kind: t.string<PickupKind>().default("speed"),
+  col: t.number().default(0),
+  row: t.number().default(0),
+  active: t.boolean().default(false),
+  nextSpawnAt: t.number().default(0),
+});
+type PickupState = InstanceType<typeof PickupState>;
 
 const GameState = schema({
   protocolVersion: t.number().default(PROTOCOL_VERSION),
@@ -69,6 +84,10 @@ const GameState = schema({
   resultWinner: t.string<ResultWinner | "">().default(""),
   resultReason: t.string<ResultReason | "">().default(""),
   resultEndedAt: t.number().default(0),
+  simulationTime: t.number().default(0),
+  vulnerabilityEndsAt: t.number().default(0),
+  vulnerabilityRespawnAt: t.number().default(0),
+  pickups: t.map(PickupState),
   players: t.map(PlayerState),
 });
 type GameState = InstanceType<typeof GameState>;
@@ -93,26 +112,79 @@ export interface StepMove {
   team: Team;
   from: Vec2;
   to: Vec2;
+  path?: MovePath;
+  shieldEndsAt?: number;
 }
 
 /**
  * Pure contact batch for one step: every hunter × runner pair is checked with
  * `sweptContact` against the same snapshot, so the result does not depend on
  * iteration order. Same-team pairs are never checked. Returns the IDs of the
- * runners to eliminate (each at most once).
+ * players to eliminate (each at most once), using the post-pickup effect snapshot.
  */
-export function resolveContacts(moves: readonly StepMove[]): Set<string> {
+export function resolveContacts(moves: readonly StepMove[], now = 0, vulnerabilityEndsAt = 0): Set<string> {
   const hunters = moves.filter((move) => move.team === "hunter");
   const eliminated = new Set<string>();
   for (const runner of moves) {
     if (runner.team !== "runner") {
       continue;
     }
-    if (hunters.some((hunter) => sweptContact(hunter.from, hunter.to, runner.from, runner.to))) {
-      eliminated.add(runner.id);
+    for (const hunter of hunters) {
+      const touching = hunter.path && runner.path
+        ? pathContact(hunter.path, runner.path) !== null
+        : sweptContact(hunter.from, hunter.to, runner.from, runner.to);
+      if (!touching) continue;
+      const outcome = contactOutcome(now, vulnerabilityEndsAt, hunter.shieldEndsAt ?? 0, runner.shieldEndsAt ?? 0);
+      if (outcome !== "blocked") eliminated.add(outcome === "hunter" ? hunter.id : runner.id);
     }
   }
   return eliminated;
+}
+
+/**
+ * Resolve protected obstacles chronologically, including contact chains created
+ * by a stop. Each event freezes at least one previously unfrozen path, so there
+ * are at most moves.length events. Earlier path history is never changed by a
+ * later event. All pairs tied at an event stop together, independent of order.
+ * Inputs are not mutated. notBefore preserves committed pickup-arrival history
+ * when new protection resolves only the still-untraveled portion of the step.
+ */
+export function resolveProtectedMovement(moves: readonly StepMove[], now: number, vulnerabilityEndsAt = 0, notBefore = 0): StepMove[] {
+  const resolved = moves.map(move => ({ ...move, path: move.path ?? [
+    { position: move.from, time: 0 }, { position: move.to, time: 1 },
+  ] }));
+  const frozen = new Set<string>();
+  for (let event = 0; event < moves.length; event++) {
+    let earliest = Infinity;
+    const contacts: { hunter: StepMove; runner: StepMove; time: number }[] = [];
+    for (const hunter of resolved.filter(move => move.team === "hunter")) {
+      for (const runner of resolved.filter(move => move.team === "runner")) {
+        if (frozen.has(hunter.id) && frozen.has(runner.id)) continue;
+        if (contactOutcome(now, vulnerabilityEndsAt, hunter.shieldEndsAt ?? 0, runner.shieldEndsAt ?? 0) !== "blocked") continue;
+        const future = (path: MovePath): MovePath => notBefore === 0 ? path : [
+          { position: pathPosition(path, notBefore), time: notBefore },
+          ...path.filter(point => point.time > notBefore),
+        ];
+        const time = pathBlockingContact(future(hunter.path), future(runner.path));
+        if (time === null) continue;
+        earliest = Math.min(earliest, time);
+        contacts.push({ hunter, runner, time });
+      }
+    }
+    if (!Number.isFinite(earliest)) break;
+    const stopping = new Set(contacts.filter(contact => contact.time === earliest)
+      .flatMap(contact => [contact.hunter.id, contact.runner.id]));
+    for (const move of resolved) {
+      if (!stopping.has(move.id) || frozen.has(move.id)) continue;
+      const position = pathPosition(move.path, earliest);
+      const segment = move.path.find(point => point.time > earliest) ?? move.path[move.path.length - 1]!;
+      const stop = { ...segment, position, time: earliest };
+      move.to = position;
+      move.path = [...move.path.filter(point => point.time < earliest), stop, { ...stop, time: 1 }];
+      frozen.add(move.id);
+    }
+  }
+  return resolved;
 }
 
 /** One full simulation step in ms (1000 / SIMULATION_HZ). */
@@ -186,6 +258,9 @@ export class GameRoom extends Room<{ state: GameState }> {
   #roundStartedAt = 0;
   /** Simulation cursor: round-relative ms already simulated; never passes the round deadline. */
   #simulatedMs = 0;
+  #random = pickupRandom(0);
+  #priority: string[] = [];
+  #spawnPositions: Vec2[] = [];
 
   async onCreate(options: unknown): Promise<void> {
     const code = this.#joinOptionsError(options);
@@ -335,6 +410,13 @@ export class GameRoom extends Room<{ state: GameState }> {
     const maze = generateMaze(seed);
     const spawns = findSpawnCells(maze);
     const nextSpawnIndex = { hunter: 0, runner: 0 };
+    this.#random = pickupRandom(seed);
+    this.#priority = seededPriority(this.#joinOrder, this.#random);
+    this.#spawnPositions = [];
+    this.state.pickups.clear();
+    this.state.vulnerabilityEndsAt = 0;
+    this.state.vulnerabilityRespawnAt = 0;
+    this.state.simulationTime = 0;
     for (const sessionId of this.#joinOrder) {
       const player = this.state.players.get(sessionId);
       if (!player || player.team === "unassigned") {
@@ -343,6 +425,9 @@ export class GameRoom extends Room<{ state: GameState }> {
       const cell = spawns[player.team][nextSpawnIndex[player.team]++];
       assert(cell, "teams never exceed the available spawn cells");
       const position = this.placeSpawn(player.team, { x: cell.col + 0.5, y: cell.row + 0.5 }, maze);
+      this.#spawnPositions.push(position);
+      player.speedEndsAt = 0;
+      player.shieldEndsAt = 0;
       player.alive = true;
       player.x = position.x;
       player.y = position.y;
@@ -389,7 +474,15 @@ export class GameRoom extends Room<{ state: GameState }> {
     this.state.players.forEach((player: PlayerState) => {
       player.alive = true;
       player.queuedDirection = "";
+      player.speedEndsAt = 0;
+      player.shieldEndsAt = 0;
     });
+    this.state.pickups.clear();
+    this.state.vulnerabilityEndsAt = 0;
+    this.state.vulnerabilityRespawnAt = 0;
+    this.state.simulationTime = 0;
+    this.#spawnPositions = [];
+    this.#priority = [];
     this.#maze = null;
     this.state.phase = "lobby";
     this.state.roundId = "";
@@ -485,6 +578,9 @@ export class GameRoom extends Room<{ state: GameState }> {
       this.#roundStartedAt = this.state.countdownEndsAt;
       this.#simulatedMs = 0;
       this.state.countdownEndsAt = 0;
+      this.state.simulationTime = this.#roundStartedAt;
+      for (const kind of PICKUP_KINDS) this.state.pickups.set(kind, new PickupState({ id: kind, kind }));
+      if (this.#maze) this.#spawnPickups(this.#roundStartedAt, this.#maze);
     }
     const maze = this.#maze;
     if (this.state.phase === "playing" && maze) {
@@ -514,35 +610,108 @@ export class GameRoom extends Room<{ state: GameState }> {
     }
   }
 
-  /** One D041 step: move → contacts on one snapshot → eliminate together → outcome. */
+  /** Retry unavailable cells on subsequent simulation ticks, never outside play. */
+  #spawnPickups(now: number, maze: readonly string[]): void {
+    const players = [...this.state.players.values()];
+    const origin = this.#spawnPositions[0];
+    if (!origin) return;
+    this.state.pickups.forEach((pickup: PickupState) => {
+      if (pickup.active || now < pickup.nextSpawnAt) return;
+      const excluded = [...this.#spawnPositions, ...players.filter(p => p.alive).map(p => ({ x: p.x, y: p.y })),
+        ...[...this.state.pickups.values()].filter(p => p.active).map(p => ({ x: p.col + 0.5, y: p.row + 0.5 }))];
+      const cell = pickupCell(maze, origin, excluded, this.#random);
+      if (cell) { pickup.col = cell.col; pickup.row = cell.row; pickup.active = true; }
+    });
+  }
+
+  /** Preserve history through notBefore when protection starts at a pickup arrival. */
+  #blockProtectedMoves(moves: StepMove[], now: number, notBefore = 0): void {
+    const resolved = resolveProtectedMovement(moves, now, this.state.vulnerabilityEndsAt, notBefore);
+    for (let i = 0; i < moves.length; i++) {
+      const move = resolved[i]!;
+      moves[i] = move;
+      const player = this.state.players.get(move.id)!;
+      player.x = move.to.x;
+      player.y = move.to.y;
+      const last = move.path![move.path!.length - 1]!;
+      if (last.direction) player.direction = last.direction;
+      if (last.queuedDirection !== undefined) player.queuedDirection = last.queuedDirection ?? "";
+    }
+  }
+
+  /** One D041 step: expire → move → pickups → snapshot contacts → eliminate → outcome. */
   #playingStep(dt: number, deadlineReached: boolean, stepEndsAt: number, maze: readonly string[]): void {
     // Alive counts at step start (the first step of a tick sees any disconnects since the last tick).
     const before = this.#aliveCounts();
+    this.state.simulationTime = stepEndsAt;
+    this.#spawnPickups(stepEndsAt - dt * 1000, maze);
     const moves: StepMove[] = [];
     this.state.players.forEach((player: PlayerState) => {
       if (!player.alive || player.team === "unassigned") {
         return;
       }
       const from = { x: player.x, y: player.y };
+      const path: PathPoint[] = [];
+      const speedEndsAt = player.speedEndsAt;
+      if (!effectActive(stepEndsAt, player.shieldEndsAt)) player.shieldEndsAt = 0;
       if (dt > 0) {
-        const next = stepPlayerMove(
+        let next = stepPlayerMove(
           {
             position: from,
             direction: player.direction,
             queuedDirection: player.queuedDirection === "" ? null : player.queuedDirection,
           },
-          DEFAULT_MOVE_SPEED_TILES_PER_SECOND,
-          dt,
+          DEFAULT_MOVE_SPEED_TILES_PER_SECOND * (effectActive(stepEndsAt - dt * 1000, speedEndsAt) ? GAME_RULES.speedMultiplier : 1),
+          speedEndsAt > stepEndsAt - dt * 1000 && speedEndsAt < stepEndsAt ? (speedEndsAt - (stepEndsAt - dt * 1000)) / 1000 : dt,
           maze,
+          path,
         );
+        if (speedEndsAt > stepEndsAt - dt * 1000 && speedEndsAt < stepEndsAt) {
+          const fraction = (speedEndsAt - (stepEndsAt - dt * 1000)) / (dt * 1000);
+          for (const point of path) point.time *= fraction;
+          const rest: PathPoint[] = [];
+          next = stepPlayerMove(next, DEFAULT_MOVE_SPEED_TILES_PER_SECOND, dt * (1 - fraction), maze, rest);
+          path.push(...rest.map(point => ({ ...point, time: fraction + point.time * (1 - fraction) })));
+        }
         player.x = next.position.x;
         player.y = next.position.y;
         player.direction = next.direction;
         player.queuedDirection = next.queuedDirection ?? "";
       }
-      moves.push({ id: player.id, team: player.team, from, to: { x: player.x, y: player.y } });
+      if (!effectActive(stepEndsAt, player.speedEndsAt)) player.speedEndsAt = 0;
+      if (path.length === 0) path.push({ position: from, time: 0 }, { position: from, time: 1 });
+      moves.push({ id: player.id, team: player.team, from, to: { x: player.x, y: player.y }, path, shieldEndsAt: player.shieldEndsAt });
     });
-    for (const id of resolveContacts(moves)) {
+    // Existing protected opponents are movement obstacles, not traversable pickup paths.
+    this.#blockProtectedMoves(moves, stepEndsAt);
+    // Award in path-arrival order. A new shield can stop later traversal, so
+    // recompute remaining candidates instead of committing claims on erased paths.
+    for (let award = 0; award < PICKUP_KINDS.length; award++) {
+      const candidates = [...this.state.pickups.values()].flatMap(pickup => {
+        if (!pickup.active) return [];
+        const claim = pickupClaim(pickup.kind, pickup.col, pickup.row,
+          moves.map(m => ({ id: m.id, team: m.team, path: m.path! })), this.#priority);
+        return claim ? [{ pickup, claim }] : [];
+      }).sort((a, b) => a.claim.time - b.claim.time || a.pickup.id.localeCompare(b.pickup.id));
+      const next = candidates[0];
+      if (!next) break;
+      const { pickup, claim } = next;
+      const player = this.state.players.get(claim.id)!;
+      const timing = pickupTiming(pickup.kind, stepEndsAt - dt * 1000 * (1 - claim.time));
+      pickup.active = false;
+      pickup.nextSpawnAt = timing.nextSpawnAt;
+      if (pickup.kind === "speed") player.speedEndsAt = timing.endsAt;
+      else if (pickup.kind === "shield") player.shieldEndsAt = timing.endsAt;
+      else {
+        this.state.vulnerabilityEndsAt = timing.endsAt;
+        this.state.vulnerabilityRespawnAt = timing.nextSpawnAt;
+      }
+      for (const move of moves) move.shieldEndsAt = this.state.players.get(move.id)!.shieldEndsAt;
+      if (pickup.kind === "shield") this.#blockProtectedMoves(moves, stepEndsAt, claim.time);
+    }
+    // Every combat contact still uses one common post-pickup effect snapshot;
+    // shield movement blocking begins at acquisition, never before its arrival.
+    for (const id of resolveContacts(moves, stepEndsAt, this.state.vulnerabilityEndsAt)) {
       const player = this.state.players.get(id);
       if (player) {
         player.alive = false;
@@ -562,6 +731,10 @@ export class GameRoom extends Room<{ state: GameState }> {
       this.state.resultWinner = outcome.winner;
       this.state.resultReason = outcome.reason;
       this.state.resultEndedAt = Math.min(stepEndsAt, this.state.roundEndsAt);
+    } else {
+      // A pickup becoming eligible at this boundary exists for the next movement,
+      // never retroactively along the path that preceded its spawn time.
+      this.#spawnPickups(stepEndsAt, maze);
     }
   }
 }

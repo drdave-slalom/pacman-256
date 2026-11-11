@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { GameRoomSnapshot, PlayerSnapshot } from "@maze/shared";
 import {
   aliveCounts,
+  effectStatus, playerEffectCue, PICKUP_CUES,
   canSteer,
   countdownRemaining,
   formatClock,
@@ -11,6 +12,23 @@ import {
   resultView,
   roundTimeRemaining,
 } from "./hud-view.ts";
+
+test("T7 display cues are distinct, authoritative, exact-expiry aware and available to spectators", () => {
+  const s = snapshot({ phase: "playing", roundId: "r", simulationTime: 1000, vulnerabilityEndsAt: 9000,
+    players: { a: player("a", { team: "hunter", speedEndsAt: 6000, shieldEndsAt: 4000 }), b: player("b", { team: "runner", alive: false }) } });
+  assert.equal(new Set(Object.values(PICKUP_CUES).map(c => c.symbol)).size, 3);
+  assert.match(effectStatus(s, "a"), /Speed 5.0s.*Shield 3.0s.*Global reversal 8.0s/);
+  assert.match(effectStatus(s, "b"), /Global reversal 8.0s/);
+  assert.match(playerEffectCue(s, s.players.a!), /SHIELD/);
+  assert.doesNotMatch(playerEffectCue(s, s.players.a!), /EXPOSED/);
+  s.simulationTime = 4000;
+  assert.match(playerEffectCue(s, s.players.a!), /EXPOSED/);
+  assert.doesNotMatch(playerEffectCue(s, s.players.a!), /SHIELD/);
+  s.simulationTime = 9000;
+  assert.equal(playerEffectCue(s, s.players.a!), "");
+  s.phase = "results";
+  assert.equal(effectStatus(s, "a"), "");
+});
 
 function player(id: string, overrides: Partial<PlayerSnapshot> = {}): PlayerSnapshot {
   return {
@@ -23,6 +41,8 @@ function player(id: string, overrides: Partial<PlayerSnapshot> = {}): PlayerSnap
     direction: "left",
     queuedDirection: "",
     lastInputSequence: -1,
+    speedEndsAt: 0,
+    shieldEndsAt: 0,
     ...overrides,
   };
 }
@@ -42,6 +62,10 @@ function snapshot(overrides: Partial<GameRoomSnapshot> = {}): GameRoomSnapshot {
     resultWinner: "",
     resultReason: "",
     resultEndedAt: 0,
+    simulationTime: 0,
+    vulnerabilityEndsAt: 0,
+    vulnerabilityRespawnAt: 0,
+    pickups: {},
     players: { a: player("a", { team: "hunter" }), b: player("b", { team: "runner", x: 3.5 }) },
     ...overrides,
   };

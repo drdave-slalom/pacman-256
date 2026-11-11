@@ -347,3 +347,49 @@ reviewed/QA'd milestones (each via PR + green CI):
 Open follow-ups: M1 cross-device LAN check; M4 AC#7 manual Herdr-pane smoke;
 snapshot cold-build latency (~38s `gh pr checks` fan-out); minor review nits
 (F3/F5/F8 for M0; N1–N5 for M4).
+
+## T7 implementation context (not new gameplay decisions)
+
+- Implements [SPEC/T7](../SPEC/T7-three-pickups.md) against the approved
+  D012/D019/D033–D042 contract: one authoritative pickup of each kind,
+  independent speed/shield deadlines, global hunter vulnerability, safe seeded
+  spawn/retry, collection refresh and the 0/8/18-second vulnerability schedule.
+- Shared pure helpers retain true piecewise movement paths (including buffered
+  corners and wall stops). Claims use path arrival time and a server-seeded,
+  per-round stable shuffled player priority, not packet or map iteration order.
+  Collection deadlines use the arrival's simulation time. Speed expiry within
+  a step divides boosted/base-speed traversal; no speed strength stacking.
+- Colyseus state publishes pickup cells/availability/respawn deadlines, player
+  effect deadlines, global deadlines and the simulation cursor. Clients still
+  send only existing direction/lobby requests. Combat uses one post-pickup
+  snapshot, batches eliminations, blocks protected opposing contacts, and
+  evaluates victory before timeout. Results stop simulation/spawning; replay
+  clears pickup/effect state and reshuffles priority for the new round.
+- Phaser shows distinct triangle/square/diamond pickup cues with text; HTML
+  shows local speed/shield and global reversal seconds. Shielded and exposed
+  hunters have explicit shape/text labels, not color-only indicators. These
+  are authoritative-state displays, not client combat or winner predictions.
+- Automated coverage includes shared timing/spawn/path/claim rules, real-room
+  pickup/respawn/expiry/reversal/blocking/replay/deadline cases and client cue
+  mapping, alongside existing T5/T6 regressions. Independent review and QA
+  remain required before PR. No physical-phone, four-device, named browser,
+  orientation or FPS acceptance is asserted here (T8/T9 remain open).
+- Cycle 1 review fixes preserve D041's movement → pickups → contact-snapshot
+  order: protected movement resolves chronologically through stop-created
+  contact chains (each event freezes at least one new player, bounded by the
+  roster). The blocker-only recheck corrects the former blanket next-phase
+  exception: pickup candidates are processed in arrival order; a new shield
+  blocks the remaining movement from acquisition, including later same-step
+  contacts. Resolution preserves history through that arrival and rechecks
+  remaining candidates on retained paths before committing further awards.
+  Every combat contact still uses one common post-pickup effect snapshot.
+  There is no rewind before a committed arrival, separation teleport or added
+  knockback. This is implementation context, not a contract amendment.
+  Regressions include the reviewer's four-player chain in all 24 iteration
+  orders at normal/boosted speeds, real-room chain checks, and the exact
+  6.25ms contact / 12.5ms shield-arrival example with a contested variant.
+  The targeted recheck adds the 2.5ms shield acquisition / 13.75ms contact
+  example: retained shield arrival, x=1.855/2.455 stops and 0.6 separation,
+  including reversed iteration and real-room deadline assertions.
+  Pickup arrival uses segment projection to avoid zero-radius discriminant
+  roundoff on the QA-reported straight-crossing case.

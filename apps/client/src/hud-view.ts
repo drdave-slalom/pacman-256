@@ -1,4 +1,25 @@
-import type { GameRoomSnapshot } from "@maze/shared";
+import type { GameRoomSnapshot, PlayerSnapshot, PickupKind } from "@maze/shared";
+
+export const PICKUP_CUES: Record<PickupKind, { symbol: string; label: string }> = {
+  speed: { symbol: "△", label: "Speed" },
+  shield: { symbol: "□", label: "Shield" },
+  vulnerability: { symbol: "◇", label: "Reverse (runners only)" },
+};
+
+/** Timers are a display of simulation deadlines, never local gameplay decisions. */
+export function effectStatus(snapshot: GameRoomSnapshot, localId: string): string {
+  if (snapshot.phase !== "playing") return "";
+  const p = snapshot.players[localId];
+  const seconds = (end: number) => Math.max(0, (end - snapshot.simulationTime) / 1000).toFixed(1);
+  return `△ Speed ${seconds(p?.speedEndsAt ?? 0)}s · □ Shield ${seconds(p?.shieldEndsAt ?? 0)}s · ◇ Global reversal ${seconds(snapshot.vulnerabilityEndsAt)}s`;
+}
+
+export function playerEffectCue(snapshot: GameRoomSnapshot, player: PlayerSnapshot): string {
+  if (snapshot.phase !== "playing" || !player.alive) return "";
+  const shield = snapshot.simulationTime < player.shieldEndsAt;
+  const vulnerable = player.team === "hunter" && snapshot.simulationTime < snapshot.vulnerabilityEndsAt && !shield;
+  return [shield ? "□ SHIELD" : "", vulnerable ? "◇ EXPOSED" : "", snapshot.simulationTime < player.speedEndsAt ? "△" : ""].filter(Boolean).join(" ");
+}
 
 /**
  * Pure client view model for the T6 match HUD, spectator mode, and results

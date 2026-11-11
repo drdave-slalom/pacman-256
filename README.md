@@ -10,8 +10,11 @@ T5 adds a server-driven 3-second countdown, hunter-on-runner contact elimination
 round outcomes (team elimination, timeout, simultaneous wipe, disconnects), and
 host return-to-lobby. T6 adds the match HUD (phase, timer, alive counts),
 spectator mode, and a results overlay that shows exactly what the server declared;
-the client never guesses the winner. Pickups and vulnerability reversal are later
-tasks (T7).
+the client never guesses the winner. T7 adds three server-owned pickups and
+conditional contact combat: △ Speed (1.5x, 5s), □ Shield (3s), and runner-only
+◇ Reverse (global hunter vulnerability, 8s). Speed/shield respawn after 15s;
+Reverse respawns 10s after its global window ends. Independent T7 review/QA
+and physical-phone acceptance remain pending.
 
 ## Requirements and quick start
 
@@ -50,8 +53,14 @@ is occupied rather than silently selecting a different URL.
    runners cyan) whose pupils glance toward the direction of travel; your own
    player has a white outline and a pulsing white ring. The client only sends
    direction intent; the server moves players and the client interpolates between
-   updates. A hunter touching a runner
-   eliminates the runner; eliminated players stop moving and their input is
+   updates. Collect △ Speed or □ Shield as either team; only runners collect
+   ◇ Reverse. Normally a hunter eliminates an unshielded runner on contact;
+   runner shields block opposing contact. During global reversal an unshielded
+   hunter is eliminated by runner contact; a hunter's own shield overrides
+   reversal until its independent timer expires. The HUD displays local effect
+   and global reversal seconds; explicit □ SHIELD / ◇ EXPOSED player labels
+   distinguish protection from vulnerability without relying on color.
+   Eliminated players stop moving and their input is
    ignored. The round ends when a team is eliminated or at the 180-second deadline
    (runners win). In the results phase the lobby panel shows a one-line result
    taken from the server's `resultWinner`/`resultReason` (never inferred locally),
@@ -155,6 +164,43 @@ diagnostic room. Integration tests exercise it with real Colyseus SDK clients.
 - **Test hooks:** `createGameServer` accepts trusted `clock` and `spawnPlacer`
   options (alongside `mazeSeedSource`) so tests can drive phase deadlines and
   force contacts. Production rooms use `Date.now` and default spawns.
+
+### T7 pickups and conditional combat
+
+The server publishes `pickups` (stable kind IDs, cells, active flags, next spawn
+times), per-player `speedEndsAt`/`shieldEndsAt`, `vulnerabilityEndsAt`,
+`vulnerabilityRespawnAt`, and `simulationTime`. Effects are active strictly
+before their deadlines. Simulation time, not client wall time, drives the effect
+HUD. Repeated collection refreshes rather than stacks; different effects coexist.
+Spawning excludes spawn cells, occupied cells, other pickups, walls and unreachable
+cells, using a reproducible seeded server stream. Unavailable cells retry next
+simulation tick. No pickup request or client effect declaration is accepted.
+
+Movement traces record actual cell-center segments, buffered turns and wall stops.
+Pickup arrival time wins; exact ties use a once-per-round seeded player priority.
+After movement and pickup awards, all contacts use one effect snapshot; eliminations
+apply together, then victory precedes timeout. Existing shielded opposing contacts stop movement at
+the contact boundary and allow retreat. Stops resolve chronologically through
+multi-player chains, bounded by the number of players. Pickup candidates are
+processed in arrival order. A new shield blocks the remaining movement from its
+acquisition time, including later contacts in that same step; committed arrivals
+are never rewound. Remaining pickup candidates are rechecked on the retained
+paths. All combat contacts use the common post-pickup snapshot, including contacts
+before acquisition. Team contacts do not block. The simulation
+cursor clamps at the round deadline. Results stop pickups/effects progressing;
+return-to-lobby clears them for replay.
+
+Focused T7 coverage (build shared first, as root scripts do):
+
+```bash
+npm --workspace packages/shared run build
+node --experimental-strip-types --test packages/shared/src/pickups.test.ts apps/server/src/movement-resolution.test.ts apps/server/src/game-room.test.ts apps/client/src/hud-view.test.ts
+```
+
+These include real-room SDK checks, not physical-device acceptance. T8 owns four
+physical devices; T9 owns the named browser/device and performance matrix. Live
+phone readability of pickup and hunter-state cues, touch controls, and orientation
+changes still needs that human validation.
 
 ## Client (T3)
 
@@ -264,7 +310,12 @@ also runs the tests for the staged-documentation update script
 (`scripts/update-staged-docs.test.mjs`), the software-factory smoke tests
 (`scripts/factory-smoke.test.mjs`), and the label-sync script tests
 (`scripts/sync-labels.test.mjs`). No cloud account is required.
-`npm run build` emits shared/server JavaScript and client static assets.
+`npm run build` covers all game and factory-control workspaces; `npm run check`
+retains that full-repository validation. `npm run build:game` builds only shared
+→ server → client, and is the production Docker build target. The image uses
+locked game workspace dependencies and excludes operational factory-control code.
+`npm run test:docker` checks this build boundary; see `deploy/README.md` for the
+real image smoke command.
 
 After building, `npm start` runs the compiled server. The built client is in
 `apps/client/dist`; see `deploy/` for the Kubernetes deployment, where one
@@ -306,6 +357,9 @@ The [CI workflow](./.github/workflows/ci.yml) runs on pull requests, pushes to
   **22.18.0** (minimum supported) and **24.x**.
 - Read-only repository permissions, a 15-minute job timeout, and cancellation of
   superseded runs on the same ref.
+- A separate **Game image build and smoke** job builds a local Docker image and
+  checks health, static assets, nonroot runtime, and real Colyseus create/join.
+  It runs on PRs too, without registry login, image publication, or deployment.
 - On `main` pushes or manual runs, the Node 24 job uploads a seven-day build
   artifact named `maze-workshop-<commit SHA>`. Pull requests validate only.
 
