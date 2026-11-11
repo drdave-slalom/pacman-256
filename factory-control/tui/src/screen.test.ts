@@ -111,6 +111,38 @@ test("render(width) reflects state changes without a width change (B1)", async (
   assert.notDeepEqual(third, second);
 });
 
+test("board view renders the pipeline flow strip above the card columns", async (t) => {
+  const h = makeHarness();
+  t.after(() => h.screen.dispose());
+  await settle();
+  const joined = h.screen.render(W).join("\n");
+  const stripTop = joined.indexOf("┌──────┐ → ┌──────────┐");
+  assert.ok(stripTop >= 0, "expected boxed strip top border");
+  assert.ok(joined.includes("│ Spec │ → │ Dispatch │"), "expected strip titles");
+  const firstColumn = joined.indexOf("Spec (1)");
+  assert.ok(firstColumn >= 0, "expected column header below the strip");
+  assert.ok(stripTop < firstColumn, "strip must render above the columns");
+  assert.ok(!joined.includes("Unknown (0)") || joined.indexOf("Unknown (0)") > stripTop, "Unknown column stays below the strip");
+});
+
+
+test("board pipeline strip stays fixed across selection moves", async (t) => {
+  const h = makeHarness();
+  t.after(() => h.screen.dispose());
+  await settle();
+  const before = h.screen.render(W);
+  h.screen.handleInput(DOWN);
+  const after = h.screen.render(W);
+  // board view: [header, rule, strip(4), …body]; body/selection shift below.
+  assert.deepEqual(before.slice(2, 6), [
+  "┌──────┐ → ┌──────────┐ → ┌─────────┐ → ┌────────┐ → ┌─────┐ → ┌───────────┐ → ┌─────┐ → ┌──────┐",
+  "│ Spec │ → │ Dispatch │ → │ Execute │ → │ Review │ → │ QA  │ → │ Integrate │ → │ CI  │ → │ Done │",
+  "│ (1)  │ → │   (0)    │ → │   (1)   │ → │  (1)   │ → │ (0) │ → │    (0)    │ → │ (0) │ → │ (1)  │",
+  "└──────┘ → └──────────┘ → └─────────┘ → └────────┘ → └─────┘ → └───────────┘ → └─────┘ → └──────┘",
+  ]);
+  assert.deepEqual(after.slice(2, 6), before.slice(2, 6));
+  assert.notDeepEqual(after, before, "selection move must change card rows below");
+});
 test("actions view shows a preparing state and ignores stale resolutions (S1)", async (t) => {
   const resolvers: Array<(r: PrepareResponse) => void> = [];
   const prepare = (name: string): Promise<PrepareResponse> =>
