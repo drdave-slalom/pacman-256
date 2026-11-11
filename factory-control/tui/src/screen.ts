@@ -183,6 +183,7 @@ export class FactoryScreen implements Component {
   private scroll = new ScrollView(new Text(""));
   private lastHeadLen = 0;
   private lastRegion = 0;
+  private lastBodyLen = 0;
   private rowMap: number[] = [];
 
   constructor(opts: FactoryScreenOptions) {
@@ -280,8 +281,21 @@ export class FactoryScreen implements Component {
       case "board":
       case "detail": {
         if (this.flat.length === 0) return;
-        this.selectedUnit = clamp(this.selectedUnit + delta, 0, this.flat.length - 1);
-        this.ensureVisibleRow(this.selectedUnit);
+        const prev = this.selectedUnit;
+        const next = clamp(prev + delta, 0, this.flat.length - 1);
+        if (next !== prev) {
+          this.selectedUnit = next;
+          this.ensureVisibleRow(this.selectedUnit);
+        } else if (this.view === "board") {
+          // Selection is pinned at an edge: scroll the viewport toward the
+          // trailing informational sections (Orphaned/Closed issues) instead of
+          // doing nothing. Page keys already pass a scaled delta; arrows use the
+          // same consistent step for simplicity.
+          const sign = Math.sign(delta);
+          if ((prev === 0 && sign < 0) || (prev === this.flat.length - 1 && sign > 0)) {
+            this.scrollViewBy(sign * Math.max(1, this.lastRegion - 2));
+          }
+        }
         break;
       }
       case "agents": {
@@ -336,6 +350,12 @@ export class FactoryScreen implements Component {
     } else if (row >= top + this.lastRegion) {
       this.scroll.scrollTo(row - this.lastRegion + 1);
     }
+  }
+
+  /** Scroll the board viewport by `rows` lines (±), clamped to the body's scrollable range. */
+  private scrollViewBy(rows: number): void {
+    const max = Math.max(0, this.lastBodyLen - this.lastRegion);
+    this.scroll.scrollTo(clamp(this.scroll.scrollTop + rows, 0, max));
   }
 
   private openSelected(): void {
@@ -813,6 +833,7 @@ export class FactoryScreen implements Component {
     this.lastRegion = region;
 
     const body = this.renderBody(style, width);
+    this.lastBodyLen = body.length;
     this.scroll.updateLayout(body.length, region, () => this.opts.tui.requestRender());
     const top = this.scroll.scrollTop;
     const visible = body.slice(top, top + region);
