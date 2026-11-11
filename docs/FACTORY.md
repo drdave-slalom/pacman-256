@@ -1,11 +1,152 @@
-# Local Software Factory
+# Software Factory Guide
 
-This is the operating guide for the **local, agent-powered software factory**
-for pacman-256. It defines how we break work into bounded units and distribute
-them across role-specific subagents, with a human Lead owning acceptance and
-integration. The factory supports GitHub Copilot in VS Code and the original
-Herdr (Pi Herdsman) runtime. A cloud variant runs on GitHub issues and PRs;
-see [GitHub agent pipeline (cloud mode)](#github-agent-pipeline-cloud-mode).
+The software factory is the team's repeatable path from a request to a tested,
+reviewed change. It has two ways to run that process:
+
+| Mode | Where agents run | Who coordinates and integrates | Best suited for |
+|---|---|---|---|
+| **Local machine** | In a developer's VS Code Copilot or Herdr/Pi session, using separate Git worktrees | A human Lead | Work needing close direction, parallel independent tasks, or phone/LAN checks |
+| **GitHub cloud** | GitHub Actions and Copilot cloud agent sessions, driven by issues and pull requests | GitHub workflows coordinate; a human approves the spec and some merges | Well-scoped work that can be built and checked in CI |
+
+For implementation work, both modes use a written specification, independent
+review and QA, and CI. They are complementary: the local mode has a human Lead
+actively coordinating each step; cloud mode automates more of the hand-offs,
+but does not remove its human approval gates.
+
+**Terms:** A *unit* is a bounded change with its own acceptance criteria. A
+*Lead* is the human responsible for clarifying scope, accepting agent work, and
+integration in the local flow. A *worktree* is a separate checkout and branch
+for one unit, keeping concurrent changes isolated.
+
+## At a glance
+
+### Local machine flow
+
+The local flow supports GitHub Copilot in VS Code and the Herdr (Pi Herdsman)
+runtime. For implementation work, the Lead prepares the spec and delegates
+instead of implementing the change. Each writer gets an isolated worktree
+containing its spec. Review and QA are separate checks; the Lead accepts the
+results and integrates only after both pass. Review/fix work is capped at two
+cycles; after that, only blockers reopen work. Phone/LAN validation stays a
+human/device check when the change needs it.
+
+```mermaid
+flowchart TD
+    A["Request, issue, or existing spec"] --> B["Lead clarifies scope and acceptance criteria"]
+    B --> C["Find or confirm GitHub issue; write spec"]
+    C --> D["Split into bounded, independent units"]
+    D --> E["Create one worktree per unit; include its spec"]
+    E --> F["Delegate to the narrowest role agent"]
+    F --> G["Agent implements and validates; returns handoff"]
+    G --> H["Independent review"]
+    G --> I["QA with real commands"]
+    H --> J{"Review and QA pass?"}
+    I --> J
+    J -- "No: targeted fix; max two cycles" --> F
+    J -- "Yes" --> K["Lead accepts; human approves integration"]
+    K --> L["Open PR by default; direct merge only if approved"]
+    L --> M["Watch required CI; fix failures"]
+    M --> N{"CI green?"}
+    N -- "No: owning writer fixes; re-run QA and relevant review" --> F
+    N -- "Yes, after merge" --> O["Remove worktree and report"]
+```
+
+Independent units may proceed in parallel, but dependent work waits for its
+prerequisites and accepted handoff. The local operator can also inspect units
+through the optional [factory control center](../factory-control/README.md).
+
+### GitHub cloud flow
+
+The cloud pipeline starts from a GitHub issue. A read-only triage workflow
+classifies eligible new issues and checks readiness; it never starts
+implementation. A collaborator can then start the pipeline, and Copilot first
+proposes a spec in a draft PR. A write-permission collaborator approves that
+spec before Copilot builds. Separate workflows review and test the resulting
+PR, while CI runs its required checks. Eligible low-risk changes can auto-merge
+after all gates pass; other changes wait for a human.
+
+```mermaid
+flowchart TD
+    A["Collaborator opens or reopens issue"] --> B["Factory Triage: classify and comment"]
+    B --> C{"Ready to specify?"}
+    C -- "No" --> H["agent:needs-human; human clarifies"]
+    C -- "Yes" --> D["Triage+ collaborator adds agent:go"]
+    D --> E["Copilot writes spec only and opens draft PR"]
+    E --> F{"Write+ user comments /approve-spec?"}
+    F -- "Not yet" --> F
+    F -- "Yes" --> G{"Gate accepts linked issue, spec, and Delegation?"}
+    G -- "No" --> H["agent:needs-human; human resolves validation issue"]
+    G -- "Yes" --> I["Copilot implements the approved Delegation"]
+    I --> J["Factory Review and Factory QA run independently"]
+    I --> K["Required CI checks run"]
+    J --> L{"Copilot review present; factory review approved; QA passes; CI green; no human hold?"}
+    K --> L
+    L -- "No; cycles remain" --> M["Gate requests targeted Copilot fix"]
+    M --> I
+    L -- "No; cycles exhausted or stopped" --> H
+    L -- "Yes" --> N{"Low risk only, no stricter label, and no sensitive files?"}
+    N -- "Yes: docs, chore, or follow-up" --> O["Auto-merge"]
+    N -- "No" --> P["agent:needs-human; request human review"]
+    P --> Q{"Human merges PR?"}
+    O --> R["Issue closes; pipeline labels are cleaned up"]
+    Q -- "Yes" --> R
+    Q -- "No; PR closed" --> H
+```
+
+The cloud builder is one Copilot session that follows the spec's role steps;
+the review and QA workflows are independent agents. A workflow or agent may
+report evidence, but `agent:needs-human` means the pipeline has stopped for a
+person to decide what happens next. Auto-merge is limited to `type:docs`,
+`type:chore`, or `follow-up` without stricter labels; sensitive paths always
+require a person.
+
+Triage is helpful but not a prerequisite for `agent:go`; an untriaged issue
+must be classified before dispatch. If the spec is not approved yet, the draft
+PR waits. If dispatch stops with `agent:needs-human`, resolve the issue and
+remove that label before trying again. `agent:go` requires triage permission or
+higher, while `/approve-spec` requires write permission or higher. See the
+[cloud pipeline details](#github-agent-pipeline-cloud-mode) for triggers,
+labels, and safety conditions.
+
+### Labels and workflow names
+
+Cloud automation is enabled only when the repository variable
+`AGENT_PIPELINE_ENABLED` is `true`. GitHub labels both describe the work and,
+for the `agent:*` labels, control its progression. The label definitions live
+in [`.github/labels.yml`](../.github/labels.yml).
+
+| Label family | Purpose |
+|---|---|
+| `type:feature`, `type:bug`, `type:chore`, `type:docs` | Classify the kind of issue; type also affects whether cloud auto-merge is allowed |
+| `role:builder`, `role:qa`, `role:review`, `role:design`, `role:art`, `role:docs` | Identify the role(s) expected to work on the unit; in cloud mode, build roles mirror the spec's Delegation |
+| `lane:A`, `lane:B`, `lane:C` | Group game work by area: rendering/input/mobile UX; multiplayer/rules/room lifecycle; networking/lobby/results/integration |
+| `status:spec`, `status:ready`, `status:in-progress`, `status:review` | Show the work's current stage |
+| `agent:go` | Human trigger that asks the cloud pipeline to start writing a spec |
+| `agent:active` | Marks an issue currently owned by the cloud pipeline and binds its PR to the issue |
+| `agent:needs-human` | Stops automation pending human clarification or decision |
+| `cycle:1`, `cycle:2` | Track the two review/fix cycles; blockers after the second cycle need a human |
+| `blocked`, `follow-up`, `playtest` | Flag blocked work, deferred findings, or playtest-related work |
+
+The GitHub workflow names are:
+
+| Workflow | Responsibility |
+|---|---|
+| **Factory Triage** | Classifies new/reopened issues from collaborators and posts a plan; does not start work |
+| **Agent dispatch** | Responds to `agent:go` by assigning Copilot to write the spec |
+| **Agent gate** | Enforces spec approval, routes fixes, checks evidence, controls merge/close-out |
+| **Factory Review** | Independently reviews Copilot PRs against the spec |
+| **Factory QA** | Runs repository and focused checks, then posts a pass/fail verdict |
+| **CI** | Runs the required Validate checks on pull requests |
+
+Label definitions can be previewed and synchronized with
+`node scripts/sync-labels.mjs --dry-run` and `node scripts/sync-labels.mjs`.
+The latter changes repository labels and should be run only with authorization.
+
+## Local Software Factory
+
+The remainder of this guide explains the local workflow in detail: how work is
+broken into bounded units and distributed across role-specific subagents, with
+a human Lead owning acceptance and integration.
 
 **Lead sessions should load the `factory-orchestrator` skill** to run this
 workflow; it is the executable form of this guide. The skill is dual-located:
