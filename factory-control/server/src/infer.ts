@@ -1,4 +1,4 @@
-import type { Attention, CheckState, Stage, UnitFlags } from "./types.ts";
+import type { Attention, CheckState, IssueCard, Stage, UnitFlags } from "./types.ts";
 
 /**
  * Pure-inference stage decision (spec: "Pure-inference stage decision").
@@ -97,5 +97,74 @@ export function inferUnit(evidence: Evidence): Inferred {
   }
 
   const attention = attentionFromFlags(flags);
+  return { stage, flags, attention };
+}
+
+export interface IssueEvidence {
+  hasBranch: boolean;
+  hasWorktree: boolean;
+  /** A live agent is currently acting on this unit. */
+  liveAgentActing: boolean;
+  blockedAgent: boolean;
+  prState?: "OPEN" | "MERGED" | "CLOSED";
+  checks?: CheckState;
+}
+
+/**
+ * Stage/flag/attention inference for GitHub-issue card units (U3). Reuses the
+ * existing spec-unit machinery for artifact/PR effects, then overlays the
+ * issue's `status:*` label rules:
+ *
+ * - `status:spec` → stage spec
+ * - `status:ready` → stage spec + needsDispatch
+ * - `status:in-progress` → execute (review when an open PR exists)
+ * - `status:review` → review + reviewPending
+ * - no status → spec + needsDispatch when no artifact exists (mirrors rule 9)
+ *
+ * A `blocked` label surfaces via the existing `parse-error` attention (no new
+ * enumeration); `blocked-agent` is reserved for live blocked agents.
+ */
+export function inferIssueUnit(card: IssueCard, evidence: IssueEvidence): Inferred {
+  const base = inferUnit({
+    hasSpec: true,
+    hasWorktree: evidence.hasWorktree,
+    hasBranch: evidence.hasBranch,
+    hasImpl: false,
+    hasReview: false,
+    hasQa: false,
+    liveAgentActing: evidence.liveAgentActing,
+    blockedAgent: evidence.blockedAgent,
+    ...(evidence.prState !== undefined ? { prState: evidence.prState } : {}),
+    ...(evidence.checks !== undefined ? { checks: evidence.checks } : {}),
+  });
+
+  const status = (card.labels.status ?? "").toLowerCase();
+  const flags = { ...base.flags };
+  let stage = base.stage;
+
+  if (status === "spec") {
+    stage = "spec";
+    flags.needsDispatch = false;
+  } else if (status === "ready") {
+    stage = "spec";
+    flags.needsDispatch = true;
+  } else if (status === "in-progress") {
+    flags.needsDispatch = false;
+    if (evidence.prState === "OPEN") {
+      stage = "review";
+      flags.reviewPending = true;
+    } else if (evidence.prState !== "MERGED") {
+      stage = "execute";
+    }
+    // merged PR → keep base (done)
+  } else if (status === "review") {
+    stage = "review";
+    flags.reviewPending = true;
+    flags.needsDispatch = false;
+  }
+  // any other/empty status → keep base inference.
+
+  const attention = attentionFromFlags(flags);
+  if (card.labels.blocked && !attention.includes("parse-error")) attention.push("parse-error");
   return { stage, flags, attention };
 }

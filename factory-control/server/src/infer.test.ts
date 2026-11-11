@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { inferUnit, isImplementationDefinition, type Evidence } from "./infer.ts";
+import { inferIssueUnit, inferUnit, isImplementationDefinition, type Evidence, type IssueEvidence } from "./infer.ts";
+import type { IssueCard } from "./types.ts";
 
 function evidence(partial: Partial<Evidence>): Evidence {
   return {
@@ -95,4 +96,96 @@ test("isImplementationDefinition recognizes the implementation role set", () => 
   assert.equal(isImplementationDefinition("pr-reviewer"), false);
   assert.equal(isImplementationDefinition("qa-tester"), false);
   assert.equal(isImplementationDefinition(undefined), false);
+});
+
+function issueCard(overrides: Partial<IssueCard> = {}): IssueCard {
+  return {
+    number: 1,
+    title: "Test issue",
+    state: "open",
+    url: "https://example.com/i/1",
+    labels: { blocked: false, followUp: false, playtest: false, raw: [] },
+    assignees: [],
+    ...overrides,
+  };
+}
+
+function issueEvidence(overrides: Partial<IssueEvidence> = {}): IssueEvidence {
+  return {
+    hasBranch: false,
+    hasWorktree: false,
+    liveAgentActing: false,
+    blockedAgent: false,
+    ...overrides,
+  };
+}
+
+function labels(status?: string, blocked = false) {
+  return { blocked, followUp: false, playtest: false, raw: [] as string[], ...(status ? { status } : {}) };
+}
+
+test("inferIssueUnit: status:spec → spec", () => {
+  const out = inferIssueUnit(issueCard({ labels: labels("spec") }), issueEvidence());
+  assert.equal(out.stage, "spec");
+  assert.equal(out.flags.needsDispatch, false);
+});
+
+test("inferIssueUnit: status:ready → spec + needsDispatch", () => {
+  const out = inferIssueUnit(issueCard({ labels: labels("ready") }), issueEvidence());
+  assert.equal(out.stage, "spec");
+  assert.equal(out.flags.needsDispatch, true);
+  assert.ok(out.attention.includes("needs-dispatch"));
+});
+
+test("inferIssueUnit: status:in-progress → execute", () => {
+  const out = inferIssueUnit(issueCard({ labels: labels("in-progress") }), issueEvidence());
+  assert.equal(out.stage, "execute");
+});
+
+test("inferIssueUnit: status:in-progress with open PR → review + reviewPending", () => {
+  const out = inferIssueUnit(issueCard({ labels: labels("in-progress") }), issueEvidence({ prState: "OPEN" }));
+  assert.equal(out.stage, "review");
+  assert.equal(out.flags.reviewPending, true);
+  assert.ok(out.attention.includes("review-pending"));
+});
+
+test("inferIssueUnit: status:in-progress with merged PR → done (base)", () => {
+  const out = inferIssueUnit(issueCard({ labels: labels("in-progress") }), issueEvidence({ prState: "MERGED" }));
+  assert.equal(out.stage, "done");
+});
+
+test("inferIssueUnit: status:review → review + reviewPending", () => {
+  const out = inferIssueUnit(issueCard({ labels: labels("review") }), issueEvidence());
+  assert.equal(out.stage, "review");
+  assert.equal(out.flags.reviewPending, true);
+});
+
+test("inferIssueUnit: no status without artifacts → spec + needsDispatch", () => {
+  const out = inferIssueUnit(issueCard(), issueEvidence());
+  assert.equal(out.stage, "spec");
+  assert.equal(out.flags.needsDispatch, true);
+  assert.ok(out.attention.includes("needs-dispatch"));
+});
+
+test("inferIssueUnit: no status with branch → dispatch (base artifact rule)", () => {
+  const out = inferIssueUnit(issueCard(), issueEvidence({ hasBranch: true }));
+  assert.equal(out.stage, "dispatch");
+});
+
+test("inferIssueUnit: blocked label surfaces via existing parse-error attention", () => {
+  const out = inferIssueUnit(issueCard({ labels: labels(undefined, true) }), issueEvidence());
+  assert.ok(out.attention.includes("parse-error"));
+  assert.equal(out.flags.blockedAgent, false);
+});
+
+test("inferIssueUnit: blocked label + status:ready → both attentions", () => {
+  const out = inferIssueUnit(issueCard({ labels: labels("ready", true) }), issueEvidence());
+  assert.ok(out.attention.includes("needs-dispatch"));
+  assert.ok(out.attention.includes("parse-error"));
+});
+
+test("inferIssueUnit: open PR with green checks → integrate + readyToMerge (base)", () => {
+  const out = inferIssueUnit(issueCard(), issueEvidence({ prState: "OPEN", checks: "green" }));
+  assert.equal(out.stage, "integrate");
+  assert.equal(out.flags.readyToMerge, true);
 });
