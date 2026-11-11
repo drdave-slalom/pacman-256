@@ -3,5 +3,5 @@
   "compilerOptions": {
     "noEmit": true
   },
-  "include": ["packages/shared/src/**/*.test.ts", "apps/server/src/**/*.test.ts", "apps/client/src/**/*.test.ts", "factory-control/server/src/**/*.test.ts"]
+  "include": ["packages/shared/src/**/*.test.ts", "apps/server/src/**/*.test.ts", "apps/client/src/**/*.test.ts", "factory-control/server/src/**/*.test.ts", "factory-control/web/src/**/*.test.ts"]
 }

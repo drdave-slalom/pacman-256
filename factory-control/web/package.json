@@ -1,0 +1,30 @@
+{
+  "name": "@maze/factory-control-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test src/state/*.test.ts src/*.test.ts",
+    "smoke": "npm run build && node --experimental-strip-types scripts/smoke.mjs",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@maze/factory-control-shared": "0.1.0",
+    "@types/node": "^22.18.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "esbuild": "^0.28.2",
+    "vite": "^8.3.7"
+  }
+}

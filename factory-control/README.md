@@ -73,6 +73,7 @@ factory-control/
   tickets/         # work items M0–M4 (ticket-format, tracked here as files)
   server/          # M0 + M2: snapshot aggregation + guarded action API
   web/             # M1: read-only Vite/React mirror
+  shared/          # canonical snapshot types (server + web)
   tui/             # M3: pi extension
   state/           # runtime state (audit log, dispatch queue) — gitignored
 ```
@@ -97,3 +98,26 @@ Each spec is a bounded unit: write it → export worktree via
 (`builder` for implementation) → `qa-tester` + `pr-reviewer` must pass before
 any PR/merge → watch CI (`gh pr checks <pr> --watch`) → remove the worktree
 only after CI green + merged. The Lead does not implement; humans approve.
+
+## Web mirror (M1)
+
+The read-only web mirror lives in [`web/`](web/README.md) and is served by the
+control server as a static build (same process that serves `GET /api/snapshot`).
+It renders the pipeline as a kanban (`/`), a unit detail page (`/unit/:id`),
+and the herd panel (`/agents`). It polls the snapshot every ~5 s and is
+**strictly read-only**: it issues no writes, and every mutating method on the
+web surface returns 404/405. The one exception to "no POST anywhere" is the
+pre-existing M0 endpoint `POST /api/refresh` (server-side snapshot cache
+re-read): it mutates no state and the web UI never calls it.
+
+**Bind address (trust decision).** The server defaults to
+`127.0.0.1:4780` (`HOST`/`PORT` env). To let teammates open the mirror from
+another machine on LAN, run `HOST=0.0.0.0 npm run factory:control:serve` and
+browse to `http://<your-lan-ip>:4780/`. Binding `0.0.0.0` exposes the API and
+mirror to the whole network — there is no auth (M1), so treat it as a trusted
+LAN-only decision. The Vite dev server (for UI iteration) defaults to
+`127.0.0.1:4173` and proxies `/api` to the control server.
+
+**Build/serve:** `npm run build` builds the web workspace; the control server
+serves `factory-control/web/dist` automatically (SPA fallback included).
+Smoke: `npm run factory:web:smoke`.
