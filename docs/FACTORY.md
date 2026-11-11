@@ -45,13 +45,14 @@ Lead session; the six project role profiles above have Copilot equivalents.
 ## Pipeline
 
 ```text
-Ticket / spec / ask
+GitHub issue / spec / ask
       │  (Lead)
       ▼
 0. Gate      → implementation work? write spec(s) + delegate; Lead does not implement
       │
       ▼
-1. Clarify → acceptance criteria in SPEC/<task-id>-<slug>.md
+1. Clarify → find or (with user confirmation) create the unit's GitHub issue;
+             acceptance criteria in SPEC/<task-id>-<slug>.md (links the issue)
       │
       ▼
 2. Break down → bounded units; one executor per unit; no overlapping writers
@@ -103,10 +104,12 @@ These apply to every request without the user restating them (D048):
    plus its fixes); from the third pass on only blockers
    (failed acceptance criterion, crash/data integrity, security, regression)
    reopen work, each with one targeted fix re-checked alone. Other findings
-   become PR follow-ups. CI failures are always fixed. Integrate via PR by default; merge
-   directly into `main` only with explicit user approval. The PR body links the
-   spec and summarizes QA results, the review verdict, and the three-way
-   reconciliation of spec, change, and tests.
+   become PR follow-ups, filed as `follow-up` issues linked to the PR. CI
+   failures are always fixed. Integrate via PR by default; merge
+   directly into `main` only with explicit user approval. The PR body fills
+   `.github/pull_request_template.md`: `Closes #N` for the unit's issue, the
+   spec link, QA results, the review verdict, the three-way reconciliation of
+   spec, change, and tests, and follow-ups.
 3. **Watch CI after opening a PR.** Run `gh pr checks <pr> --watch`; right
    after creation it may report "no checks reported", so wait and retry. After
    a user-approved direct merge, watch the `main` push run of `ci.yml`
@@ -122,6 +125,32 @@ These apply to every request without the user restating them (D048):
    fix. Report the final CI status; work is not done while CI is pending or
    red. Remove the worktree only after CI is green and the PR is merged (or,
    for a direct merge, the `main` run is green).
+
+### GitHub tracker
+
+GitHub Issues is the factory tracker (D055; scoping profile
+`.initiative-scoping/profile.md`, tracker `github`).
+
+- **Units start from an issue.** Before dispatch, the Lead looks up the unit's
+  issue (title prefixed with the unit ID, for example `T6`) or, with user
+  confirmation, creates one from the `factory-unit` issue form. The spec links
+  the issue. Bugs use the `bug` form; blank issues are disabled
+  (`.github/ISSUE_TEMPLATE/`).
+- **PRs close issues.** PRs fill `.github/pull_request_template.md` and include
+  `Closes #N` when an issue exists. Leave the auto-generated description
+  markers at the end for `pr-description.yml`.
+- **Labels** are defined in `.github/labels.yml`: `type:*`
+  (feature/bug/chore/docs), `role:*` (builder/qa/review/design/art/docs),
+  `lane:A`/`lane:B`/`lane:C`, `status:*` (spec/ready/in-progress/review),
+  `blocked`, `follow-up`, and `playtest`. Sync them to the repo with
+  `node scripts/sync-labels.mjs` (`--dry-run` previews); syncing writes to
+  GitHub, so get user confirmation first.
+- **Deferred review findings** (D050) become `follow-up` issues linked to the PR.
+- **Required CI.** The `main` ruleset (`main-copilot-review`) requires the
+  checks `Validate (Node 22.18.0)` and `Validate (Node 24.x)` from `ci.yml`, in
+  addition to requiring PRs, blocking force-push/deletion, and running Copilot
+  code review. No approvals are required. Renaming the CI job or its Node
+  matrix changes the check names, so update the ruleset in the same change.
 
 ### Copilot in VS Code
 
@@ -259,8 +288,8 @@ Rules:
 - **Prefer the focused definition.** Use `builder` for resolved implementation,
   `scout` for recon, `qa-tester` for verification, `pr-reviewer` for review.
 - **Keep it local-first.** Validate with documented commands (`npm run check`,
-  local-network smoke test). Cloud deployment and CI pipeline changes are
-  separate and deferred.
+  local-network smoke test). Cloud deployment changes are separate and
+  deferred.
 
 ## Dispatch example
 
@@ -269,7 +298,8 @@ path**, not an existing file.
 
 From a Lead session:
 
-1. Write the spec (hypothetical example: `SPEC/t5-countdown.md`) and break it
+1. Find (or, with user confirmation, create) the unit's GitHub issue, write
+   the spec linking it (hypothetical example: `SPEC/t5-countdown.md`), and break it
    into units (one per file-surface/concern).
 2. For each unit, create its isolated worktree:
 
@@ -314,8 +344,8 @@ For Herdr/Pi, replace “Copilot subagent” with `delegate_agent`, use the
 matching `.pi/agents/` definition, and pass the result reference in `files`.
 
 5. Integrate accepted work with human approval, after review and QA: open a PR
-   with the `open-pr` skill (body links the spec and summarizes QA, review,
-   and reconciliation). Merge `factory/t5-countdown` directly into `main` only
+   with the `open-pr` skill (body fills the PR template: `Closes #N`, spec
+   link, QA, review, reconciliation, follow-ups). Merge `factory/t5-countdown` directly into `main` only
    with explicit user approval. Run the build and record in
    `docs/DECISIONS.md`.
 6. Watch CI as described in gate 3: `gh pr checks <pr> --watch` for a PR, or

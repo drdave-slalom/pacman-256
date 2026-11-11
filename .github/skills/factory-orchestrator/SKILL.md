@@ -27,9 +27,10 @@ decision history. The confirmed game rules live in `docs/GAME-CONTRACT.md`.
 ## Pipeline
 
 ```text
-Ticket / spec / ask
+GitHub issue / spec / ask
   → 0. Dispatch gate (implementation → spec + role agent; Lead does not implement)
-  → 1. Clarify + spec (SPEC/<task-id>-<slug>.md with acceptance criteria)
+  → 1. Clarify + spec (find or, with user confirmation, create the unit's
+          GitHub issue; SPEC/<task-id>-<slug>.md links it and has acceptance criteria)
   → 2. Break down (bounded units; one executor each)
   → 3. Worktree per unit (scripts/factory-worktree.sh)
   → 4. Delegate (runtime-native subagent → narrowest role profile)
@@ -50,8 +51,14 @@ Ticket / spec / ask
    needed role are unavailable, stop and ask the user; only the user may waive
    this gate.
 
-1. **Clarify + spec.** Write one or more short specs in
-   `SPEC/<task-id>-<slug>.md`, each covering goal, scope, out-of-scope,
+1. **Clarify + spec.** Find the unit's GitHub issue (`gh issue list --search
+   "<unit-id> in:title"`); if none exists, ask the user to confirm, then create
+   it with the `factory-unit` issue form's fields and default labels (for
+   example `gh issue create --title "<unit-id>: <goal>" --label type:feature
+   --label status:spec --body-file <file>`). GitHub Issues is the tracker (D055; see
+   `docs/FACTORY.md#github-tracker`). Write one or more short specs in
+   `SPEC/<task-id>-<slug>.md`, each linking the issue and covering goal, scope,
+   out-of-scope,
    assumptions, acceptance criteria, and validation. If the ask is
    underspecified, propose acceptance criteria and confirm before delegating.
    Each spec is handed to the matching role agent. Before delegating, ensure
@@ -105,13 +112,15 @@ Ticket / spec / ask
    blockers reopen work, whatever a reviewer tags `[blocker]`: a failed acceptance criterion, a
    crash or data-integrity problem, a security issue, or a regression. Fix a
    blocker with one targeted change and re-check only that fix. List every
-   other finding as a follow-up in the PR body. CI failures are always fixed.
+   other finding as a follow-up in the PR body and file it as a `follow-up`
+   issue linked to the PR. CI failures are always fixed.
 
 7. **Integrate + record.** As Lead, with human approval, after review and QA:
    review the `factory/<unit>` branch and run the build. Integrate via a PR
-   with the `open-pr` skill by default; the PR body links the spec and
-   summarizes QA results, the review verdict, and the three-way reconciliation
-   of spec, change, and tests. Merge directly into `main` only with explicit
+   with the `open-pr` skill by default; the PR body fills the PR template
+   with `Closes #N` for the unit's issue, the spec link, QA results, the
+   review verdict, the three-way reconciliation of spec, change, and tests,
+   and follow-ups. Merge directly into `main` only with explicit
    user approval. Record the outcome in `docs/DECISIONS.md`.
 
 8. **Watch CI.** For a PR, run `gh pr checks <pr> --watch` (it may report "no
@@ -160,6 +169,8 @@ Ticket / spec / ask
 
 ## Final checks
 
+- [ ] The unit had a GitHub issue (created only with user confirmation), the
+      spec linked it, and the PR used the template with `Closes #N`.
 - [ ] Implementation work had a `SPEC/` spec and was done by a role agent, not
       the Lead (or the user explicitly waived the gate).
 - [ ] Each delegated unit had a worktree, acceptance criteria, and validation.

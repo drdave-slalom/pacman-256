@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Project direction
+    url: https://github.com/drdave-slalom/pacman-256/blob/main/PROJECT-BRIEF.md
+    about: Product concept, MVP outcome, and agreed direction.
+  - name: Decision log
+    url: https://github.com/drdave-slalom/pacman-256/blob/main/docs/DECISIONS.md
+    about: Recorded decisions; check here before proposing a change to agreed rules.
