@@ -1,0 +1,19 @@
+{
+  "entries": {
+    "actions/github-script@v7": {
+      "repo": "actions/github-script",
+      "version": "v7",
+      "sha": "f28e40c7f34bde8b3046d885e986cb6290c5673b"
+    },
+    "actions/setup-node@v4": {
+      "repo": "actions/setup-node",
+      "version": "v4",
+      "sha": "49933ea5288caeca8642d1e84afbd3f7d6820020"
+    },
+    "github/gh-aw-actions/setup@v1.2.2": {
+      "repo": "github/gh-aw-actions/setup",
+      "version": "v1.2.2",
+      "sha": "53d0749e19424a918acd82b4d140264ce48f2f14"
+    }
+  }
+}
