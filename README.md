@@ -181,10 +181,12 @@ Pickup arrival time wins; exact ties use a once-per-round seeded player priority
 After movement and pickup awards, all contacts use one effect snapshot; eliminations
 apply together, then victory precedes timeout. Existing shielded opposing contacts stop movement at
 the contact boundary and allow retreat. Stops resolve chronologically through
-multi-player chains, bounded by the number of players. Pickup awards use these
-final movement paths. New shields affect all same-step combat contacts but never
-rewind completed movement or erase awarded arrivals; their movement blocking
-applies in the next movement phase. Team contacts do not block. The simulation
+multi-player chains, bounded by the number of players. Pickup candidates are
+processed in arrival order. A new shield blocks the remaining movement from its
+acquisition time, including later contacts in that same step; committed arrivals
+are never rewound. Remaining pickup candidates are rechecked on the retained
+paths. All combat contacts use the common post-pickup snapshot, including contacts
+before acquisition. Team contacts do not block. The simulation
 cursor clamps at the round deadline. Results stop pickups/effects progressing;
 return-to-lobby clears them for replay.
 

@@ -352,13 +352,19 @@ tunables remain starting values for review.
 - Cycle 1 review fixes preserve D041's movement → pickups → contact-snapshot
   order: protected movement resolves chronologically through stop-created
   contact chains (each event freezes at least one new player, bounded by the
-  roster). Claims are then committed on those final paths. A newly awarded
-  shield protects against every same-step combat contact without rewinding
-  already completed movement; it blocks subsequent movement phases. There is
-  no retroactive pickup cancellation, claimant reassignment, separation teleport,
-  or added knockback. This is implementation context, not a contract amendment.
+  roster). The blocker-only recheck corrects the former blanket next-phase
+  exception: pickup candidates are processed in arrival order; a new shield
+  blocks the remaining movement from acquisition, including later same-step
+  contacts. Resolution preserves history through that arrival and rechecks
+  remaining candidates on retained paths before committing further awards.
+  Every combat contact still uses one common post-pickup effect snapshot.
+  There is no rewind before a committed arrival, separation teleport or added
+  knockback. This is implementation context, not a contract amendment.
   Regressions include the reviewer's four-player chain in all 24 iteration
   orders at normal/boosted speeds, real-room chain checks, and the exact
   6.25ms contact / 12.5ms shield-arrival example with a contested variant.
+  The targeted recheck adds the 2.5ms shield acquisition / 13.75ms contact
+  example: retained shield arrival, x=1.855/2.455 stops and 0.6 separation,
+  including reversed iteration and real-room deadline assertions.
   Pickup arrival uses segment projection to avoid zero-radius discriminant
   roundoff on the QA-reported straight-crossing case.

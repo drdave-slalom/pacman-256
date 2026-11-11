@@ -146,9 +146,10 @@ export function resolveContacts(moves: readonly StepMove[], now = 0, vulnerabili
  * by a stop. Each event freezes at least one previously unfrozen path, so there
  * are at most moves.length events. Earlier path history is never changed by a
  * later event. All pairs tied at an event stop together, independent of order.
- * Inputs are not mutated; callers commit the returned paths before pickup claims.
+ * Inputs are not mutated. notBefore preserves committed pickup-arrival history
+ * when new protection resolves only the still-untraveled portion of the step.
  */
-export function resolveProtectedMovement(moves: readonly StepMove[], now: number, vulnerabilityEndsAt = 0): StepMove[] {
+export function resolveProtectedMovement(moves: readonly StepMove[], now: number, vulnerabilityEndsAt = 0, notBefore = 0): StepMove[] {
   const resolved = moves.map(move => ({ ...move, path: move.path ?? [
     { position: move.from, time: 0 }, { position: move.to, time: 1 },
   ] }));
@@ -160,7 +161,11 @@ export function resolveProtectedMovement(moves: readonly StepMove[], now: number
       for (const runner of resolved.filter(move => move.team === "runner")) {
         if (frozen.has(hunter.id) && frozen.has(runner.id)) continue;
         if (contactOutcome(now, vulnerabilityEndsAt, hunter.shieldEndsAt ?? 0, runner.shieldEndsAt ?? 0) !== "blocked") continue;
-        const time = pathBlockingContact(hunter.path, runner.path);
+        const future = (path: MovePath): MovePath => notBefore === 0 ? path : [
+          { position: pathPosition(path, notBefore), time: notBefore },
+          ...path.filter(point => point.time > notBefore),
+        ];
+        const time = pathBlockingContact(future(hunter.path), future(runner.path));
         if (time === null) continue;
         earliest = Math.min(earliest, time);
         contacts.push({ hunter, runner, time });
@@ -619,9 +624,9 @@ export class GameRoom extends Room<{ state: GameState }> {
     });
   }
 
-  /** Commit the final movement paths before claims; pickups never rewind these. */
-  #blockProtectedMoves(moves: StepMove[], now: number): void {
-    const resolved = resolveProtectedMovement(moves, now, this.state.vulnerabilityEndsAt);
+  /** Preserve history through notBefore when protection starts at a pickup arrival. */
+  #blockProtectedMoves(moves: StepMove[], now: number, notBefore = 0): void {
+    const resolved = resolveProtectedMovement(moves, now, this.state.vulnerabilityEndsAt, notBefore);
     for (let i = 0; i < moves.length; i++) {
       const move = resolved[i]!;
       moves[i] = move;
@@ -679,11 +684,18 @@ export class GameRoom extends Room<{ state: GameState }> {
     });
     // Existing protected opponents are movement obstacles, not traversable pickup paths.
     this.#blockProtectedMoves(moves, stepEndsAt);
-    this.state.pickups.forEach((pickup: PickupState) => {
-      if (!pickup.active) return;
-      const claim = pickupClaim(pickup.kind, pickup.col, pickup.row,
-        moves.map(m => ({ id: m.id, team: m.team, path: m.path! })), this.#priority);
-      if (!claim) return;
+    // Award in path-arrival order. A new shield can stop later traversal, so
+    // recompute remaining candidates instead of committing claims on erased paths.
+    for (let award = 0; award < PICKUP_KINDS.length; award++) {
+      const candidates = [...this.state.pickups.values()].flatMap(pickup => {
+        if (!pickup.active) return [];
+        const claim = pickupClaim(pickup.kind, pickup.col, pickup.row,
+          moves.map(m => ({ id: m.id, team: m.team, path: m.path! })), this.#priority);
+        return claim ? [{ pickup, claim }] : [];
+      }).sort((a, b) => a.claim.time - b.claim.time || a.pickup.id.localeCompare(b.pickup.id));
+      const next = candidates[0];
+      if (!next) break;
+      const { pickup, claim } = next;
       const player = this.state.players.get(claim.id)!;
       const timing = pickupTiming(pickup.kind, stepEndsAt - dt * 1000 * (1 - claim.time));
       pickup.active = false;
@@ -694,11 +706,11 @@ export class GameRoom extends Room<{ state: GameState }> {
         this.state.vulnerabilityEndsAt = timing.endsAt;
         this.state.vulnerabilityRespawnAt = timing.nextSpawnAt;
       }
-    });
-    // Movement is already final. New protection affects every same-step combat
-    // contact, but cannot erase an arrival that awarded it (or a competing claim).
-    // It becomes a movement obstacle in the next movement phase.
-    for (const move of moves) move.shieldEndsAt = this.state.players.get(move.id)!.shieldEndsAt;
+      for (const move of moves) move.shieldEndsAt = this.state.players.get(move.id)!.shieldEndsAt;
+      if (pickup.kind === "shield") this.#blockProtectedMoves(moves, stepEndsAt, claim.time);
+    }
+    // Every combat contact still uses one common post-pickup effect snapshot;
+    // shield movement blocking begins at acquisition, never before its arrival.
     for (const id of resolveContacts(moves, stepEndsAt, this.state.vulnerabilityEndsAt)) {
       const player = this.state.players.get(id);
       if (player) {

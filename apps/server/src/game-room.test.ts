@@ -967,8 +967,8 @@ test("T5: a delayed tick across the deadline still resolves a catch in the final
   assert.equal(playerOf(results, guest.id).alive, false);
 });
 
-for (const contested of [false, true]) for (const reverse of [false, true]) {
-  test(`T7 cycle 1 real room: shield arrival retained, contested=${contested}, reversed=${reverse}`, async t => {
+for (const pickupBeforeContact of [false, true]) for (const contested of [false, true]) for (const reverse of [false, true]) {
+  test(`T7 shield arrival retained: pickupBeforeContact=${pickupBeforeContact}, contested=${contested}, reversed=${reverse}`, async t => {
     const harness = await startServer(t);
     const { h1, r1, r2 } = await countdownTwoVsTwo(harness);
     harness.advance(GAME_RULES.countdownMs);
@@ -977,11 +977,16 @@ for (const contested of [false, true]) for (const reverse of [false, true]) {
     const hunter = room.state.players.get(h1.id)!;
     const runner = room.state.players.get(r1.id)!;
     const cell = corridor(generateMaze(TEST_SEED));
-    hunter.x = cell.col + 0.9; hunter.y = cell.row + 0.5; hunter.direction = "right";
-    runner.x = cell.col + 1.55; runner.y = cell.row + 0.5; runner.direction = "left";
+    const hunterStart = cell.col + (pickupBeforeContact ? 0.8 : 0.9);
+    const runnerStart = cell.col + (pickupBeforeContact ? 1.51 : 1.55);
+    const arrivalMs = pickupBeforeContact ? 2.5 : 12.5;
+    const hunterStop = cell.col + (pickupBeforeContact ? 0.855 : 0.95);
+    const runnerStop = cell.col + (pickupBeforeContact ? 1.455 : 1.5);
+    hunter.x = hunterStart; hunter.y = cell.row + 0.5; hunter.direction = "right";
+    runner.x = runnerStart; runner.y = cell.row + 0.5; runner.direction = "left";
     if (contested) {
       const challenger = room.state.players.get(r2.id)!;
-      challenger.x = cell.col + 1.6; challenger.y = cell.row + 0.5; challenger.direction = "left";
+      challenger.x = runnerStart + 0.05; challenger.y = cell.row + 0.5; challenger.direction = "left";
     }
     for (const pickup of room.state.pickups.values()) { pickup.active = false; pickup.nextSpawnAt = harness.now() + 100000; }
     const shield = room.state.pickups.get("shield")!;
@@ -996,11 +1001,13 @@ for (const contested of [false, true]) for (const reverse of [false, true]) {
     const result = await r1.waitFor(s => s.simulationTime >= at + SIMULATION_STEP_MS - 1e-6, "single step shield acquisition");
     assert.equal(result.phase, "playing");
     assert.equal(result.pickups.shield!.active, false);
-    assert.ok(Math.abs(result.players[r1.id]!.shieldEndsAt - (at + 12.5 + GAME_RULES.shieldDurationMs)) < 1e-6);
-    assert.ok(Math.abs(result.pickups.shield!.nextSpawnAt - (at + 12.5 + GAME_RULES.standardPickupRespawnMs)) < 1e-6);
-    assert.ok(Math.abs(result.players[r1.id]!.x - (cell.col + 1.55 - 4 / 30)) < 1e-6, "decoded position must not rewind to cell.col + 1.525");
-    assert.ok(Math.abs(result.players[h1.id]!.x - (cell.col + 0.9 + 4 / 30)) < 1e-6);
-    assert.ok(Math.abs(runner.x - (cell.col + 1.55 - 4 / 30)) < 1e-10, "authority retains the complete awarded path");
+    assert.ok(Math.abs(result.players[r1.id]!.shieldEndsAt - (at + arrivalMs + GAME_RULES.shieldDurationMs)) < 1e-6);
+    assert.ok(Math.abs(result.pickups.shield!.nextSpawnAt - (at + arrivalMs + GAME_RULES.standardPickupRespawnMs)) < 1e-6);
+    assert.ok(Math.abs(result.players[r1.id]!.x - runnerStop) < 1e-6, "decoded stop preserves pickup arrival");
+    assert.ok(Math.abs(result.players[h1.id]!.x - hunterStop) < 1e-6);
+    assert.ok(Math.abs(runner.x - runnerStop) < 1e-10, "authority stops only at/after acquisition");
+    assert.ok(Math.abs(hunter.x - hunterStop) < 1e-10);
+    if (pickupBeforeContact) assert.ok(Math.abs(runner.x - hunter.x - 0.6) < 1e-10, "later protected contact blocks within this step");
     assert.equal(result.players[r1.id]!.alive, true, "post-pickup shield prevents same-step elimination");
     if (contested) {
       assert.equal(result.players[r2.id]!.shieldEndsAt, 0, "later arrival loses despite map order");

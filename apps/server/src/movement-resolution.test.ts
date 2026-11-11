@@ -47,6 +47,26 @@ for (const speed of [4, 6]) {
   });
 }
 
+test("T7 blocker recheck: shield acquired at 2.5ms blocks the later 13.75ms contact without erasing arrival", () => {
+  const moves = [plannedMove("H", "hunter", 1.8, "right"), plannedMove("R", "runner", 2.51, "left")];
+  for (const order of permutations(moves)) {
+    const resolved = resolveProtectedMovement(order, 0);
+    const claim = pickupClaim("shield", 2, 1, resolved.map(move => ({ ...move, path: move.path! })), ["H", "R"]);
+    assert.equal(claim?.id, "R");
+    assert.ok(Math.abs(claim!.time * 1000 / 30 - 2.5) < 1e-10);
+    const runner = resolved.find(move => move.id === "R")!;
+    runner.shieldEndsAt = 3000 + claim!.time * 1000 / 30;
+    const blocked = resolveProtectedMovement(resolved, 1000 / 30, 0, claim!.time);
+    const h = blocked.find(move => move.id === "H")!, r = blocked.find(move => move.id === "R")!;
+    assert.ok(Math.abs(h.to.x - 1.855) < 1e-12);
+    assert.ok(Math.abs(r.to.x - 2.455) < 1e-12);
+    assert.ok(Math.abs(r.to.x - h.to.x - 0.6) < 1e-12);
+    assert.ok(Math.abs(pickupArrival(r.path!, 2, 1)! - claim!.time) < 1e-12);
+    assert.ok(Math.abs(r.path![r.path!.length - 2]!.time * 1000 / 30 - 13.75) < 1e-10);
+    assert.equal(resolveContacts(blocked, 1000 / 30).size, 0, "one post-pickup snapshot protects the contact");
+  }
+});
+
 test("T7 cycle 1: finalized arrivals survive newly awarded shield, including contested earlier arrival", () => {
   for (const contested of [false, true]) {
     const moves = [plannedMove("H", "hunter", 1.9, "right"), plannedMove("R", "runner", 2.55, "left")];
@@ -54,16 +74,19 @@ test("T7 cycle 1: finalized arrivals survive newly awarded shield, including con
     for (const order of permutations(moves)) {
       const resolved = resolveProtectedMovement(order, 0);
       // H/R touch at 6.25ms; R reaches the shield at 12.5ms, R2 at
-      // 25ms. Movement precedes pickup awards, so neither arrival is erased
-      // by the new protection. Seed priority must not override earlier arrival.
+      // 25ms. Protection may stop the remaining path at acquisition, but
+      // cannot erase that arrival. Priority must not override earlier arrival.
       const claim = pickupClaim("shield", 2, 1, resolved.map(move => ({ ...move, path: move.path! })), ["R2", "H", "R"]);
       assert.equal(claim?.id, "R");
       assert.ok(Math.abs(claim!.time / 30 - 0.0125) < 1e-12);
       const runner = resolved.find(move => move.id === "R")!;
       assert.ok(Math.abs(pickupArrival(runner.path!, 2, 1)! / 30 - 0.0125) < 1e-12);
-      assert.ok(Math.abs(runner.to.x - (2.55 - 4 / 30)) < 1e-12, "not rewound to 2.525");
       runner.shieldEndsAt = 3000 + claim!.time * 1000 / 30;
-      const eliminated = resolveContacts(resolved, 1000 / 30);
+      const blocked = resolveProtectedMovement(resolved, 1000 / 30, 0, claim!.time);
+      const retained = blocked.find(move => move.id === "R")!;
+      assert.ok(Math.abs(retained.to.x - 2.5) < 1e-12, "stop at acquisition, never rewind to 2.525");
+      assert.ok(Math.abs(pickupArrival(retained.path!, 2, 1)! - claim!.time) < 1e-12);
+      const eliminated = resolveContacts(blocked, 1000 / 30);
       assert.equal(eliminated.has("R"), false, "new shield governs same-step combat");
       assert.equal(eliminated.has("H"), false);
       if (contested) assert.equal(eliminated.has("R2"), true, "other contact uses the same post-pickup snapshot");
