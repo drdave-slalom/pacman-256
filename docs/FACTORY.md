@@ -108,9 +108,8 @@ These apply to every request without the user restating them (D048):
    failures are always fixed. Integrate via PR by default; merge
    directly into `main` only with explicit user approval. The PR body fills
    `.github/pull_request_template.md`: `Closes #N` for the unit's issue (or
-   "No issue" if none), the
-   spec link, QA results, the review verdict, the three-way reconciliation of
-   spec, change, and tests, and follow-ups.
+   "No issue" if none), the spec link, QA results, the review verdict, the
+   three-way reconciliation of spec, change, and tests, and follow-ups.
 3. **Watch CI after opening a PR.** Run `gh pr checks <pr> --watch`; right
    after creation it may report "no checks reported", so wait and retry. After
    a user-approved direct merge, watch the `main` push run of `ci.yml`
