@@ -366,6 +366,14 @@ function fakeGitHub(seed = {}) {
     const notFound = () => Object.assign(new Error("Not Found"), { status: 404 });
     const labelsOf = (number) => state.issues.get(number)?.labels.map(({ name }) => name) ?? [];
     const github = {
+        graphql: async (query, variables) => {
+            const mutation = /\{\s*(\w+)\(/.exec(query)[1];
+            writes.push(["tokenGraphql", mutation, variables]);
+            if (seed.tokenGraphqlError) {
+                throw new Error(seed.tokenGraphqlError);
+            }
+            return {};
+        },
         paginate: async (method, params) => (await method(params)).data,
         request: async () => ({ data: state.rules }),
         rest: {
@@ -806,4 +814,66 @@ test("/approve-spec stops at needs-human for an unknown delegation profile", asy
     assert.deepEqual(world.writes[0], ["addLabels", 10, ["agent:needs-human"]]);
     assert.match(world.writes[1][2], /Unknown delegation profile "qa-tester"/);
     assert.equal(world.writes.length, 2);
+});
+
+test("synchronize disables auto-merge before issue resolution, with a GITHUB_TOKEN fallback", async () => {
+    const syncPayload = { action: "synchronize", pull_request: { number: 20 } };
+    const autoMergePr = pipelinePr({ auto_merge: { merge_method: "squash" } });
+
+    // (a) No linked issue has agent:active.
+    const none = fakeGitHub({ issues: [{ number: 10, labels: ["type:docs"] }], prs: [autoMergePr] });
+    await run(none, handlePullRequestEvent, syncPayload);
+    assert.deepEqual(none.pat, [["graphql", "disablePullRequestAutoMerge", { id: "PR_20" }]]);
+    assert.match(none.writes.at(-1)[2], /auto-merge disabled/);
+
+    // (b) Two linked issues have agent:active.
+    const two = fakeGitHub({
+        issues: [
+            { number: 10, labels: ["agent:active"] },
+            { number: 11, labels: ["agent:active"] },
+        ],
+        prs: [pipelinePr({ auto_merge: {}, body: "Closes #10\nCloses #11" })],
+    });
+    await run(two, handlePullRequestEvent, syncPayload);
+    assert.deepEqual(two.pat, [["graphql", "disablePullRequestAutoMerge", { id: "PR_20" }]]);
+    assert.ok(two.labelsOf(10).includes("agent:needs-human") && two.labelsOf(11).includes("agent:needs-human"));
+
+    // Non-pipeline PRs and PRs without auto-merge are left alone.
+    for (const pr of [pipelinePr({ auto_merge: {}, user: { login: "drdave-slalom", type: "User" } }), pipelinePr()]) {
+        const world = fakeGitHub({ issues: [{ number: 10, labels: ["type:docs"] }], prs: [pr] });
+        await run(world, handlePullRequestEvent, syncPayload);
+        assert.deepEqual([world.pat, world.writes], [[], []]);
+    }
+
+    // (c) PAT disable throws: GITHUB_TOKEN fallback succeeds.
+    const fallback = fakeGitHub({
+        issues: [{ number: 10, labels: ["agent:active", "status:review"] }],
+        prs: [autoMergePr],
+        graphqlErrors: { disablePullRequestAutoMerge: "Resource not accessible" },
+    });
+    await run(fallback, handlePullRequestEvent, syncPayload);
+    assert.deepEqual(fallback.writes.find(([kind]) => kind === "tokenGraphql"), ["tokenGraphql", "disablePullRequestAutoMerge", { id: "PR_20" }]);
+    assert.ok(fallback.logs.some((line) => /retrying with GITHUB_TOKEN/.test(line)));
+    assert.match(fallback.writes.at(-1)[2], /auto-merge disabled/);
+    assert.ok(!fallback.labelsOf(10).includes("agent:needs-human"));
+
+    // (d) Both fail: needs-human when resolvable, and the handler rejects.
+    const failing = fakeGitHub({
+        issues: [{ number: 10, labels: ["agent:active", "status:review"] }],
+        prs: [autoMergePr],
+        graphqlErrors: { disablePullRequestAutoMerge: "Resource not accessible" },
+        tokenGraphqlError: "Forbidden",
+    });
+    await assert.rejects(run(failing, handlePullRequestEvent, syncPayload), /could not disable auto-merge on PR #20.*PAT: GraphQL error: Resource not accessible; GITHUB_TOKEN: Forbidden/);
+    assert.ok(failing.labelsOf(10).includes("agent:needs-human"));
+    assert.match(failing.writes.at(-1)[2], /Agent pipeline stopped.*could not disable auto-merge/);
+
+    const failingUnresolvable = fakeGitHub({
+        issues: [{ number: 10, labels: ["type:docs"] }],
+        prs: [autoMergePr],
+        graphqlErrors: { disablePullRequestAutoMerge: "nope" },
+        tokenGraphqlError: "Forbidden",
+    });
+    await assert.rejects(run(failingUnresolvable, handlePullRequestEvent, syncPayload), /could not disable auto-merge/);
+    assert.match(failingUnresolvable.writes.at(-1)[2], /could not disable auto-merge/);
 });

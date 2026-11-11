@@ -861,17 +861,16 @@ export async function handlePullRequestEvent({ github, context, core, env = proc
     if (payload.action === "closed") {
         return handleClosed({ github, context, core });
     }
+    if (payload.action === "synchronize") {
+        // Before any issue resolution, so a PR with zero or several linked issues cannot keep auto-merge on.
+        await disableStaleAutoMerge({ github, context, core, env }, payload.pull_request.number);
+    }
     const resolved = await resolvePipelinePr({ github, context, core }, payload.pull_request.number);
     if (!resolved) {
         return;
     }
     const { api, pr, issue, labels } = resolved;
     try {
-        if (payload.action === "synchronize" && pr.auto_merge) {
-            // Auto-merge was enabled for a reviewed head; a new push needs fresh review and QA.
-            await createPatClient(env.COPILOT_ASSIGN_TOKEN).graphql(MUTATIONS.disableAutoMerge, { id: pr.node_id });
-            await api.comment(pr.number, `New commits after auto-merge was enabled: auto-merge disabled. Factory review and QA must pass again for \`${pr.head.sha.slice(0, 7)}\`.`);
-        }
         if (labels.has(LABEL.needsHuman) || !labels.has(LABEL.ready) || pr.state !== "open") {
             return core.info(`Issue #${issue.number} is not waiting for the build to finish; nothing to do.`);
         }
@@ -896,6 +895,51 @@ export async function handlePullRequestEvent({ github, context, core, env = proc
         await stopForHuman(api, { issueNumber: issue.number, commentOn: pr.number, message: `pull request update failed: ${error.message}` });
         core.setFailed(error.message);
     }
+}
+
+/**
+ * Auto-merge was enabled for a reviewed head; a new push needs fresh review and
+ * QA. Disable it with the PAT, falling back to GITHUB_TOKEN; if both fail, stop
+ * the pipeline when the issue is resolvable and throw so the job fails visibly.
+ */
+async function disableStaleAutoMerge({ github, context, core, env }, pullNumber) {
+    const api = ops({ github, context });
+    const { data: pr } = await github.rest.pulls.get({ owner: api.owner, repo: api.repo, pull_number: pullNumber });
+    if (!isPipelinePr(pr, api.fullName) || !pr.auto_merge) {
+        return;
+    }
+    const errors = [];
+    let disabled = false;
+    try {
+        await createPatClient(env.COPILOT_ASSIGN_TOKEN).graphql(MUTATIONS.disableAutoMerge, { id: pr.node_id });
+        disabled = true;
+    } catch (error) {
+        errors.push(`PAT: ${error.message}`);
+        core.warning(`Disabling auto-merge with the PAT failed (${error.message}); retrying with GITHUB_TOKEN.`);
+        try {
+            await github.graphql(MUTATIONS.disableAutoMerge, { id: pr.node_id });
+            disabled = true;
+        } catch (fallbackError) {
+            errors.push(`GITHUB_TOKEN: ${fallbackError.message}`);
+        }
+    }
+    const head = pr.head.sha.slice(0, 7);
+    if (disabled) {
+        await api.comment(pr.number, `New commits after auto-merge was enabled: auto-merge disabled. Factory review and QA must pass again for \`${head}\`.`);
+        return;
+    }
+    const message = `could not disable auto-merge on PR #${pr.number} after new commits (\`${head}\`): ${errors.join("; ")}. Disable it manually.`;
+    try {
+        const resolved = await resolvePipelinePr({ github, context, core }, pr.number);
+        if (resolved) {
+            await stopForHuman(api, { issueNumber: resolved.issue.number, commentOn: pr.number, message });
+        } else {
+            await api.comment(pr.number, `**Agent pipeline:** ${message}`);
+        }
+    } catch (reportError) {
+        core.warning(`Could not report the auto-merge failure: ${reportError.message}`);
+    }
+    throw new Error(message);
 }
 
 async function handleClosed({ github, context, core }) {
