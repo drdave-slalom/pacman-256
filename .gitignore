@@ -13,6 +13,9 @@ coverage/
 !.env.example
 *.local
 
+# Factory-control runtime state (M2): audit log + lock files
+factory-control/state/
+
 # Logs
 *.log
 npm-debug.log*

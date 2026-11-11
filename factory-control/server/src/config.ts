@@ -30,6 +30,11 @@ export function serverHost(): string {
   return process.env.HOST ?? "127.0.0.1";
 }
 
+export function controlToken(): string | undefined {
+  const token = process.env.FACTORY_CONTROL_TOKEN;
+  return token !== undefined && token.trim() !== "" ? token : undefined;
+}
+
 export function serverPort(): number {
   return envInt("PORT", 4780);
 }
