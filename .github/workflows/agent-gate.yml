@@ -1,0 +1,156 @@
+# Agent pipeline state machine (SPEC/github-agent-pipeline.md, D056).
+#
+# Only base-branch-safe triggers: the workflow definition and the logic in
+# .github/scripts/agent-gate.mjs always come from the default branch, and PR
+# head code is never checked out. Every job acts only on Copilot-authored PRs
+# whose linked issue has `agent:active`, and only while AGENT_PIPELINE_ENABLED
+# is 'true'. Untrusted text (comments, titles, bodies) is read in JavaScript
+# from the event payload, never interpolated into a shell.
+name: Agent gate
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, edited, synchronize, ready_for_review, closed]
+  workflow_run:
+    workflows: [Factory Review, Factory QA, CI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to re-evaluate (for example after a late Copilot code review)
+        required: true
+        type: number
+
+permissions: {}
+
+jobs:
+  approve-spec:
+    if: >-
+      vars.AGENT_PIPELINE_ENABLED == 'true' &&
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/approve-spec')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    concurrency:
+      group: agent-gate-approve-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    steps:
+      - name: Check out pipeline scripts from the default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Approve the spec and start the build
+        uses: actions/github-script@v7
+        env:
+          COPILOT_ASSIGN_TOKEN: ${{ secrets.COPILOT_ASSIGN_TOKEN }}
+        with:
+          script: |
+            const { handleApproveSpec } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/agent-gate.mjs`);
+            await handleApproveSpec({ github, context, core, env: process.env });
+
+  pull-request:
+    if: >-
+      vars.AGENT_PIPELINE_ENABLED == 'true' &&
+      github.event_name == 'pull_request_target' &&
+      github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    concurrency:
+      group: agent-gate-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - name: Check out pipeline scripts from the default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Mark the finished build ready for review
+        uses: actions/github-script@v7
+        env:
+          COPILOT_ASSIGN_TOKEN: ${{ secrets.COPILOT_ASSIGN_TOKEN }}
+        with:
+          script: |
+            const { handlePullRequestEvent } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/agent-gate.mjs`);
+            await handlePullRequestEvent({ github, context, core, env: process.env });
+
+  close-out:
+    if: >-
+      vars.AGENT_PIPELINE_ENABLED == 'true' &&
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    concurrency:
+      group: agent-gate-close-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - name: Check out pipeline scripts from the default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Clear pipeline labels and file follow-ups
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { handlePullRequestEvent } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/agent-gate.mjs`);
+            await handlePullRequestEvent({ github, context, core, env: process.env });
+
+  evaluate:
+    if: >-
+      vars.AGENT_PIPELINE_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      issues: write
+      pull-requests: write
+      statuses: read
+    concurrency:
+      group: agent-gate-evaluate-${{ inputs.pr_number || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_sha }}
+      cancel-in-progress: false
+    steps:
+      - name: Check out pipeline scripts from the default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Route blockers or merge when every gate is green
+        uses: actions/github-script@v7
+        env:
+          COPILOT_ASSIGN_TOKEN: ${{ secrets.COPILOT_ASSIGN_TOKEN }}
+          AGENT_MERGE_REVIEWER: ${{ vars.AGENT_MERGE_REVIEWER }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        with:
+          script: |
+            const gate = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/agent-gate.mjs`);
+            const handler = context.eventName === "workflow_dispatch" ? gate.handleManualEvaluate : gate.handleWorkflowRun;
+            await handler({ github, context, core, env: process.env });
