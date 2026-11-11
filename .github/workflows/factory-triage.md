@@ -1,10 +1,10 @@
 ---
 name: Factory Triage
-description: Read-only factory-orchestrator triage of every new issue; labels it and posts one plan comment, never starts work (SPEC/github-agent-pipeline.md, D056).
+description: Read-only factory-orchestrator triage of issues opened by triage+ collaborators; labels it and posts one plan comment, never starts work (SPEC/github-agent-pipeline.md, D056).
 on:
   issues:
     types: [opened, reopened]
-  roles: all
+  roles: [admin, maintainer, write, triage]
   skip-bots: [github-actions, copilot, copilot-swe-agent, dependabot]
 if: >-
   vars.AGENT_PIPELINE_ENABLED == 'true' &&
