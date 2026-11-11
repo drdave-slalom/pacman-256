@@ -4,7 +4,8 @@ This is the operating guide for the **local, agent-powered software factory**
 for pacman-256. It defines how we break work into bounded units and distribute
 them across role-specific subagents, with a human Lead owning acceptance and
 integration. The factory supports GitHub Copilot in VS Code and the original
-Herdr (Pi Herdsman) runtime.
+Herdr (Pi Herdsman) runtime. A cloud variant runs on GitHub issues and PRs;
+see [GitHub agent pipeline (cloud mode)](#github-agent-pipeline-cloud-mode).
 
 **Lead sessions should load the `factory-orchestrator` skill** to run this
 workflow; it is the executable form of this guide. The skill is dual-located:
@@ -228,6 +229,115 @@ Use the `.pi/agents/` definitions with Herdr's `delegate_agent` interface.
 Create a separate worktree for each unit, pass relevant files, and forward
 completed-agent result references exactly as described below. The default
 `scripts/factory-setup.sh` mode continues to validate this original runtime.
+
+## GitHub agent pipeline (cloud mode)
+
+A label-driven pipeline runs the same SDLC on GitHub without a VS Code
+session (D057, [spec](../SPEC/github-agent-pipeline.md)). The local VS Code /
+Herdr flow above stays supported; the two are complementary.
+[`factory-control/`](../factory-control/README.md) remains the local operator
+surface (TUI + read-only web mirror) for local units.
+
+**When to use which:**
+
+- **Cloud:** well-specified, low-risk units (docs, chores, follow-ups) and
+  first drafts of features that need no phone or LAN check during the build.
+- **Local (VS Code / Herdr):** gameplay and multiplayer work that needs
+  phone/LAN validation, multi-unit parallel work in worktrees, or anything
+  needing close human steering.
+
+**Moving parts:** `.github/workflows/copilot-setup-steps.yml` (Node 22.18 +
+`npm ci` for the cloud agent); `agent-dispatch.yml` and `agent-gate.yml`
+(label/comment glue, logic in `.github/scripts/agent-gate.mjs`, always loaded
+from the default branch); and the gh-aw workflows `factory-triage.md`,
+`factory-review.md`, and `factory-qa.md` (each compiled to a `.lock.yml`). The
+builder is the Copilot cloud agent; triage, review, and QA are read-only and
+write only through gh-aw safe outputs.
+
+**Setup prerequisites:**
+
+- Settings → Actions → General: **Allow GitHub Actions to create and approve
+  pull requests** on (the factory review submits an APPROVE review).
+- Settings → General: **Allow auto-merge** on.
+- Secrets: `COPILOT_ASSIGN_TOKEN` (user PAT for Copilot assignment, `@copilot`
+  comments, marking PRs ready, and merging) and `COPILOT_GITHUB_TOKEN` (gh-aw).
+- Variable `AGENT_PIPELINE_ENABLED` = `true`. Optional: `AGENT_MAX_ACTIVE`
+  (default 3) and `AGENT_MERGE_REVIEWER` (default: the repo owner).
+- Labels from `.github/labels.yml` synced (`node scripts/sync-labels.mjs`).
+- Do **not** set `GH_AW_GITHUB_TOKEN`: it changes the identity the gh-aw
+  reviewer posts as, so the gate no longer recognizes its reviews and verdicts.
+- While "Allow GitHub Actions to create and approve pull requests" is on, any
+  workflow can satisfy a required-approval rule, so do not rely on required
+  approvals as a human gate; human gates are `agent:go`, `/approve-spec`, and
+  `agent:needs-human`.
+
+| Step | Trigger | Result |
+|---|---|---|
+| 0. Triage | Issue opened/reopened by a triage+ collaborator (others are not triaged) | `factory-triage` (orchestrator profile, read-only) adds `type:*`/`lane:*`/`role:*` labels and one triage comment; labels `status:spec` if ready or `agent:needs-human` if gaps. Never starts work. |
+| 1. Queue | A triage+ user (not a bot) adds `agent:go` | `agent-dispatch.yml` assigns Copilot (`factory-orchestrator` profile, model `auto`) to write only `SPEC/<id>-<slug>.md` with a `## Delegation` section and open a draft PR with `Closes #N`. `agent:go` → `agent:active` + `status:spec`; stale `cycle:*`, `status:ready`/`status:review`, and `role:*` labels are cleared. |
+| 2. Spec gate | A write+ user (not a bot) comments `/approve-spec`, or `/approve-spec <sha>` which must match the PR head | Refused while the PR title starts with `[WIP]` (Copilot is still writing). `agent-gate.yml` requires exactly one linked issue with `agent:active` and binds the PR to it, and checks the PR changes exactly one `SPEC/*.md` with a valid Delegation section; otherwise `agent:needs-human`. It then re-adds `[WIP] ` to the PR title, mirrors Delegation to `role:*` labels, sets `status:ready`, and posts one `@copilot` build comment. |
+| 3. Build | That `@copilot` comment | Copilot implements per the Delegation, acting as each named `.github/agents/<profile>.agent.md` in order (delegating to that custom agent if available), runs `npm run check`, fills the PR template, and removes `[WIP]` from the title last. When `[WIP]` is gone, the gate marks the PR ready and sets `status:review`. |
+| 4. Review + QA | PR ready / new push | `factory-review` submits a `github-actions[bot]` APPROVE or REQUEST_CHANGES review on the head commit (`[blocker]/[should]/[nit]`). `factory-qa` runs `npm ci && npm run check` plus focused tests; its `qa-verdict` job posts `<!-- factory-qa:pass\|fail -->` with `Head: <sha>`. The gate trusts only `github-actions[bot]` verdicts for the current head. |
+| 5. Fix cycles | Changes requested, QA fail, or failing required checks | `cycle:1`, then `cycle:2` (D050). The gate turns the PR back to draft with `[WIP]` and `status:ready` and posts one `@copilot` comment listing the blockers. Copilot removes `[WIP]` last, which triggers exactly one re-review, so intermediate pushes don't burn cycles. Blockers after `cycle:2` → `agent:needs-human`. Review/QA finishing without a verdict → `agent:needs-human`. |
+| 6. Merge | Required CI green, Copilot code review present, factory review approved, QA pass, no `agent:needs-human` | Auto-merge (squash, enabled with `COPILOT_ASSIGN_TOKEN` so the merge triggers CI, deploy, and close-out; bound to the reviewed head SHA, so any new push disables it and needs fresh review and QA) only when the issue has `type:docs`, `type:chore`, or `follow-up` and **not** `type:feature`, `type:bug`, or `playtest`; the strictest label wins. If GitHub reports the PR already clean, the gate squash-merges directly. PRs touching sensitive paths in any commit of the PR (`.github/`, `deploy/`, `scripts/`, `factory-control/server/`, or at any depth and case-insensitive: `Dockerfile`, `Dockerfile.*`, `.dockerignore`, `.npmrc`, `package.json`, `package-lock.json`) always need a human. Otherwise: `agent:needs-human` plus a review request to `AGENT_MERGE_REVIEWER`. |
+| 7. Close-out | PR merged | `Closes #N` closes the issue; Follow-ups items become `follow-up` issues; `agent:active`, `status:*`, `cycle:*`, and `agent:needs-human` are removed. A PR closed unmerged removes `agent:active`, `cycle:*`, `status:ready`/`status:review`, and `role:*`, and adds `agent:needs-human`. |
+
+**Delegation section.** The spec's `## Delegation` lists one line per step,
+`- <profile>: <task>` (profiles: `builder`, `artist`, `gameplay-designer`,
+`docs-writer`), plus `QA depth: fast|slow`.
+
+**Labels** (`.github/labels.yml`): `agent:go` (start), `agent:active` (one
+agent run per issue; at most `AGENT_MAX_ACTIVE` issues at once),
+`agent:needs-human` (pipeline stopped; a person must act), `cycle:1`/`cycle:2`
+(D050 counter). They work alongside the D055 `type:*`, `role:*`, `lane:*`, and
+`status:*` labels.
+
+**Kill switch.** Workflows act only while repo variable `AGENT_PIPELINE_ENABLED`
+is `true`. Unset it or set any other value to stop all pipeline actions.
+
+**Stop, re-check, or restart a unit.**
+
+- Stop: remove `agent:active`, unassign Copilot from the issue/PR, and add
+  `agent:needs-human`.
+- Small fix on an open PR: post one `@copilot` comment describing the change.
+- Re-check gates (for example after a late Copilot code review): run
+  `agent-gate.yml` manually with input `pr_number`
+  (`gh workflow run agent-gate.yml -f pr_number=<n>`).
+- Restart dispatch (for example after a PR was closed unmerged): close any
+  open agent PR for the issue, unassign Copilot, remove `agent:active` and
+  `agent:needs-human`, then a triage+ user removes and re-adds `agent:go`. The
+  issue must be open. Dispatch clears stale `cycle:*`, `status:ready`/`status:review`,
+  and `role:*` labels itself. With `agent:needs-human` present, dispatch only
+  comments and does nothing. When the `AGENT_MAX_ACTIVE` limit is reached,
+  `agent:go` stays queued; remove and re-add it when a slot frees up.
+- `/approve-spec` is ignored unless the issue has `status:spec` and the PR
+  title has no `[WIP]` prefix; with `agent:needs-human` present, remove it and
+  comment `/approve-spec` again.
+
+**Permissions.** Only triage+ users can trigger `agent:go`; only write+ users
+can `/approve-spec`; bot actors are ignored at both human gates. Workflows
+recheck permissions via the API and act only on Copilot-authored PRs bound to
+exactly one linked issue with `agent:active`. Issue and PR text is
+untrusted input.
+
+**Known limits.**
+
+- No phone or LAN validation in the cloud; `playtest` and gameplay work still
+  needs a human check before merge.
+- Dispatch sends model `auto`: the local role-profile models (for example
+  Claude Haiku 5.5 for `docs-writer`) are not available to the cloud agent.
+- Copilot leaves PRs as drafts; the gate marks them ready once `[WIP]` is
+  removed, which starts Copilot code review.
+- **Accepted secret risk until issue #47:** `DO_API_TOKEN` and the
+  `COPILOT_ASSIGN_TOKEN` PAT are repo-level, and workflow-run approval for
+  Copilot branches is off, so an agent PR that edits a `pull_request` workflow
+  could read them. Mitigations: glue workflows run from base-branch definitions
+  (`pull_request_target`, `workflow_run`, `issues`, `issue_comment`) and never
+  check out PR code, and sensitive-path PRs never auto-merge. Residual risk:
+  a workflow on an agent PR branch can still read repo secrets and, through
+  `GITHUB_TOKEN`, post as `github-actions[bot]` (the identity the gate trusts
+  for review and QA verdicts) until #47 is done and workflow-run approval is
+  re-enabled.
 
 ## Worktree isolation
 

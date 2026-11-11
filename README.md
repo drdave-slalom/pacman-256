@@ -308,8 +308,10 @@ result-summary lines. The DOM and
 Phaser wiring in `main.ts`/`maze-scene.ts` has no automated tests. `npm test`
 also runs the tests for the staged-documentation update script
 (`scripts/update-staged-docs.test.mjs`), the software-factory smoke tests
-(`scripts/factory-smoke.test.mjs`), and the label-sync script tests
-(`scripts/sync-labels.test.mjs`). No cloud account is required.
+(`scripts/factory-smoke.test.mjs`), the label-sync script tests
+(`scripts/sync-labels.test.mjs`), the Docker build-boundary tests
+(`scripts/docker-build.test.mjs`), and the agent-pipeline gate tests
+(`.github/scripts/agent-gate.test.mjs`). No cloud account is required.
 `npm run build` covers all game and factory-control workspaces; `npm run check`
 retains that full-repository validation. `npm run build:game` builds only shared
 → server → client, and is the production Docker build target. The image uses
@@ -347,6 +349,11 @@ npm run factory:control:serve   # control server (127.0.0.1:4780)
 The TUI extension is loaded via `.pi/extensions/factory-control.ts`; it only
 mutates through the M2 prepare/execute protocol and never re-renders the Herdr
 widget.
+
+Factory units can also run on GitHub without a local session: label an issue
+`agent:go`, approve the spec with `/approve-spec`, and the Copilot cloud agent
+builds while review and QA workflows gate the merge. See
+[GitHub agent pipeline (cloud mode)](docs/FACTORY.md#github-agent-pipeline-cloud-mode).
 
 ## GitHub Actions
 
