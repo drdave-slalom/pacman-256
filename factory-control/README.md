@@ -121,3 +121,51 @@ LAN-only decision. The Vite dev server (for UI iteration) defaults to
 **Build/serve:** `npm run build` builds the web workspace; the control server
 serves `factory-control/web/dist` automatically (SPA fallback included).
 Smoke: `npm run factory:web:smoke`.
+
+## Guarded actions API (M2)
+
+The server exposes a guarded **action API** for the operator-side TUI (M3). It
+is the only surface that mutates git/GitHub/scripts; the web mirror is
+strictly read-only and never calls these endpoints. Every mutation goes
+through a two-step `prepare` → `execute` protocol with gate preconditions
+computed from the snapshot, per-unit locks, and an append-only audit log.
+
+### Endpoints
+
+- `POST /api/actions/<name>/prepare` body `{unit?, pr?, override?, root?}`
+  → `{requestId, ok, preconditions, plan}` (`preconditions` = `[{name, ok,
+  detail}]`; `root:true` is accepted by `checks/run` only).
+- `POST /api/actions/<name>/execute` body `{requestId, confirm: true, approvedBy}`
+  → `{requestId, outcome, command, exit, outputTail}`; gate violations return
+  `409` with `{error, preconditions}` and never run the command.
+- `GET /api/actions/audit?limit=200` → recent audit lines (newest last).
+- `GET /api/actions/locks` → current lock state.
+
+Actions: `worktree/create`, `worktree/remove`, `checks/run`, `pr/open`,
+`checks/query` (the polling API behind the TUI's `ci/watch` pane), `pr/merge`,
+and `main/merge` (direct, requires `override:true`). Guards are listed in
+[SPEC/factory-control-actions.md](SPEC/factory-control-actions.md) and are
+computed from the snapshot at both prepare and execute time. `main/merge`
+runs `git fetch origin` and a clean-tree check (`git diff --quiet HEAD`) before
+`git checkout main`, so stale local refs cannot produce a wrong/failed merge.
+
+Unit ids are validated against `/^[a-z0-9._-]+$/i` and canonicalized before
+they flow into subprocess args, branch/script names, or lock keys; `pr` must
+be a positive integer. Invalid input is rejected with 400.
+
+### Operator token
+
+Remote operator sessions require the `X-Control-Token` header matching the
+server-configured token (`FACTORY_CONTROL_TOKEN` env). Localhost sessions are
+exempt (token optional). With no token configured, remote action sessions are
+denied (`503`).
+
+### State (gitignored)
+
+- `factory-control/state/audit.log.jsonl` — append-only JSONL: `{at, action,
+  requestId, operator, ip, unit?, pr?, preconditions, outcome, exit?}`.
+- `factory-control/state/locks/<unit>.lock` — per-unit lock files; stale locks
+  (>1 h, or held by a dead pid) are releasable with `override:true`.
+
+Build/test: `npm run check` covers the server workspace, including the action
+modules and their unit/integration tests.
