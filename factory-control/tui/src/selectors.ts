@@ -131,6 +131,23 @@ export function buildBoard(snapshot: FactorySnapshot, filter = ""): BoardModel {
   };
 }
 
+export interface PipelineStage {
+  key: string;
+  title: string;
+  count: number;
+}
+
+/**
+ * The eight flow-strip stages (Spec…Done) with live unit counts, in order.
+ * `Unknown`/`Orphaned` are deliberately excluded — they stay below the strip.
+ */
+export function pipelineStages(model: BoardModel): PipelineStage[] {
+  return STAGE_COLUMNS.map((c) => {
+    const col = model.columns.find((x) => x.key === c.key);
+    return { key: c.key, title: c.title, count: col?.units.length ?? 0 };
+  });
+}
+
 /** Flat list of units in the same order the board renderer draws them. */
 export function flattenUnits(model: BoardModel): Unit[] {
   const out: Unit[] = [];

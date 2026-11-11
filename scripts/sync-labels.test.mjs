@@ -31,6 +31,11 @@ const specLabels = [
     "blocked",
     "follow-up",
     "playtest",
+    "agent:go",
+    "agent:active",
+    "agent:needs-human",
+    "cycle:1",
+    "cycle:2",
 ];
 
 test("labels.yml defines exactly the spec label set with valid colors and descriptions", () => {

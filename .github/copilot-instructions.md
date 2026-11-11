@@ -56,6 +56,7 @@ For path-specific instructions (e.g. per-language or per-directory guidance), se
 - Follow the brief's AI-first workflow: propose acceptance criteria before implementing, keep steps small and bounded, test with each change, review for missed requirements/multi-us/networkplay edge cases, and report what changed/tested/uncertain.
 - **Standing workflow gates (D048):** implementation work starts as a `SPEC/` spec handed to the matching role agent (the Lead does not implement; only research, read-only review, simple lookups, and small non-code edits stay direct; if subagents/roles are unavailable, stop and ask — only the user may waive); `qa-tester` and `pr-reviewer` must pass before any PR or merge (PR by default; direct merge only with user approval); after a PR or merge, run `gh pr checks <pr> --watch` (or the `main` CI run), fix failures via the owning writer, and report final CI status. Cap review/fix at two cycles per unit; after that only blockers reopen work and other findings become PR follow-ups (D050). See [docs/FACTORY.md](../docs/FACTORY.md).
 - **Tracker (D055):** GitHub Issues tracks factory units; PRs fill `.github/pull_request_template.md` and include `Closes #N` for the unit's issue. See [FACTORY.md](../docs/FACTORY.md#github-tracker).
+- **Cloud pipeline (D057):** as the Copilot cloud agent on an issue, follow the label-driven pipeline (`agent:go` → spec-only draft PR → `/approve-spec` → build per the spec's Delegation section). See [FACTORY.md](../docs/FACTORY.md#github-agent-pipeline-cloud-mode).
 
 ## Roles
 

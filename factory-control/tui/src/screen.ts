@@ -58,6 +58,7 @@ import {
   renderHelp,
   renderLeadPrompt,
   renderOfflineBanner,
+  renderPipelineStrip,
   renderQueueView,
   type ActionResultState,
   type LineStyle,
@@ -706,6 +707,13 @@ export class FactoryScreen implements Component {
       headLines = renderOfflineBanner({ ...this.offline, retrying: true }, style, width);
     } else {
       headLines = renderHeader(this.snapshot, style, width);
+      // Pipeline flow strip leads the board view, above the scrollable columns.
+      if (this.view === "board") {
+        const model = this.model;
+        if (model !== null) {
+          headLines = [...headLines, ...renderPipelineStrip(model, style, width)];
+        }
+      }
     }
 
     const foot = renderHelp(this.view, style, width);

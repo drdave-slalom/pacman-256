@@ -6,6 +6,7 @@ import {
   flattenUnits,
   formatAge,
   formatElapsed,
+  pipelineStages,
   showBranch,
   summarizeAttention,
   unitById,
@@ -29,6 +30,12 @@ test("buildBoard honors a filter query", () => {
   const units = flattenUnits(model);
   assert.equal(units.length, 1);
   assert.equal(units[0]?.id, "T3-review");
+});
+
+test("pipelineStages lists the eight stages in order with live counts", () => {
+  const stages = pipelineStages(buildBoard(fixtureSnapshot()));
+  assert.deepEqual(stages.map((s) => s.title), ["Spec", "Dispatch", "Execute", "Review", "QA", "Integrate", "CI", "Done"]);
+  assert.deepEqual(stages.map((s) => s.count), [1, 0, 1, 1, 0, 0, 0, 1]);
 });
 
 test("flattenUnits follows column order", () => {
