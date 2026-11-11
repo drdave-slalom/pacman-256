@@ -17,6 +17,8 @@ import {
   generateMaze,
   isWalkableIn,
   joinErrorCode,
+  joinErrorText,
+  mazeDimensionsForPlayers,
   spawnDirection,
   parseActionResult,
   parseInputRejected,
@@ -268,10 +270,27 @@ test("AC2: join failures reach the SDK with mappable codes", { timeout: 20_000 }
     );
     assert.equal(Object.keys(host.snapshot().players).length, 1);
   });
-  await t.test("fifth client -> ROOM_FULL", async () => {
+  await t.test("T12: 32nd client joins and the 33rd is rejected with ROOM_FULL", async () => {
     const host = await harness.create("P1");
-    for (const name of ["P2", "P3", "P4"]) await harness.join(host.room.roomId, name);
-    await rejectsWithCode(harness.client.joinById(host.room.roomId, joinOptions("P5")), "ROOM_FULL");
+    for (let i = 2; i <= 32; i++) {
+      const p = await harness.join(host.room.roomId, `P${i}`);
+      if (i === 32) {
+        assert.equal(Object.keys(p.snapshot().players).length, 32);
+      }
+    }
+    const full = await host.waitFor((s) => Object.keys(s.players).length === 32, "32 players");
+    assert.equal(Object.keys(full.players).length, 32);
+    // Colyseus reports a capacity-locked room with its own error string; the
+    // SDK maps it to ROOM_FULL and the client then renders the shared message,
+    // which must cite the 32-player cap.
+    await assert.rejects(
+      harness.client.joinById(host.room.roomId, joinOptions("P33")),
+      (error: unknown) => {
+        assert.equal(joinErrorCode(error), "ROOM_FULL");
+        assert.ok(joinErrorText("ROOM_FULL").includes("(32 players)"), joinErrorText("ROOM_FULL"));
+        return true;
+      },
+    );
   });
   await t.test("join after start -> JOIN_CLOSED", async () => {
     const { host } = await startOneVsOne(harness);
@@ -426,6 +445,136 @@ test("AC4: 3v1 starts and assigns three hunter spawns", { timeout: 15_000 }, asy
   const midRow = Math.floor(MAZE_HEIGHT / 2);
   for (const hunter of hunters) assert.ok(Math.floor(hunter.y) < midRow, "hunters spawn in the top half");
   for (const runner of runners) assert.ok(Math.floor(runner.y) > midRow, "runners spawn in the bottom half");
+});
+
+/** Join a full 32-player lobby and assign teams with the first `hunters` as hunters. */
+async function fullThirtyTwoLobby(harness: Harness, hunters: number): Promise<Player[]> {
+  const host = await harness.create("H1");
+  const players: Player[] = [host];
+  for (let i = 2; i <= 32; i++) {
+    players.push(await harness.join(host.room.roomId, `P${i}`));
+  }
+  await host.waitFor((s) => Object.keys(s.players).length === 32, "full lobby");
+  for (let i = 0; i < hunters; i++) {
+    expectAccepted(await players[i]!.request("chooseTeam", { team: "hunter" }));
+  }
+  for (let i = hunters; i < 32; i++) {
+    expectAccepted(await players[i]!.request("chooseTeam", { team: "runner" }));
+  }
+  return players;
+}
+
+test("T12: 16v16 starts on a scaled maze with 32 distinct, deterministic spawn cells", { timeout: 120_000 }, async (t) => {
+  const harness = await startServer(t);
+  const players = await fullThirtyTwoLobby(harness, 16);
+  expectAccepted(await players[0]!.request("startMatch", {}));
+  harness.advance(GAME_RULES.countdownMs);
+  const state = await players[0]!.waitFor((s) => s.phase === "playing", "playing");
+  const dims = mazeDimensionsForPlayers(32);
+  assert.deepEqual(dims, { width: 33, height: 31 });
+  assert.equal(state.mazeWidth, 33, "snapshot carries the authoritative maze width");
+  assert.equal(state.mazeHeight, 31, "snapshot carries the authoritative maze height");
+  const maze = generateMaze(state.mazeSeed, dims);
+  assert.equal(maze.length, dims.height);
+  assert.equal(maze[0]!.length, dims.width);
+  const hunters = Object.values(state.players).filter((p) => p.team === "hunter");
+  const runners = Object.values(state.players).filter((p) => p.team === "runner");
+  assert.equal(hunters.length, 16);
+  assert.equal(runners.length, 16);
+  const cells = new Set(Object.values(state.players).map((p) => `${p.x},${p.y}`));
+  assert.equal(cells.size, 32, "all 32 spawn cells must be distinct");
+  const midRow = Math.floor(dims.height / 2);
+  for (const player of Object.values(state.players)) {
+    assert.equal(player.lastInputSequence, -1);
+    assert.ok(isWalkableIn(maze, Math.floor(player.x), Math.floor(player.y)));
+    if (player.team === "hunter") assert.ok(Math.floor(player.y) < midRow, "hunters spawn in the top half");
+    else assert.ok(Math.floor(player.y) > midRow, "runners spawn in the bottom half");
+  }
+  // Deterministic placement matches the shared function for the same maze, and
+  // join order maps to the spawn array order (H1..P16 hunters, P17..P32 runners).
+  const spawns = findSpawnCells(maze, { hunter: 16, runner: 16 });
+  const actual = (side: "hunter" | "runner") =>
+    Object.values(state.players).filter((p) => p.team === side).map((p) => `${p.x},${p.y}`);
+  assert.deepEqual(actual("hunter"), spawns.hunter.map((c) => `${c.col + 0.5},${c.row + 0.5}`));
+  assert.deepEqual(actual("runner"), spawns.runner.map((c) => `${c.col + 0.5},${c.row + 0.5}`));
+});
+
+test("T12: uneven teams at capacity (17v15) start cleanly with distinct spawns", { timeout: 120_000 }, async (t) => {
+  const harness = await startServer(t);
+  const players = await fullThirtyTwoLobby(harness, 17);
+  expectAccepted(await players[0]!.request("startMatch", {}));
+  harness.advance(GAME_RULES.countdownMs);
+  const state = await players[0]!.waitFor((s) => s.phase === "playing", "playing");
+  const hunters = Object.values(state.players).filter((p) => p.team === "hunter");
+  const runners = Object.values(state.players).filter((p) => p.team === "runner");
+  assert.equal(hunters.length, 17);
+  assert.equal(runners.length, 15);
+  const cells = new Set(Object.values(state.players).map((p) => `${p.x},${p.y}`));
+  assert.equal(cells.size, 32, "spawns must be distinct across uneven teams");
+  const dims = mazeDimensionsForPlayers(32);
+  const maze = generateMaze(state.mazeSeed, dims);
+  const midRow = Math.floor(dims.height / 2);
+  for (const hunter of hunters) {
+    assert.ok(isWalkableIn(maze, Math.floor(hunter.x), Math.floor(hunter.y)));
+    assert.ok(Math.floor(hunter.y) < midRow, "hunters spawn in the top half");
+  }
+  for (const runner of runners) {
+    assert.ok(isWalkableIn(maze, Math.floor(runner.x), Math.floor(runner.y)));
+    assert.ok(Math.floor(runner.y) > midRow, "runners spawn in the bottom half");
+  }
+});
+
+/** Place every runner on the first hunter spawn so they all overlap at round start. */
+function allRunnersOnFirstHunterSpawn(): SpawnPlacer {
+  return (team, position, maze) => {
+    if (team !== "runner") return position;
+    const cell = findSpawnCells(maze).hunter[0]!;
+    return { x: cell.col + 0.5, y: cell.row + 0.5 };
+  };
+}
+
+test("T12: a full 16v16 round completes by timeout with runner/timeout outcomes", { timeout: 120_000 }, async (t) => {
+  const harness = await startServer(t);
+  const players = await fullThirtyTwoLobby(harness, 16);
+  expectAccepted(await players[0]!.request("startMatch", {}));
+  harness.advance(GAME_RULES.countdownMs);
+  const playing = await players[0]!.waitFor((s) => s.phase === "playing", "playing");
+  assert.equal(playing.mazeWidth, 33);
+  assert.equal(playing.mazeHeight, 31);
+  const playingHunters = Object.values(playing.players).filter((p) => p.team === "hunter" && p.alive).length;
+  const playingRunners = Object.values(playing.players).filter((p) => p.team === "runner" && p.alive).length;
+  assert.equal(playingHunters, 16);
+  assert.equal(playingRunners, 16);
+  // Advance the injected clock the whole round; the simulation catches up.
+  harness.advance(GAME_RULES.roundDurationMs);
+  const results = await players[0]!.waitFor((s) => s.phase === "results", "timeout results");
+  assert.equal(results.resultWinner, "runner");
+  assert.equal(results.resultReason, "timeout");
+  assert.equal(results.resultEndedAt, playing.roundEndsAt);
+  const hunters = Object.values(results.players).filter((p) => p.team === "hunter");
+  const runners = Object.values(results.players).filter((p) => p.team === "runner");
+  assert.equal(hunters.length, 16);
+  assert.equal(runners.length, 16);
+  for (const player of Object.values(results.players)) {
+    assert.equal(player.alive, true, "both teams survive a timeout");
+  }
+});
+
+test("T12: a scaled 16v16 round ends by team elimination with hunter/teamEliminated semantics", { timeout: 120_000 }, async (t) => {
+  const harness = await startServer(t, TEST_SEED, allRunnersOnFirstHunterSpawn());
+  const players = await fullThirtyTwoLobby(harness, 16);
+  expectAccepted(await players[0]!.request("startMatch", {}));
+  harness.advance(GAME_RULES.countdownMs);
+  const results = await players[0]!.waitFor((s) => s.phase === "results", "elimination results");
+  assert.equal(results.resultWinner, "hunter");
+  assert.equal(results.resultReason, "teamEliminated");
+  assert.equal(results.resultEndedAt, harness.now());
+  const hunters = Object.values(results.players).filter((p) => p.team === "hunter");
+  const runners = Object.values(results.players).filter((p) => p.team === "runner");
+  assert.equal(hunters.length, 16);
+  assert.equal(runners.length, 16, "eliminated runners stay listed as spectators");
+  for (const hunter of hunters) assert.equal(hunter.alive, true);
+  for (const runner of runners) assert.equal(runner.alive, false);
 });
 
 test("AC5: B observes A move after A's setDirection; positions stay walkable", { timeout: 15_000 }, async (t) => {
@@ -732,6 +881,18 @@ test("T5 unit: resolveContacts batches hunter x runner contacts order-independen
   ];
   assert.deepEqual([...resolveContacts(moves)].sort(), ["r1", "r2"]);
   assert.deepEqual([...resolveContacts([...moves].reverse())].sort(), ["r1", "r2"]);
+});
+
+test("T12 unit: 16v16 contact resolution is correct and order-independent", () => {
+  const hunters = Array.from({ length: 16 }, (_, i) => move(`h${i}`, "hunter", [i + 0.5, 1.5]));
+  const runners = Array.from({ length: 16 }, (_, i) => move(`r${i}`, "runner", [i + 0.5, 1.5]));
+  const eliminated = [...resolveContacts([...hunters, ...runners])].sort();
+  assert.deepEqual(eliminated, runners.map((r) => r.id).sort(), "every overlapping runner is eliminated");
+  // Far apart at 16v16: no eliminations.
+  const farRunners = Array.from({ length: 16 }, (_, i) => move(`r${i}`, "runner", [i + 0.5, 9.5]));
+  assert.equal(resolveContacts([...hunters, ...farRunners]).size, 0);
+  // Reversed iteration order must give the identical elimination set.
+  assert.deepEqual([...resolveContacts([...hunters, ...runners].reverse())].sort(), eliminated);
 });
 
 test("T5 unit: same-step elimination + last-hunter disconnect is a simultaneous wipe", () => {

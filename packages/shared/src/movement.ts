@@ -1,8 +1,6 @@
 import type { Direction } from "./index.ts";
 import {
-  MAZE_HEIGHT,
   MAZE_MAP,
-  MAZE_WIDTH,
   PLAYER_SPAWN,
   isInsideIn,
   isWalkableIn,
@@ -92,6 +90,8 @@ export function stepPlayerMove(
   const position: Vec2 = { x: state.position.x, y: state.position.y };
   let direction: Direction = state.direction;
   let queuedDirection: Direction | null = state.queuedDirection;
+  const height = maze.length;
+  const width = height > 0 ? maze[0]!.length : 0;
 
   // Immediate input semantics: same direction is a no-op, opposite reverses
   // right away (even at zero movement), perpendicular stays buffered.
@@ -145,7 +145,7 @@ export function stepPlayerMove(
 
       const nextCol = cellX + sign;
       const nextBlocked =
-        !isInsideIn(MAZE_WIDTH, MAZE_HEIGHT, nextCol, row) ||
+        !isInsideIn(width, height, nextCol, row) ||
         !isWalkableIn(maze, nextCol, row);
       // Destination center: the next center ahead when the path is open, or
       // the current cell center when blocked (never a wall boundary).
@@ -192,7 +192,7 @@ export function stepPlayerMove(
 
       const nextRow = cellY + sign;
       const nextBlocked =
-        !isInsideIn(MAZE_WIDTH, MAZE_HEIGHT, col, nextRow) ||
+        !isInsideIn(width, height, col, nextRow) ||
         !isWalkableIn(maze, col, nextRow);
       const nextCenterY = atCenter
         ? cellY + 0.5 + sign

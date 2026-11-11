@@ -43,6 +43,8 @@ function snapshot(overrides: Partial<GameRoomSnapshot> = {}): GameRoomSnapshot {
     serverTime: 0,
     roundId: "",
     mazeSeed: 0,
+    mazeWidth: 0,
+    mazeHeight: 0,
     countdownEndsAt: 0,
     roundEndsAt: 0,
     resultWinner: "",

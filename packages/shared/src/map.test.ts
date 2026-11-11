@@ -7,6 +7,8 @@ import {
   PLAYER_SPAWN,
   isInside,
   isWalkable,
+  isWalkableIn,
+  mazeDimensionsForPlayers,
 } from "./map.ts";
 
 test("maze grid has the approved dimensions", () => {
@@ -48,6 +50,33 @@ test("border walls and interior corridors are encoded consistently", () => {
 test("spawn cell is inside the maze and walkable", () => {
   assert.equal(isInside(PLAYER_SPAWN.col, PLAYER_SPAWN.row), true);
   assert.equal(isWalkable(PLAYER_SPAWN.col, PLAYER_SPAWN.row), true);
+});
+
+test("mazeDimensionsForPlayers keeps the 21x19 canvas up to 8 players and scales above", () => {
+  for (let players = 1; players <= 8; players++) {
+    assert.deepEqual(mazeDimensionsForPlayers(players), { width: 21, height: 19 });
+  }
+  for (let players = 9; players <= 16; players++) {
+    assert.deepEqual(mazeDimensionsForPlayers(players), { width: 25, height: 23 });
+  }
+  for (let players = 17; players <= 24; players++) {
+    assert.deepEqual(mazeDimensionsForPlayers(players), { width: 29, height: 27 });
+  }
+  for (let players = 25; players <= 32; players++) {
+    assert.deepEqual(mazeDimensionsForPlayers(players), { width: 33, height: 31 });
+  }
+});
+
+test("isWalkableIn uses the maze's own dimensions, not just the static canvas", () => {
+  const small = MAZE_MAP;
+  assert.equal(isWalkableIn(small, 19, 17), true);
+  assert.equal(isWalkableIn(small, 21, 18), false, "outside the 21x19 grid");
+  const large = Array.from({ length: 31 }, (_, row) =>
+    row === 0 || row === 30 ? "#".repeat(33) : `#${".".repeat(31)}#`,
+  );
+  assert.equal(isWalkableIn(large, 31, 29), true, "large maze interior");
+  assert.equal(isWalkableIn(large, 32, 29), false, "large maze border");
+  assert.equal(isWalkableIn(large, 1, 30), false, "large maze bottom border");
 });
 
 test("every walkable cell is reachable from the spawn", () => {

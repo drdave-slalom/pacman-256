@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { MAZE_HEIGHT, MAZE_WIDTH, generateMaze, isWalkableIn } from "@maze/shared";
+import { MAZE_HEIGHT, MAZE_WIDTH, generateMaze, isWalkableIn, mazeDimensionsForPlayers } from "@maze/shared";
 import type { Direction, GameRoomSnapshot, PlayerTeam } from "@maze/shared";
 import { countdownRemaining, PICKUP_CUES, playerEffectCue } from "./hud-view.ts";
 import { Interpolator, mazeKey, playerViews } from "./session-model.ts";
@@ -186,7 +186,15 @@ export class MazeScene extends Phaser.Scene {
     }
     if (key !== this.renderedMazeKey) {
       this.renderedMazeKey = key;
-      this.renderMaze(generateMaze(snapshot.mazeSeed));
+      // T12: render the authoritative maze dimensions carried on the snapshot
+      // (set by the server from the shared sizing rule at round start). The
+      // roster-based inference stays as a defensive fallback for snapshots
+      // without dims (e.g. older servers).
+      const dims =
+        snapshot.mazeWidth > 0 && snapshot.mazeHeight > 0
+          ? { width: snapshot.mazeWidth, height: snapshot.mazeHeight }
+          : mazeDimensionsForPlayers(Object.keys(snapshot.players).length);
+      this.renderMaze(generateMaze(snapshot.mazeSeed, dims));
       this.interpolator.clear();
       this.lastRevision = -1;
     }
@@ -288,16 +296,27 @@ export class MazeScene extends Phaser.Scene {
   }
 
   private renderMaze(maze: readonly string[]): void {
+    const width = maze[0]?.length ?? MAZE_WIDTH;
+    const height = maze.length;
+    // T12: scaled rooms have larger mazes; resize the canvas to the generated
+    // dimensions (Scale.FIT keeps it fitting the phone) and re-center the
+    // countdown readout.
+    const targetW = width * TILE_SIZE;
+    const targetH = height * TILE_SIZE;
+    if (this.scale.gameSize.width !== targetW || this.scale.gameSize.height !== targetH) {
+      this.scale.resize(targetW, targetH);
+    }
+    this.countdownText.setPosition(targetW / 2, targetH / 2);
     const tiles = this.mazeGraphics;
     tiles.clear();
     // Near-black background; corridors stay darker than the wall zones.
     tiles.fillStyle(0x05060a, 1);
-    tiles.fillRect(0, 0, MAZE_WIDTH * TILE_SIZE, MAZE_HEIGHT * TILE_SIZE);
+    tiles.fillRect(0, 0, targetW, targetH);
     // Subtle dark-blue tint behind wall cells so wall masses read distinctly
     // from the black corridors.
     tiles.fillStyle(0x0b1224, 1);
-    for (let row = 0; row < MAZE_HEIGHT; row++) {
-      for (let col = 0; col < MAZE_WIDTH; col++) {
+    for (let row = 0; row < height; row++) {
+      for (let col = 0; col < width; col++) {
         if (!isWalkableIn(maze, col, row)) {
           tiles.fillRect(col * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
         }
@@ -307,8 +326,8 @@ export class MazeScene extends Phaser.Scene {
     // Neon line art: a glowing stroke runs along every floor/wall boundary
     // (soft outer halos then a hot bright core).
     const segments: Array<[number, number, number, number]> = [];
-    for (let row = 0; row < MAZE_HEIGHT; row++) {
-      for (let col = 0; col < MAZE_WIDTH; col++) {
+    for (let row = 0; row < height; row++) {
+      for (let col = 0; col < width; col++) {
         if (!isWalkableIn(maze, col, row)) {
           continue;
         }

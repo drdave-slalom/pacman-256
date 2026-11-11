@@ -404,3 +404,21 @@ Phaser's downward-positive Y coordinates passes through `(0, -radius)` — the t
 resolves the PR #24 review blocker (issue #63); the previous anticlockwise arc
 swept through `(0, +radius)` (the bottom), leaving a lower semicircle and the
 eyes outside the body.
+
+## D059 — Room capacity and maze/spawn scaling for up to 32 players (T12)
+
+Adopted in T12 (issue #83): `GAME_RULES.maxPlayers` raised 4 → 32, and the
+room rejects a 33rd join with an updated `ROOM_FULL` message. Maze dimensions
+scale with room size via the shared `mazeDimensionsForPlayers(n)` rule: n ≤ 8
+→ 21×19 (unchanged), 9–16 → 25×23, 17–24 → 29×27, 25–32 → 33×31 (odd,
+symmetric); the 21×19 path remains byte-identical and the client/server still
+regenerate identical mazes from one uint32 seed. Spawn placement scales to N
+per team (default 16; arrays are sized to actual team sizes so uneven lobbies
+up to 31v1 start cleanly), hunters top half / runners bottom half, deterministic.
+The snapshot now carries authoritative maze width/height (set at start, reset on
+return-to-lobby) so a client renders exactly the simulated maze even if the
+roster changes during countdown. Scaled mazes never leak an unvalidated grid:
+the generator falls back to `buildMinimalValidMaze` and throws a clear error
+only if even that fails. Review and QA passed (475+74 tests, focused 96/96,
+live 32-client loopback probe); remaining human steps are the cloud deploy smoke
+test and a physical phone/LAN 16v16 match, which are recorded as follow-ups.

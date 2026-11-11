@@ -57,6 +57,8 @@ function snapshot(overrides: Partial<GameRoomSnapshot> = {}): GameRoomSnapshot {
     serverTime: 1_000_000,
     roundId: "",
     mazeSeed: 0,
+    mazeWidth: 0,
+    mazeHeight: 0,
     countdownEndsAt: 0,
     roundEndsAt: 0,
     resultWinner: "",
@@ -111,6 +113,25 @@ test("roundTimeRemaining is the server deadline minus server time, clamped, disp
   assert.equal(roundTimeRemaining(snapshot({ ...playing, serverTime: 1_181_000, roundEndsAt: 1_180_000 })), 0, "clamped at 0");
   assert.equal(roundTimeRemaining(snapshot({ phase: "results", roundId: "r1" })), 0, "results freeze the timer");
   assert.equal(roundTimeRemaining(snapshot({ phase: "countdown", roundId: "r1" })), 0);
+});
+
+test("T12: HUD roster handles 32 players with correct per-team counts and statuses", () => {
+  const players: Record<string, PlayerSnapshot> = {};
+  for (let i = 0; i < 16; i++) players[`h${i}`] = player(`h${i}`, { team: "hunter" });
+  for (let i = 0; i < 16; i++) players[`r${i}`] = player(`r${i}`, { team: "runner" });
+  players.h3!.alive = false;
+  players.r5!.alive = false;
+  players.r6!.alive = false;
+  const s = snapshot({ phase: "playing", roundId: "r1", players });
+  assert.equal(Object.keys(s.players).length, 32);
+  assert.deepEqual(aliveCounts(s), { hunter: 15, runner: 14 });
+  assert.equal(isLocalEliminated(s, "h3"), true);
+  assert.equal(isLocalEliminated(s, "h0"), false);
+  assert.equal(canSteer(s, "h0"), true);
+  assert.equal(canSteer(s, "h3"), false, "eliminated hunter cannot steer");
+  assert.equal(canSteer(s, "r5"), false, "eliminated runner cannot steer");
+  assert.ok(effectStatus(s, "h0").length > 0);
+  assert.equal(playerEffectCue(s, s.players.h0!), "", "no effects at start");
 });
 
 test("aliveCounts counts alive players per team, ignoring unassigned and eliminated", () => {
