@@ -68,7 +68,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-      pull-requests: read
+      pull-requests: write
     concurrency:
       group: agent-gate-pr-${{ github.event.pull_request.number }}
       cancel-in-progress: false
