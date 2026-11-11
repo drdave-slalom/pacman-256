@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fixtureSnapshot } from "./fixtures.ts";
+import { fixtureSnapshot, fixtureSnapshotWithIssues } from "./fixtures.ts";
 import {
   buildBoard,
   flattenUnits,
   formatAge,
   formatElapsed,
+  issueDisplayStatus,
   pipelineStages,
   showBranch,
   summarizeAttention,
@@ -78,4 +79,34 @@ test("formatElapsed buckets durations", () => {
 test("showBranch strips an origin/ prefix", () => {
   assert.equal(showBranch("origin/factory/t9"), "factory/t9");
   assert.equal(showBranch("factory/t9"), "factory/t9");
+});
+
+test("issueDisplayStatus prefers the status label over the GitHub state", () => {
+  const snapshot = fixtureSnapshotWithIssues();
+  const standalone = snapshot.units.find((u) => u.id === "issue12");
+  assert.ok(standalone?.issue);
+  assert.equal(issueDisplayStatus(standalone!.issue!), "ready");
+  const hybrid = snapshot.units.find((u) => u.id === "T3-review");
+  assert.equal(issueDisplayStatus(hybrid!.issue!), "review");
+});
+
+test("buildBoard places issue cards in their stage columns (standalone + hybrid)", () => {
+  const model = buildBoard(fixtureSnapshotWithIssues());
+  const byKey = new Map(model.columns.map((c) => [c.key, c]));
+  const specIds = byKey.get("spec")?.units.map((u) => u.id) ?? [];
+  assert.ok(specIds.includes("issue12"), `expected issue12 in spec column, got ${specIds.join(",")}`);
+  const reviewUnits = byKey.get("review")?.units ?? [];
+  assert.equal(reviewUnits.length, 1);
+  assert.equal(reviewUnits[0]?.kind, "hybrid");
+  assert.equal(reviewUnits[0]?.issue?.number, 7);
+});
+
+test("buildBoard filter matches issue number and title", () => {
+  const model = buildBoard(fixtureSnapshotWithIssues(), "laggy");
+  const flat = flattenUnits(model);
+  assert.equal(flat.length, 1);
+  assert.equal(flat[0]?.id, "issue12");
+  const byNumber = buildBoard(fixtureSnapshotWithIssues(), "7");
+  const ids = flattenUnits(byNumber).map((u) => u.id);
+  assert.ok(ids.includes("T3-review"), `expected #7 match on the hybrid card, got ${ids.join(",")}`);
 });

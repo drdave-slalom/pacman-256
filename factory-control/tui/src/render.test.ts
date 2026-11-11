@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { Unit } from "@maze/factory-control-shared";
-import { fixtureSnapshot } from "./fixtures.ts";
+import { fixtureSnapshot, fixtureSnapshotWithIssues } from "./fixtures.ts";
 import { buildBoard, flattenUnits } from "./selectors.ts";
 import {
   plainStyle,
@@ -192,6 +192,48 @@ test("renderDetail shows spec/git/pr/trail/next-action", () => {
   assert.ok(joined.includes("pr-reviewer"));
   assert.ok(joined.includes("Assign PR review"));
   assertLinesFit(lines, 120);
+});
+
+test("renderBoardBody shows issue cards as #n + title + status", () => {
+  const model = buildBoard(fixtureSnapshotWithIssues());
+  const lines = renderBoardBody(model, 0, plainStyle, 120);
+  const joined = lines.join("\n");
+  assert.ok(joined.includes("#12 Mobile touch controls feel laggy [ready]"));
+  assert.ok(joined.includes("#7 Add sound effects [review]"));
+  assertLinesFit(lines, 120);
+});
+
+test("renderDetail shows issue fields and the GitHub URL", () => {
+  const snapshot = fixtureSnapshotWithIssues();
+  const unit = flattenUnits(buildBoard(snapshot)).find((u) => u.id === "issue12");
+  assert.ok(unit);
+  const lines = renderDetail(unit!, snapshot, plainStyle, 140);
+  const joined = lines.join("\n");
+  assert.ok(joined.includes("issue"));
+  assert.ok(joined.includes("#12"));
+  assert.ok(joined.includes("state open"));
+  assert.ok(joined.includes("status ready"));
+  assert.ok(joined.includes("type:bug"));
+  assert.ok(joined.includes("lane:B"));
+  assert.ok(joined.includes("role:builder+qa"));
+  assert.ok(joined.includes("playtest"));
+  assert.ok(joined.includes("assignees alice"));
+  assert.ok(joined.includes("milestone MVP"));
+  assert.ok(joined.includes("https://github.com/example/repo/issues/12"));
+  assert.ok(joined.includes("Touch joystick input"));
+  assertLinesFit(lines, 140);
+});
+
+test("renderDetail shows issue field on hybrid cards alongside spec/git", () => {
+  const snapshot = fixtureSnapshotWithIssues();
+  const unit = flattenUnits(buildBoard(snapshot)).find((u) => u.id === "T3-review");
+  assert.ok(unit);
+  const lines = renderDetail(unit!, snapshot, plainStyle, 140);
+  const joined = lines.join("\n");
+  assert.ok(joined.includes("#7 Add sound effects"));
+  assert.ok(joined.includes("SPEC/T3-review.md"));
+  assert.ok(joined.includes("factory/t3-review"));
+  assertLinesFit(lines, 140);
 });
 
 test("renderAgentsView lists agent rows with lifecycle glyphs", () => {

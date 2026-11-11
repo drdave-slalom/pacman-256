@@ -31,10 +31,14 @@ export interface PlanLike {
 
 export type MenuPlan = PlanLike | DispatchPlanLike;
 
+export type IssueInputKind = "comment" | "labels" | "state";
+
 export interface ActionCandidate {
   name: string;
   label: string;
   hint: string;
+  /** Issue write-back actions require operator input before prepare/execute. */
+  input?: IssueInputKind;
 }
 
 const CATALOG: Readonly<Record<string, { label: string; hint: string }>> = {
@@ -45,6 +49,10 @@ const CATALOG: Readonly<Record<string, { label: string; hint: string }>> = {
   "checks/query": { label: "Query PR checks", hint: "poll gh pr checks" },
   "pr/merge": { label: "Merge PR", hint: "gh pr merge --merge" },
   "main/merge": { label: "Direct main merge", hint: "requires override:true approval" },
+  "github/issue-comment": { label: "Comment on issue", hint: "write a comment on the issue" },
+  "github/issue-label": { label: "Change issue labels", hint: "add/remove labels (comma-separated)" },
+  "github/issue-state": { label: "Close / reopen issue", hint: "switch issue state (close/reopen)" },
+  "factory/start-work": { label: "Start work", hint: "scaffold spec + branch + enqueue dispatch" },
 };
 
 function cat(name: string): ActionCandidate {
@@ -97,6 +105,17 @@ export function candidateActions(unit: Unit, snapshot: FactorySnapshot): ActionC
   if ((unit.pr !== undefined && unit.pr.checks === "green") || unit.flags.readyToMerge) {
     out.push(cat("main/merge"));
   }
+
+  // Issue write-back + start-work actions appear on issue-seeded/hybrid cards.
+  // Availability is decided by the M2/M4 prepare preconditions (gh auth, issue
+  // state, existing branch/worktree); comment/label/state require operator
+  // input on open, so they are not eagerly prepared with a neutral body.
+  if (unit.issue !== undefined) {
+    out.push({ ...cat("github/issue-comment"), input: "comment" });
+    out.push({ ...cat("github/issue-label"), input: "labels" });
+    out.push({ ...cat("github/issue-state"), input: "state" });
+    out.push(cat("factory/start-work"));
+  }
   return out;
 }
 
@@ -111,6 +130,8 @@ export interface ActionMenuRow {
   /** `action` (M2) | `dispatch` | `skill` (M4 triggers). */
   kind?: "action" | "dispatch" | "skill";
   skill?: string;
+  /** Issue write-back actions ask for operator input before prepare. */
+  input?: IssueInputKind;
 }
 
 export interface PreparedOutcome {
@@ -136,16 +157,20 @@ export function buildActionMenu(
 ): ActionMenuRow[] {
   return candidates.map((c) => {
     const outcome = prepared.get(c.name);
-    const ok = outcome?.ok ?? false;
+    // Input-requiring rows are always openable: guards are evaluated with the
+    // operator-supplied body at prepare time when the row is opened.
+    const input = "input" in c ? c.input : undefined;
+    const ok = input !== undefined ? true : (outcome?.ok ?? false);
     const row: ActionMenuRow = {
       name: c.name,
       label: c.label,
       hint: c.hint,
       ok,
-      reasons: outcome !== undefined ? reasonLines(outcome.preconditions) : ["not prepared"],
+      reasons: input !== undefined ? [] : (outcome !== undefined ? reasonLines(outcome.preconditions) : ["not prepared"]),
       preconditions: outcome?.preconditions ?? [],
       kind: isTrigger(c) ? c.kind : "action",
     };
+    if (input !== undefined) row.input = input;
     if (isTrigger(c) && c.skill !== undefined) row.skill = c.skill;
     if (outcome?.plan !== undefined) row.plan = outcome.plan;
     return row;

@@ -2,7 +2,106 @@
  * Fixture snapshots for the factory-control TUI unit tests.
  */
 
-import type { FactorySnapshot } from "@maze/factory-control-shared";
+import type { FactorySnapshot, IssueCard, Unit } from "@maze/factory-control-shared";
+
+/** A full issue card (open, `status:ready`). */
+export function issueCardFixture(overrides: Partial<IssueCard> = {}): IssueCard {
+  return {
+    number: 12,
+    title: "Mobile touch controls feel laggy",
+    state: "open",
+    url: "https://github.com/example/repo/issues/12",
+    bodyExcerpt: "Touch joystick input has ~100ms latency on Android Chrome; feels unresponsive.",
+    labels: {
+      type: "bug",
+      role: ["builder", "qa"],
+      lane: "B",
+      status: "ready",
+      blocked: false,
+      followUp: false,
+      playtest: true,
+      raw: ["type:bug", "role:builder", "role:qa", "lane:B", "status:ready", "playtest"],
+    },
+    assignees: ["alice"],
+    milestone: "MVP",
+    createdAt: "2026-01-10T10:00:00.000Z",
+    updatedAt: "2026-01-11T12:30:00.000Z",
+    ...overrides,
+  };
+}
+
+/** A standalone issue card unit (no linked spec). */
+export function standaloneIssueUnit(overrides: Partial<Unit> = {}): Unit {
+  return {
+    id: "issue12",
+    kind: "issue",
+    title: "Mobile touch controls feel laggy",
+    issue: issueCardFixture(),
+    stage: "spec",
+    flags: {
+      reviewPending: false,
+      qaPending: false,
+      ciRed: false,
+      readyToMerge: false,
+      readyForCleanup: false,
+      needsDispatch: true,
+      blockedAgent: false,
+    },
+    agents: [],
+    handoffs: [],
+    attention: ["needs-dispatch"],
+    ...overrides,
+  };
+}
+
+/** A hybrid unit (spec unit linked to an issue via `Closes #N`). */
+export function hybridIssueUnit(overrides: Partial<Unit> = {}): Unit {
+  const base = fixtureSnapshot().units.find((u) => u.id === "T3-review");
+  if (base === undefined) throw new Error("fixture missing T3-review");
+  return {
+    ...base,
+    kind: "hybrid",
+    issue: {
+      number: 7,
+      title: "Add sound effects",
+      state: "open",
+      url: "https://github.com/example/repo/issues/7",
+      bodyExcerpt: "Maze ambience + pickup sounds.",
+      labels: {
+        type: "feature",
+        role: ["art"],
+        lane: "C",
+        status: "review",
+        blocked: false,
+        followUp: false,
+        playtest: false,
+        raw: ["type:feature", "role:art", "lane:C", "status:review"],
+      },
+      assignees: [],
+      milestone: "MVP",
+      createdAt: "2026-01-05T09:00:00.000Z",
+      updatedAt: "2026-01-09T16:00:00.000Z",
+    },
+    ...overrides,
+  };
+}
+
+/**
+ * Snapshot variant with issue cards: T3-review is replaced by a hybrid unit and
+ * a standalone issue unit is appended. Existing tests keep using `fixtureSnapshot`.
+ */
+export function fixtureSnapshotWithIssues(overrides: Partial<FactorySnapshot> = {}): FactorySnapshot {
+  const base = fixtureSnapshot();
+  const hybrid = hybridIssueUnit();
+  const standalone = standaloneIssueUnit();
+  const units = base.units.map((u) => (u.id === "T3-review" ? hybrid : u));
+  return {
+    ...base,
+    units: [...units, standalone],
+    issues: [standalone.issue!, hybrid.issue!],
+    ...overrides,
+  };
+}
 
 export function fixtureSnapshot(overrides: Partial<FactorySnapshot> = {}): FactorySnapshot {
   return {

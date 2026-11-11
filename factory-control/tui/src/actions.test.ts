@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fixtureSnapshot } from "./fixtures.ts";
+import { fixtureSnapshot, fixtureSnapshotWithIssues, standaloneIssueUnit } from "./fixtures.ts";
 import { buildActionMenu, candidateActions, type PreparedOutcome } from "./actions.ts";
 
 function unitOf(id: string) {
@@ -39,6 +39,42 @@ test("candidateActions for a merged+cleanup unit suggests worktree/remove", () =
   const snapshot = fixtureSnapshot();
   const names = candidateActions(unitOf("T4-merged"), snapshot).map((a) => a.name);
   assert.ok(names.includes("worktree/remove"));
+});
+
+test("candidateActions adds issue write-back + start-work actions on issue cards", () => {
+  const snapshot = fixtureSnapshotWithIssues();
+  const names = candidateActions(standaloneIssueUnit(), snapshot).map((a) => a.name);
+  for (const expected of ["github/issue-comment", "github/issue-label", "github/issue-state", "factory/start-work"]) {
+    assert.ok(names.includes(expected), `expected ${expected} in ${names.join(",")}`);
+  }
+});
+
+test("candidateActions omits issue actions without an issue card", () => {
+  const snapshot = fixtureSnapshot();
+  const names = candidateActions(unitOf("T3-review"), snapshot).map((a) => a.name);
+  assert.ok(!names.includes("github/issue-comment"));
+  assert.ok(!names.includes("github/issue-label"));
+  assert.ok(!names.includes("github/issue-state"));
+  assert.ok(!names.includes("factory/start-work"));
+});
+
+test("buildActionMenu marks input rows openable without eager prepare", () => {
+  const snapshot = fixtureSnapshotWithIssues();
+  const candidates = candidateActions(standaloneIssueUnit(), snapshot);
+  const rows = buildActionMenu(candidates, new Map());
+  const comment = rows.find((r) => r.name === "github/issue-comment");
+  assert.ok(comment);
+  assert.equal(comment?.input, "comment");
+  assert.equal(comment?.ok, true);
+  assert.deepEqual(comment?.reasons, []);
+  const labels = rows.find((r) => r.name === "github/issue-label");
+  assert.equal(labels?.input, "labels");
+  const state = rows.find((r) => r.name === "github/issue-state");
+  assert.equal(state?.input, "state");
+  const sw = rows.find((r) => r.name === "factory/start-work");
+  assert.equal(sw?.input, undefined);
+  assert.equal(sw?.ok, false); // no prepared outcome → needs prepare
+  assert.deepEqual(sw?.reasons, ["not prepared"]);
 });
 
 test("buildActionMenu maps prepare outcomes to ok/reasons", () => {

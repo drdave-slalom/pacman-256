@@ -362,7 +362,11 @@ export class FactoryScreen implements Component {
         if (entry !== undefined) this.showQueueEntry(this.selectedQueue);
         break;
       }
-      case "detail":
+      case "detail": {
+        const unit = this.currentUnit();
+        if (unit?.issue?.url !== undefined) this.openIssueUrl(unit.issue.url);
+        break;
+      }
       case "lead-prompt":
         break;
     }
@@ -427,7 +431,9 @@ export class FactoryScreen implements Component {
             ...(trigger.skill !== undefined ? { skill: trigger.skill } : {}),
           });
           prepared.set(c.name, { ok: resp.ok, preconditions: resp.preconditions, plan: resp.plan });
-        } else {
+        } else if (!("input" in c && c.input !== undefined)) {
+          // Input-form actions (issue comment/label/state) are prepared when the
+          // row is opened with the operator-supplied body — skip eager prepare.
           const resp = await prepareImpl(c.name, this.prepareBody(c.name, unit));
           prepared.set(c.name, { ok: resp.ok, preconditions: resp.preconditions, plan: resp.plan });
         }
@@ -450,6 +456,12 @@ export class FactoryScreen implements Component {
   private async startAction(row: ActionMenuRow): Promise<void> {
     const unit = this.currentUnit();
     if (unit === undefined) return;
+    let inputBody: Record<string, unknown> = {};
+    if (row.input !== undefined) {
+      const collected = await this.collectActionInput(row.input);
+      if (collected === null) return; // cancelled — stay on the actions view
+      inputBody = collected;
+    }
     if (row.kind !== undefined && row.kind !== "action") {
       await this.startTrigger(row);
       return;
@@ -461,7 +473,10 @@ export class FactoryScreen implements Component {
     this.bump();
     try {
       const prepareImpl = this.opts.prepareActionImpl ?? prepareAction;
-      const resp = await prepareImpl(row.name, this.prepareBody(row.name, unit));
+      const resp = await prepareImpl(row.name, {
+        ...this.prepareBody(row.name, unit),
+        ...inputBody,
+      });
       this.activeRow = {
         ...row,
         ok: resp.ok,
@@ -544,6 +559,10 @@ export class FactoryScreen implements Component {
       const executeImpl = this.opts.executeActionImpl ?? executeAction;
       const result: ActionResultLike = await executeImpl(row.name, this.preparedRequestId, approvedBy);
       this.resultState = { kind: "ok", outcome: result };
+      if (row.name === "factory/start-work" && result.outcome === "success") {
+        const unit = this.currentUnit();
+        if (unit !== undefined) await this.openLeadPromptForStartWork(unit.id);
+      }
     } catch (e) {
       this.resultState = e instanceof ApiError
         ? { kind: "error", message: e.message, preconditions: e.preconditions }
@@ -624,6 +643,70 @@ export class FactoryScreen implements Component {
       `Lead prompt for ${entry.id} printed above — copy it from this pane/buffer`,
       "info",
     );
+  }
+
+  /** Open the issue URL in the host's browser when available; else notify. */
+  private openIssueUrl(url: string): void {
+    const tui = this.opts.tui as { openUrl?: (url: string) => void };
+    if (tui.openUrl !== undefined) {
+      tui.openUrl(url);
+      return;
+    }
+    this.opts.ctx.ui.notify(`Issue URL: ${url}`, "info");
+  }
+
+  /**
+   * Collect operator input for an issue write-back action. Returns null when the
+   * operator cancels the dialog (the action is aborted).
+   */
+  private async collectActionInput(kind: "comment" | "labels" | "state"): Promise<Record<string, unknown> | null> {
+    const ui = this.opts.ctx.ui;
+    if (kind === "comment") {
+      const text = await ui.input("Comment text", "Write the issue comment…");
+      if (text === undefined) return null;
+      return { comment: text };
+    }
+    if (kind === "labels") {
+      const raw = await ui.input("Labels (comma-separated)", "e.g. status:review, follow-up");
+      if (raw === undefined) return null;
+      const labels = raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s !== "");
+      return { labels };
+    }
+    if (kind === "state") {
+      const choice = await ui.select("Issue state", ["close", "reopen"]);
+      if (choice === undefined) return null;
+      return { state: choice };
+    }
+    return null;
+  }
+
+  /**
+   * After a successful `factory/start-work` execute, open the lead-prompt view
+   * for the newly enqueued dispatch entry (matching unit first, else newest).
+   */
+  private async openLeadPromptForStartWork(unitId: string): Promise<boolean> {
+    try {
+      await this.loadQueue();
+    } catch (e) {
+      this.opts.ctx.ui.notify(`start-work done but queue unavailable: ${errorMessage(e)}`, "error");
+      return false;
+    }
+    const entry =
+      this.queueEntries.find((e) => e.unit === unitId) ??
+      this.queueEntries[this.queueEntries.length - 1];
+    if (entry === undefined) {
+      this.opts.ctx.ui.notify("start-work succeeded — no queue entry found yet", "info");
+      return false;
+    }
+    this.activeQueueEntry = entry;
+    this.prevView = "actions";
+    this.view = "lead-prompt";
+    this.resultState = null;
+    this.opts.ctx.ui.notify(`Start-work done — ${entry.id} queued for the Lead`, "info");
+    return true;
   }
 
   private back(): void {
