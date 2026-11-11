@@ -32,13 +32,19 @@ interface Harness {
   cleanup: () => void;
 }
 
+/** Initialize a self-contained fixture repo with a repo-local git identity, so
+ *  tests run even where no global/user git config exists (e.g. CI). */
+function initRepo(repo: string): void {
+  git(repo, "init", "-q", "-b", "main");
+  git(repo, "config", "user.email", "test@example.com");
+  git(repo, "config", "user.name", "Factory Test");
+}
+
 function makeFixtureRepo(): Harness {
   const parent = mkdtempSync(join(tmpdir(), "factory-snap-repo-"));
   const repo = join(parent, "repo");
   mkdirSync(join(repo, "SPEC"), { recursive: true });
-  git(repo, "init", "-q", "-b", "main");
-  git(repo, "config", "user.email", "test@example.com");
-  git(repo, "config", "user.name", "Test Builder");
+  initRepo(repo);
   writeSpec(repo, "T3-foo.md", "T3 spec: private rooms and synchronized movement");
   writeSpec(repo, "T5-bar.md", "T5 spec: countdown contact round end");
   writeSpec(repo, "unbalanced-baz.md", "Unbalanced lobbies");
@@ -125,7 +131,7 @@ test("integration: unreadable spec still listed with parseError", async (t) => {
   t.after(harness.cleanup);
   const repo = join(harness.parent, "repo2");
   mkdirSync(join(repo, "SPEC"), { recursive: true });
-  git(repo, "init", "-q", "-b", "main");
+  initRepo(repo);
   writeFileSync(join(repo, "SPEC", "broken.md"), "# Broken\n");
   // Replace the file with an unreadable directory of the same name after commit.
   git(repo, "add", ".");
