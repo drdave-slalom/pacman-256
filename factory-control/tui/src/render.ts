@@ -17,6 +17,7 @@ import {
   formatDiff,
   formatElapsed,
   isActingState,
+  issueDisplayStatus,
   LIFECYCLE_GLYPH,
   pipelineStages,
   showBranch,
@@ -63,7 +64,11 @@ function attentionLetters(unit: Unit): string {
 function cardLine(unit: Unit, selected: boolean, style: LineStyle): string {
   const marker = selected ? "› " : "  ";
   const dirty = unit.worktree?.dirty === true ? " *" : "";
-  const id = selected ? style.accent(style.bold(unit.id)) : unit.id;
+  // Issue-seeded/hybrid cards show `#<n> title [status]`; spec cards show id.
+  const label = unit.issue !== undefined
+    ? `#${unit.issue.number} ${unit.issue.title} [${issueDisplayStatus(unit.issue)}]`
+    : unit.id;
+  const id = selected ? style.accent(style.bold(label)) : label;
   return `${marker}${id}${attentionLetters(unit)}${dirty}`;
 }
 
@@ -237,6 +242,32 @@ export function renderDetail(unit: Unit, snapshot: FactorySnapshot | null, style
   const badges = attentionLetters(unit);
   lines.push(style.accent(style.bold(unit.id)) + `  [stage: ${style.muted(unit.stage)}]${badges}`);
   if (unit.lane !== undefined) lines.push(`lane: ${unit.lane}`);
+
+  if (unit.issue !== undefined) {
+    const issue = unit.issue;
+    lines.push(style.muted("issue"));
+    lines.push(`  #${issue.number} ${issue.title}`);
+    lines.push(
+      `  state ${issue.state} · status ${issueDisplayStatus(issue)} · updated ${issue.updatedAt !== undefined ? formatAge(issue.updatedAt) : "—"}`,
+    );
+    const labelParts: string[] = [];
+    if (issue.labels.type !== undefined) labelParts.push(`type:${issue.labels.type}`);
+    if (issue.labels.lane !== undefined) labelParts.push(`lane:${issue.labels.lane}`);
+    if (issue.labels.status !== undefined) labelParts.push(`status:${issue.labels.status}`);
+    const roles = issue.labels.role ?? [];
+    if (roles.length > 0) labelParts.push(`role:${roles.join("+")}`);
+    if (issue.labels.blocked) labelParts.push("blocked");
+    if (issue.labels.followUp) labelParts.push("follow-up");
+    if (issue.labels.playtest) labelParts.push("playtest");
+    const labels = labelParts.length > 0 ? labelParts.join(", ") : "none";
+    const raw = issue.labels.raw.length > 0 ? ` · raw: ${issue.labels.raw.join(", ")}` : "";
+    lines.push(`  labels ${labels}${raw}`);
+    lines.push(`  assignees ${issue.assignees.length > 0 ? issue.assignees.join(", ") : "none"} · milestone ${issue.milestone ?? "none"}`);
+    lines.push(`  url ${truncateToWidth(issue.url, width - 6)}`);
+    if (issue.bodyExcerpt !== undefined && issue.bodyExcerpt !== "") {
+      lines.push(style.dim(`  body ${truncateToWidth(issue.bodyExcerpt, width - 8)}`));
+    }
+  }
 
   lines.push(style.muted("spec"));
   lines.push(`  ${unit.specPath ?? "no SPEC file"}${unit.title !== undefined ? ` — ${unit.title}` : ""}`);

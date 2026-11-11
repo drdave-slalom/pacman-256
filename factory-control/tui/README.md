@@ -49,6 +49,13 @@ non-interactive output you can confirm the command registered via
   the M2 `prepare` endpoint. Passing rows are runnable (`prepare` → plan shown
   → `ctx.ui.confirm()` → `execute`); rejected rows show the exact guard
   reasons (409).
+- Issue cards: issue-seeded and hybrid units render as `#<n> title [status]`
+  on the board and show a detail section with the GitHub URL (Enter opens it).
+  Their action menu adds the issue write-back actions — `github/issue-comment`
+  (text input), `github/issue-label` (comma-separated labels), and
+  `github/issue-state` (close/reopen select) — which gather operator input, then
+  flow through prepare/confirm/execute like every other M2 action. `factory/start-work`
+  opens the lead-prompt view after a successful execute.
 - M4 triggers: the same menu includes “Dispatch unit” (Spec-stage cards) and
   “Run skill…” items on eligible cards. Opening one shows the M4 delegation
   plan (role, worktree, spec, acceptance, lead prompt); confirming **enqueues**

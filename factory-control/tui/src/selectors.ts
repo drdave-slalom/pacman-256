@@ -9,6 +9,7 @@ import type {
   AgentRecord,
   DiffTotals,
   FactorySnapshot,
+  IssueCard,
   Unit,
 } from "@maze/factory-control-shared";
 
@@ -97,6 +98,11 @@ export function isActingState(state: string): boolean {
   return ACTING_STATES.has(state);
 }
 
+/** Display status for an issue card: the `status:*` label when present, else the GitHub state. */
+export function issueDisplayStatus(issue: IssueCard): string {
+  return issue.labels.status ?? issue.state;
+}
+
 /** Build the board model (stage columns + orphaned bucket) from a snapshot. */
 export function buildBoard(snapshot: FactorySnapshot, filter = ""): BoardModel {
   const q = filter.trim().toLowerCase();
@@ -106,7 +112,9 @@ export function buildBoard(snapshot: FactorySnapshot, filter = ""): BoardModel {
     (unit.title ?? "").toLowerCase().includes(q) ||
     (unit.lane ?? "").toLowerCase().includes(q) ||
     (unit.specPath ?? "").toLowerCase().includes(q) ||
-    (unit.branch ?? "").toLowerCase().includes(q);
+    (unit.branch ?? "").toLowerCase().includes(q) ||
+    (unit.issue !== undefined &&
+      (String(unit.issue.number).includes(q) || unit.issue.title.toLowerCase().includes(q)));
 
   const columns: ColumnModel[] = [
     ...STAGE_COLUMNS.map((c) => ({ key: c.key, title: c.title, units: [] as Unit[] })),
