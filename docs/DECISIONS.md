@@ -394,3 +394,13 @@ snapshot cold-build latency (~38s `gh pr checks` fan-out); minor review nits
   including reversed iteration and real-room deadline assertions.
   Pickup arrival uses segment projection to avoid zero-radius discriminant
   roundoff on the QA-reported straight-crossing case.
+
+## D058 — Ghost mascot dome arc drawn clockwise through the top (0, -radius)
+
+The ghost mascot's body dome in `drawGhostBody()` (`apps/client/src/maze-scene.ts`)
+is drawn with a clockwise arc (`anticlockwise: false`) from π to 0, which in
+Phaser's downward-positive Y coordinates passes through `(0, -radius)` — the top
+— so the dome caps the body and the eyes sit inside the colored body. This
+resolves the PR #24 review blocker (issue #63); the previous anticlockwise arc
+swept through `(0, +radius)` (the bottom), leaving a lower semicircle and the
+eyes outside the body.
