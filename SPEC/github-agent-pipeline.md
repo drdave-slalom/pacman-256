@@ -13,9 +13,10 @@ Humans keep two gates: spec approval and (for features/playtest work) merge.
 - **Orchestrator is the single entry point (David, 2026-11-10).** Every new issue is
   triaged by `factory-orchestrator`, and every unit's spec names the role agent(s)
   that do the work. Humans do not pick the build agent; `role:*` labels mirror the
-  orchestrator's decision. Workflows execute the delegation by assigning the named
-  profile, unless the pilot shows the cloud agent can delegate to other
-  `.github/agents` profiles in-session (then the orchestrator delegates directly).
+  orchestrator's decision. After `/approve-spec` the gate posts one `@copilot` comment telling
+  Copilot to work through the Delegation steps in order, acting as (or delegating to)
+  each named `.github/agents` profile. Per-step re-assignment was not built because
+  re-assigning an issue opens a new PR.
 - **Build (writer):** Copilot cloud agent, assigned through the issues API with
   `agent_assignment.custom_agent` set to the profile the orchestrator chose.
 - **Review/QA (independent, read-only):** GitHub Agentic Workflows (`gh aw`),
@@ -29,13 +30,13 @@ Humans keep two gates: spec approval and (for features/playtest work) merge.
 
 | Step | Trigger | Actor | Result |
 |---|---|---|---|
-| 0. Triage | Every issue `opened` / `reopened` (any template) | `factory-triage.md` (gh-aw, orchestrator profile, read-only) | Classifies type, lane, and the role agent(s) needed; checks readiness (AC, validation, duplicates, conflicts with `docs/DECISIONS.md`); suggests a split into sub-issues when one unit spans roles that can't share a PR. Safe outputs: `type:*`/`lane:*`/`role:*` labels and one triage comment with the plan and any gaps. Labels `status:spec` (ready) or `agent:needs-human` (gaps/rule questions). Never starts work. |
-| 1. Queue | Human adds `agent:go` to an issue | `agent-dispatch.yml` | Verifies labeler has triage+ and triage passed; assigns Copilot with `custom_agent: factory-orchestrator` and instructions "spec only: write `SPEC/<id>-<slug>.md` including a **Delegation** section (ordered role agent per step, QA depth fast/slow), open a draft PR with `Closes #N`, stop". Labels: `agent:go` → `status:spec`, `agent:active`. |
+| 0. Triage | Issue `opened` / `reopened` by a triage+ collaborator (any template; others are not triaged, to protect the premium-request budget on this public repo) | `factory-triage.md` (gh-aw, orchestrator profile, read-only) | Classifies type, lane, and the role agent(s) needed; checks readiness (AC, validation, duplicates, conflicts with `docs/DECISIONS.md`); suggests a split into sub-issues when one unit spans roles that can't share a PR. Safe outputs: `type:*`/`lane:*`/`role:*` labels and one triage comment with the plan and any gaps. Labels `status:spec` (ready) or `agent:needs-human` (gaps/rule questions). Never starts work. |
+| 1. Queue | Human adds `agent:go` to an issue | `agent-dispatch.yml` | Verifies labeler has triage+, the issue is open, not assigned to Copilot, and lacks `agent:active`/`agent:needs-human` (triage is not required; label untriaged issues by hand first); max `AGENT_MAX_ACTIVE` (default 3) active; assigns Copilot with `custom_agent: factory-orchestrator` and instructions "spec only: write `SPEC/<id>-<slug>.md` including a **Delegation** section (ordered role agent per step, QA depth fast/slow), open a draft PR with `Closes #N`, stop". Labels: `agent:go` → `status:spec`, `agent:active`. |
 | 2. Spec gate | Human comments `/approve-spec` on the PR | `agent-gate.yml` | Verifies commenter has write+; adds `status:ready`; comments `@copilot` build instructions naming the role agent. |
-| 3. Build | `status:ready` | Copilot cloud agent | `agent-gate.yml` reads the spec's Delegation section and assigns each step's profile in order on the same PR (`builder`, `artist`, `gameplay-designer`, `docs-writer`). Unknown or missing role → `agent:needs-human`, no default. Each step runs `npm run check`; the last fills the PR template and marks the PR ready. |
+| 3. Build | `/approve-spec` | Copilot cloud agent | On approval the gate re-adds `[WIP] ` to the PR title, mirrors Delegation to `role:*` labels, and posts one `@copilot` comment: implement per Delegation acting as each named profile in order, run `npm run check`, fill the PR template, remove `[WIP]` last. Unknown or missing role → `agent:needs-human`, no default. When the title loses `[WIP]` the gate marks the PR ready → `status:review`. |
 | 4. Review + QA | PR `ready_for_review` / new push after a fix | `factory-review.md`, `factory-qa.md` (gh-aw, parallel) | Reviewer submits a PR review (approve / request changes) against the spec with `[blocker]/[should]/[nit]`. QA runs `npm ci && npm run check` plus focused tests and posts a results comment with a pass/fail marker. Label `status:review`. |
 | 5. Fix loop | Review requests changes or QA fails | `agent-gate.yml` | Adds `cycle:1`, then `cycle:2` (D050). Routes each blocker to the role that owns the affected files per the Delegation section, via `@copilot` comment. After `cycle:2`, only blockers reopen work; otherwise `agent:needs-human`. |
-| 6. Merge | All gates green | `agent-gate.yml` | Eligible if the issue has `type:docs`, `type:chore`, or `follow-up` **and not** `type:feature`/`playtest`: `gh pr merge --auto --squash`. Otherwise label `agent:needs-human` and request David's review. |
+| 6. Merge | All gates green | `agent-gate.yml` | Never if the PR touches a sensitive path (Phase 0 item 4; `Dockerfile`/`package*.json` at any depth). Eligible if the issue has `type:docs`, `type:chore`, or `follow-up` **and not** `type:feature`/`type:bug`/`playtest`: enable squash auto-merge with `COPILOT_ASSIGN_TOKEN` (so the merge triggers CI/deploy/close-out), or merge directly if GitHub reports the PR already clean. Otherwise label `agent:needs-human` and request David's review. |
 | 7. Close-out | PR merged | existing GitHub + `agent-gate.yml` | `Closes #N` closes the issue; Follow-ups section items become `follow-up` issues; remove `agent:active`. |
 
 Gates for merge: required CI (ruleset), Copilot code review completed, factory reviewer
@@ -103,7 +104,7 @@ Report results; adjust this spec before Phase 1.
 
 - Only triage+ can trigger `agent:go`; only write+ can `/approve-spec`. Workflows recheck permissions via API and ignore other actors.
 - Issue/PR text is untrusted input: no `${{ }}` interpolation of user text into `run:`; gh-aw jobs stay read-only with safe outputs; no `pull_request_target` checkout of PR code.
-- Glue workflows use least-privilege `permissions:`; the PAT is used only for assignment, `@copilot` comments, and run re-runs.
+- Glue workflows use least-privilege `permissions:`; the PAT is used only for assignment, `@copilot` comments, marking PRs ready, and enabling auto-merge/merging eligible PRs.
 - Sensitive-path rule (see Phase 0 item 4) gates both CI re-runs and auto-merge.
 - Concurrency: one active agent run per issue (`agent:active`); max open agent PRs configurable (default 3).
 - Kill switch: repo variable `AGENT_PIPELINE_ENABLED` must be `true`.
@@ -124,7 +125,7 @@ Projects board, deploy gating, Dependabot, replacing the local VS Code factory (
 
 - Pilot results recorded for the five questions in Phase 0.
 - A `type:docs` issue labeled `agent:go` reaches a merged PR with only a `/approve-spec` comment from a human; the issue closes.
-- Every newly opened issue (factory unit, bug, or other) gets exactly one triage comment and orchestrator-chosen `type:*`/`role:*`/`lane:*` labels, and no work starts without `agent:go`.
+- Every issue opened by a triage+ collaborator (factory unit, bug, or other) gets exactly one triage comment and orchestrator-chosen `type:*`/`role:*`/`lane:*` labels, and no work starts without `agent:go`.
 - An issue whose spec names `artist` (or `docs-writer`) is built by that profile, not `builder`; a missing/unknown role stops at `agent:needs-human`.
 - A `type:feature` issue reaches `agent:needs-human` with all gates green and is not auto-merged.
 - A non-collaborator applying labels or commenting `/approve-spec` has no effect.
