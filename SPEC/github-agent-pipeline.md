@@ -73,15 +73,18 @@ Report results; adjust this spec before Phase 1.
    confirm on the first Phase 1 run. Each fix push re-triggers CI approval (see 4).
 3. **gh-aw can load profiles: yes (docs).** `{{#runtime-import .github/agents/<name>.agent.md}}`
    injects files under `.github/`; frontmatter fields such as `model:` are not applied.
-4. **CI approval: required by default.** CI and `pr-description.yml` runs on the Copilot
-   branch completed as `action_required`, and the API cannot approve them (`POST
-   .../runs/{id}/approve` returns 403 for non-fork runs). **Decision (David, 2026-11-10):
-   auto-approve.** Repo Settings → Copilot → cloud agent → Policies → disable
-   "Require approval for workflow runs" (admin, UI only). Compensating guardrail:
-   `agent-gate.yml` labels any agent PR that changes `.github/workflows/`,
-   `.github/agents/`, `.github/skills/`, or `deploy/` with `agent:needs-human` and never
-   auto-merges it. Secrets must not be reachable from agent branches: move `DO_API_TOKEN` to a `production` environment secret and `COPILOT_ASSIGN_TOKEN` to an `agent` environment, both limited to deployments from `main` (verified 2026-11-10: both were repo-level).
-   The gate workflow must also mark the PR ready itself (the agent leaves it as a draft).
+4. **CI approval: required by default; approve by re-run.** Runs on Copilot branches complete as
+   `action_required`. `POST .../runs/{id}/approve` returns 403 (fork-only), but `gh run rerun <id>`
+   by a write/admin user starts the run (verified on PR #37: CI and description both passed).
+   **Decision (David, 2026-11-11): keep "Require approval for workflow runs" ON and keep secrets
+   repo-level for now.** `agent-gate.yml` (using `COPILOT_ASSIGN_TOKEN`) re-runs `action_required`
+   runs on agent PRs **only when the PR changes no file under `.github/`, `deploy/`, `Dockerfile`,
+   `scripts/`, or `package*.json`**; otherwise it labels `agent:needs-human` and a human reviews
+   before clicking "Approve and run workflows". This stops agent-edited workflows from running
+   with repo secrets without human review. Accepted residual risk: a human approving a sensitive
+   PR exposes repo-level `DO_API_TOKEN`/`COPILOT_ASSIGN_TOKEN` to that PR's workflows; moving them
+   to `main`-only environments remains a tracked follow-up. The gate workflow also marks the PR
+   ready (the agent leaves it as a draft), which triggers Copilot code review.
 5. **Orchestrator delegation in-session: not yet tested.**
 
 **Phase 1: build the chain** (files below). **Phase 2: docs + D056.**
@@ -100,7 +103,8 @@ Report results; adjust this spec before Phase 1.
 
 - Only triage+ can trigger `agent:go`; only write+ can `/approve-spec`. Workflows recheck permissions via API and ignore other actors.
 - Issue/PR text is untrusted input: no `${{ }}` interpolation of user text into `run:`; gh-aw jobs stay read-only with safe outputs; no `pull_request_target` checkout of PR code.
-- Glue workflows use least-privilege `permissions:`; PAT only in the assignment step.
+- Glue workflows use least-privilege `permissions:`; the PAT is used only for assignment, `@copilot` comments, and run re-runs.
+- Sensitive-path rule (see Phase 0 item 4) gates both CI re-runs and auto-merge.
 - Concurrency: one active agent run per issue (`agent:active`); max open agent PRs configurable (default 3).
 - Kill switch: repo variable `AGENT_PIPELINE_ENABLED` must be `true`.
 
