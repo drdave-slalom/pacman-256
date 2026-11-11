@@ -10,7 +10,7 @@ import type { FactorySnapshot } from "@maze/factory-control-shared";
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import type { ActionResultLike, DispatchEntryLike, PrepareResponse } from "./api.ts";
-import { fixtureSnapshotWithIssues } from "./fixtures.ts";
+import { fixtureSnapshotWithClosedIssues, fixtureSnapshotWithIssues } from "./fixtures.ts";
 import { FactoryScreen } from "./screen.ts";
 
 const DOWN = "\u001b[B";
@@ -86,6 +86,25 @@ function selectIssue12(h: { screen: FactoryScreen }): void {
   // T1-spec, T2-execute, T3-review, T4-merged — issue12 is already selected.
   h.screen.handleInput(ENTER);
 }
+
+test("board 'i' toggles the Closed issues section instantly (show closed)", async (t) => {
+  const h = makeHarness({ fetch: () => Promise.resolve(fixtureSnapshotWithClosedIssues()) });
+  t.after(() => h.screen.dispose());
+  await flush();
+  const off = h.screen.render(W).join("\n");
+  assert.ok(!off.includes("Closed issues (2)"), `expected hidden by default, got:\n${off}`);
+  h.screen.handleInput("i");
+  const on = h.screen.render(W).join("\n");
+  assert.ok(on.includes("Closed issues (2)"), `expected section after toggle, got:\n${on}`);
+  assert.ok(on.includes("  #53 Closed issue without a unit [done]"), `got:\n${on}`);
+  assert.ok(on.includes("  #60 Another closed orphan issue [closed]"), `got:\n${on}`);
+  // A closed issue already attached to a unit (#7) must not be duplicated.
+  const closedSection = on.slice(on.indexOf("Closed issues (2)"));
+  assert.ok(!closedSection.includes("#7"), `closed section must not duplicate linked #7:\n${closedSection}`);
+  h.screen.handleInput("i");
+  const offAgain = h.screen.render(W).join("\n");
+  assert.ok(!offAgain.includes("Closed issues (2)"), `expected hidden after second toggle, got:\n${offAgain}`);
+});
 
 test("board renders issue cards with #n + title + status", async (t) => {
   const h = makeHarness();

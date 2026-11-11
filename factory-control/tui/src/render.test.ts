@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { Unit } from "@maze/factory-control-shared";
-import { fixtureSnapshot, fixtureSnapshotWithIssues } from "./fixtures.ts";
-import { buildBoard, flattenUnits } from "./selectors.ts";
+import { fixtureSnapshot, fixtureSnapshotWithClosedIssues, fixtureSnapshotWithIssues } from "./fixtures.ts";
+import { buildBoard, closedUnmatchedIssues, flattenUnits } from "./selectors.ts";
 import {
   plainStyle,
   renderActionMenu,
@@ -12,6 +12,7 @@ import {
   renderActionResult,
   renderAgentsView,
   renderBoardBody,
+  renderClosedIssues,
   renderDetail,
   renderHeader,
   renderOfflineBanner,
@@ -201,6 +202,44 @@ test("renderBoardBody shows issue cards as #n + title + status", () => {
   assert.ok(joined.includes("#12 Mobile touch controls feel laggy [ready] [GitHub]"));
   assert.ok(joined.includes("#7 Add sound effects [review] [GitHub]"));
   assertLinesFit(lines, 120);
+});
+
+test("renderClosedIssues renders the section header and dim rows", () => {
+  const closed = closedUnmatchedIssues(fixtureSnapshotWithClosedIssues());
+  const lines = renderClosedIssues(closed, plainStyle, 200);
+  assert.deepEqual(lines, [
+    "Closed issues (2)",
+    "  #53 Closed issue without a unit [done]",
+    "  #60 Another closed orphan issue [closed]",
+  ]);
+});
+
+test("renderClosedIssues is hidden when the list is empty", () => {
+  assert.deepEqual(renderClosedIssues([], plainStyle, 200), []);
+});
+
+test("renderBoardBody appends the Closed issues section after Orphaned when passed", () => {
+  const snapshot = fixtureSnapshotWithClosedIssues();
+  const model = buildBoard(snapshot);
+  const lines = renderBoardBody(model, 0, plainStyle, 200, closedUnmatchedIssues(snapshot));
+  const joined = lines.join("\n");
+  assert.ok(joined.includes("Orphaned (2)"), `expected Orphaned section, got:\n${joined}`);
+  assert.ok(joined.includes("Closed issues (2)"), `expected Closed issues section, got:\n${joined}`);
+  assert.ok(joined.includes("  #53 Closed issue without a unit [done]"), `got:\n${joined}`);
+  assert.ok(joined.includes("  #60 Another closed orphan issue [closed]"), `got:\n${joined}`);
+  // section order: columns → Orphaned → Closed issues
+  assert.ok(joined.indexOf("Orphaned (2)") < joined.indexOf("Closed issues (2)"));
+  assertLinesFit(lines, 200);
+});
+
+test("renderBoardBody shows no Closed issues section when not passed or empty", () => {
+  const snapshot = fixtureSnapshotWithClosedIssues();
+  const model = buildBoard(snapshot);
+  const without = renderBoardBody(model, 0, plainStyle, 200);
+  assert.ok(!without.join("\n").includes("Closed issues"));
+  const empty = renderBoardBody(model, 0, plainStyle, 200, []);
+  assert.ok(!empty.join("\n").includes("Closed issues"));
+  assert.deepEqual(without, empty);
 });
 
 test("renderBoardBody shows [GitHub] badge on issue-seeded and hybrid cards, none on spec-only", () => {

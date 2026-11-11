@@ -6,7 +6,7 @@
  * the exact lines asserted by unit tests and the on-screen styling.
  */
 
-import type { AgentRecord, FactorySnapshot, Unit } from "@maze/factory-control-shared";
+import type { AgentRecord, FactorySnapshot, IssueCard, Unit } from "@maze/factory-control-shared";
 import type { ActionMenuRow, MenuPlan, PreconditionLike } from "./actions.ts";
 import type { DispatchEntryLike, DispatchPlanLike } from "./api.ts";
 import {
@@ -191,7 +191,28 @@ function stageBox(title: string, count: number, style: LineStyle): StageBox {
   return { lines: [top, titleLine, countLine, bottom], width: inner + 2 };
 }
 
-export function renderBoardBody(model: BoardModel, selectedIndex: number, style: LineStyle, width: number): string[] {
+/**
+ * "Closed issues (N)" section for the show-closed toggle: a header row plus
+ * one dim row per issue `#N title [status]` (via `issueDisplayStatus`),
+ * truncated to width. Hidden (returns no lines) when the list is empty.
+ */
+export function renderClosedIssues(issues: IssueCard[], style: LineStyle, width: number): string[] {
+  if (issues.length === 0) return [];
+  const lines: string[] = [];
+  lines.push(style.muted(`${style.accent("Closed issues")} (${issues.length})`));
+  for (const issue of issues) {
+    lines.push(style.dim(`  #${issue.number} ${issue.title} [${issueDisplayStatus(issue)}]`));
+  }
+  return lines.map((line) => truncateToWidth(line, width));
+}
+
+export function renderBoardBody(
+  model: BoardModel,
+  selectedIndex: number,
+  style: LineStyle,
+  width: number,
+  closedIssues?: IssueCard[],
+): string[] {
   const lines: string[] = [];
   let cursor = 0;
   for (const col of model.columns) {
@@ -211,6 +232,9 @@ export function renderBoardBody(model: BoardModel, selectedIndex: number, style:
     lines.push(style.dim("  none"));
   } else {
     for (const line of orphanLines) lines.push(style.dim(`  ${line}`));
+  }
+  if (closedIssues !== undefined && closedIssues.length > 0) {
+    lines.push(...renderClosedIssues(closedIssues, style, width));
   }
   return lines.map((line) => truncateToWidth(line, width));
 }
@@ -471,7 +495,7 @@ export function renderActionResult(state: ActionResultState, style: LineStyle, w
 
 export function renderHelp(view: ViewKind, style: LineStyle, width: number): string[] {
   const map: Record<ViewKind, string> = {
-    board: "↑/↓ move · enter detail · a agents · q queue · r refresh · esc close",
+    board: "↑/↓ move · enter detail · a agents · q queue · r refresh · i closed on/off · esc close",
     detail: "↑/↓ switch unit · esc board · x actions · a agents · q queue · r refresh",
     agents: "↑/↓ select · enter focus · esc back",
     actions: "↑/↓ select · enter open · esc back",

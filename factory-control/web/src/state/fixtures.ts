@@ -281,6 +281,57 @@ export function fixtureSnapshot(): FactorySnapshot {
   };
 }
 
+/**
+ * Snapshot variant with closed issues: the hybrid issue (#17) is already
+ * closed and linked (must be excluded from closed-unmatched), and two closed
+ * issues (#53, #60) are unattached. Used by the show-closed toggle tests.
+ */
+export function fixtureSnapshotWithClosedIssues(overrides: Partial<FactorySnapshot> = {}): FactorySnapshot {
+  const base = fixtureSnapshot();
+  const closedUnmatched: IssueCard[] = [
+    {
+      number: 53,
+      title: "Closed issue without a unit",
+      state: "closed",
+      url: "https://github.com/x/pacman-256/issues/53",
+      bodyExcerpt: "Resolved in #42.",
+      labels: {
+        type: "bug",
+        role: [],
+        status: "done",
+        blocked: false,
+        followUp: false,
+        playtest: false,
+        raw: ["type:bug", "status:done"],
+      },
+      assignees: [],
+      milestone: "M1",
+      createdAt: "2026-01-01T09:00:00Z",
+      updatedAt: "2026-01-20T10:00:00Z",
+    },
+    {
+      number: 60,
+      title: "Another closed orphan issue",
+      state: "closed",
+      url: "https://github.com/x/pacman-256/issues/60",
+      labels: {
+        type: "feature",
+        role: [],
+        blocked: false,
+        followUp: true,
+        playtest: false,
+        raw: ["type:feature", "follow-up"],
+      },
+      assignees: [],
+    },
+  ];
+  return {
+    ...base,
+    issues: [...base.issues, ...closedUnmatched],
+    ...overrides,
+  };
+}
+
 function workingAgent(label: string, definition: string): AgentRecord {
   return {
     label,

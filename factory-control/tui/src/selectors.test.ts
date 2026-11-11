@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fixtureSnapshot, fixtureSnapshotWithIssues } from "./fixtures.ts";
+import { fixtureSnapshot, fixtureSnapshotWithClosedIssues, fixtureSnapshotWithIssues } from "./fixtures.ts";
 import {
   buildBoard,
+  closedUnmatchedIssues,
   flattenUnits,
   formatAge,
   formatElapsed,
@@ -99,6 +100,36 @@ test("buildBoard places issue cards in their stage columns (standalone + hybrid)
   assert.equal(reviewUnits.length, 1);
   assert.equal(reviewUnits[0]?.kind, "hybrid");
   assert.equal(reviewUnits[0]?.issue?.number, 7);
+});
+
+test("closedUnmatchedIssues selects closed issues not attached to any unit, sorted ascending", () => {
+  const snapshot = fixtureSnapshotWithClosedIssues();
+  const closed = closedUnmatchedIssues(snapshot);
+  assert.deepEqual(
+    closed.map((i) => i.number),
+    [53, 60],
+  );
+  // A closed issue linked to a unit (#7) is excluded; an open standalone
+  // issue (#12) is not closed; the two unattached closed issues remain.
+  assert.deepEqual(
+    closed.map((i) => i.title),
+    ["Closed issue without a unit", "Another closed orphan issue"],
+  );
+});
+
+test("closedUnmatchedIssues returns the list sorted by number even when unsorted in the snapshot", () => {
+  const snapshot = fixtureSnapshotWithClosedIssues({
+    issues: [...fixtureSnapshotWithClosedIssues().issues].reverse(),
+  });
+  assert.deepEqual(
+    closedUnmatchedIssues(snapshot).map((i) => i.number),
+    [53, 60],
+  );
+});
+
+test("closedUnmatchedIssues returns empty when there are no closed-unmatched issues", () => {
+  assert.deepEqual(closedUnmatchedIssues(fixtureSnapshotWithIssues()), []);
+  assert.deepEqual(closedUnmatchedIssues(fixtureSnapshot()), []);
 });
 
 test("buildBoard filter matches issue number and title", () => {
