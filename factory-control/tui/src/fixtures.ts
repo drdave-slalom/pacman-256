@@ -1,0 +1,163 @@
+/**
+ * Fixture snapshots for the factory-control TUI unit tests.
+ */
+
+import type { FactorySnapshot } from "@maze/factory-control-shared";
+
+export function fixtureSnapshot(overrides: Partial<FactorySnapshot> = {}): FactorySnapshot {
+  return {
+    generatedAt: new Date(Date.now() - 90_000).toISOString(),
+    repo: { root: "/repo/primary", branch: "main", dirty: false },
+    units: [
+      {
+        id: "T1-spec",
+        specPath: "SPEC/T1-spec.md",
+        title: "T1 spec",
+        goal: "Goal for T1",
+        lane: "Platform",
+        stage: "spec",
+        flags: {
+          reviewPending: false,
+          qaPending: false,
+          ciRed: false,
+          readyToMerge: false,
+          readyForCleanup: false,
+          needsDispatch: true,
+          blockedAgent: false,
+        },
+        agents: [],
+        handoffs: [],
+        attention: ["needs-dispatch"],
+      },
+      {
+        id: "T2-execute",
+        specPath: "SPEC/T2-execute.md",
+        title: "T2 execute",
+        stage: "execute",
+        flags: {
+          reviewPending: false,
+          qaPending: false,
+          ciRed: false,
+          readyToMerge: false,
+          readyForCleanup: false,
+          needsDispatch: false,
+          blockedAgent: true,
+        },
+        branch: "factory/t2-execute",
+        worktree: { path: "/wt/t2", dirty: true, diff: { add: 10, del: 2, files: 3 } },
+        agents: [
+          {
+            label: "builder-t2",
+            definition: "builder",
+            state: "working",
+            elapsedMs: 420_000,
+            model: "mercury-1",
+            thinking: true,
+            contextPct: 40,
+            stale: false,
+            availableTools: ["read"],
+            source: "result",
+          },
+        ],
+        handoffs: [
+          {
+            agent: "builder-t2",
+            definition: "builder",
+            sessionId: "result:builder#2",
+            excerpt: "Done.",
+            source: "result",
+          },
+        ],
+        attention: ["blocked-agent"],
+      },
+      {
+        id: "T3-review",
+        specPath: "SPEC/T3-review.md",
+        stage: "review",
+        flags: {
+          reviewPending: true,
+          qaPending: false,
+          ciRed: false,
+          readyToMerge: false,
+          readyForCleanup: false,
+          needsDispatch: false,
+          blockedAgent: false,
+        },
+        branch: "factory/t3-review",
+        worktree: { path: "/wt/t3", dirty: false },
+        agents: [],
+        handoffs: [{ definition: "pr-reviewer", source: "result" }],
+        pr: { number: 3, state: "OPEN", checks: "green", url: "https://example/pull/3" },
+        attention: ["review-pending"],
+      },
+      {
+        id: "T4-merged",
+        specPath: "SPEC/T4-merged.md",
+        stage: "done",
+        flags: {
+          reviewPending: false,
+          qaPending: false,
+          ciRed: false,
+          readyToMerge: false,
+          readyForCleanup: true,
+          needsDispatch: false,
+          blockedAgent: false,
+        },
+        branch: "factory/t4-merged",
+        worktree: { path: "/wt/t4", dirty: false },
+        agents: [],
+        handoffs: [
+          {
+            agent: "qa-tester-x",
+            definition: "qa-tester",
+            sessionId: "result:qa#4",
+            source: "result",
+          },
+        ],
+        pr: { number: 4, state: "MERGED", checks: "green", url: "https://example/pull/4" },
+        attention: ["ready-for-cleanup"],
+      },
+    ],
+    agents: [
+      {
+        label: "builder-t2",
+        definition: "builder",
+        state: "working",
+        elapsedMs: 420_000,
+        model: "mercury-1",
+        thinking: true,
+        contextPct: 40,
+        stale: false,
+        availableTools: ["read"],
+        source: "result",
+      },
+      {
+        label: "idle-x",
+        definition: "pr-reviewer",
+        state: "idle",
+        elapsedMs: 900_000,
+        stale: true,
+        availableTools: [],
+        source: "unknown",
+      },
+    ],
+    prs: [
+      {
+        number: 3,
+        title: "PR3",
+        state: "OPEN",
+        headRefName: "factory/t3-review",
+        url: "https://example/pull/3",
+        checks: "green",
+      },
+    ],
+    orphaned: {
+      branches: ["origin/factory/orphan1"],
+      worktrees: ["/tmp/wt-orphan"],
+      prs: [],
+      handoffs: [],
+    },
+    errors: [],
+    ...overrides,
+  };
+}
