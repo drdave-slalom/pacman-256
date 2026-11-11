@@ -50,7 +50,8 @@ non-interactive output you can confirm the command registered via
   → `ctx.ui.confirm()` → `execute`); rejected rows show the exact guard
   reasons (409).
 - Issue cards: issue-seeded and hybrid units render as `#<n> title [status]`
-  on the board and show a detail section with the GitHub URL (Enter opens it).
+  with a prominent `[GitHub]` source badge on the board and show a detail
+  section with the GitHub URL (Enter opens it).
   Their action menu adds the issue write-back actions — `github/issue-comment`
   (text input), `github/issue-label` (comma-separated labels), and
   `github/issue-state` (close/reopen select) — which gather operator input, then
