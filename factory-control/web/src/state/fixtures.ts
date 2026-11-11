@@ -9,6 +9,7 @@ import type { AgentRecord, FactorySnapshot, Unit } from "@maze/factory-control-s
 export function fixtureSnapshot(): FactorySnapshot {
   const t10: Unit = {
     id: "T10-execute",
+    kind: "spec",
     specPath: "SPEC/T10-execute.md",
     title: "T10: execute fixture",
     goal: "Prove the execute stage renders with agents and a diff.",
@@ -45,6 +46,7 @@ export function fixtureSnapshot(): FactorySnapshot {
 
   const t11: Unit = {
     id: "T11-review",
+    kind: "spec",
     specPath: "SPEC/T11-review.md",
     title: "T11: review fixture",
     goal: "Prove the review stage renders a pending review.",
@@ -83,6 +85,7 @@ export function fixtureSnapshot(): FactorySnapshot {
 
   const t12: Unit = {
     id: "T12-integrate",
+    kind: "spec",
     specPath: "SPEC/T12-integrate.md",
     title: "T12: integrate fixture",
     goal: "Prove an open PR with green checks is ready to merge.",
@@ -104,6 +107,7 @@ export function fixtureSnapshot(): FactorySnapshot {
 
   const t13: Unit = {
     id: "T13-unknown",
+    kind: "spec",
     specPath: "SPEC/T13-unknown.md",
     stage: "unknown",
     flags: {
@@ -122,6 +126,7 @@ export function fixtureSnapshot(): FactorySnapshot {
 
   const t14: Unit = {
     id: "T14-done",
+    kind: "spec",
     specPath: "SPEC/T14-done.md",
     title: "T14: done fixture",
     goal: "Prove a merged unit with a lingering worktree flags cleanup.",
@@ -149,6 +154,7 @@ export function fixtureSnapshot(): FactorySnapshot {
 
   const t15: Unit = {
     id: "T15-parse",
+    kind: "spec",
     specPath: "SPEC/T15-parse.md",
     parseError: "expected ## Goal",
     stage: "spec",
@@ -179,6 +185,7 @@ export function fixtureSnapshot(): FactorySnapshot {
     generatedAt: new Date().toISOString(),
     repo: { root: "/repo/pacman-256", branch: "main", dirty: false },
     units: [t10, t11, t12, t13, t14, t15],
+    issues: [],
     agents,
     prs: [
       { number: 42, title: "T10: execute fixture", state: "OPEN", headRefName: "factory/t10-execute", url: "https://github.com/x/pacman-256/pull/42", checks: "green" },

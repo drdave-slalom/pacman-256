@@ -10,6 +10,7 @@ import type { AgentRecord, FactorySnapshot, Unit, UnitPr } from "../types.ts";
 function baseUnit(overrides: Partial<Unit> = {}): Unit {
   return {
     id: "t1fx",
+    kind: "spec",
     stage: "spec",
     flags: {
       reviewPending: false,
@@ -32,6 +33,7 @@ function makeSnapshot(units: Unit[]): FactorySnapshot {
     generatedAt: "2026-01-01T00:00:00.000Z",
     repo: { root: "/tmp/fixture", branch: "main", dirty: false },
     units,
+    issues: [],
     agents: [],
     prs: [],
     orphaned: { branches: [], worktrees: [], handoffs: [], prs: [] },

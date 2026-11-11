@@ -14,6 +14,7 @@ function prOf(number: number, state: string, checks: CheckState): UnitPr {
 function baseUnit(overrides: Partial<Unit> = {}): Unit {
   return {
     id: "t1fx",
+    kind: "spec",
     stage: "unknown",
     flags: {
       reviewPending: false,
@@ -36,6 +37,7 @@ function makeSnapshot(units: Unit[], orphaned: Partial<FactorySnapshot["orphaned
     generatedAt: "2026-01-01T00:00:00.000Z",
     repo: { root: "/tmp/fixture", branch: "main", dirty: false },
     units,
+    issues: [],
     agents: [],
     prs: [],
     orphaned: {
