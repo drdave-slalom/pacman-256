@@ -1,21 +1,24 @@
 /**
  * Interactive-screen regression tests (B1 cache-invalidation, S1 preparing
- * state / stale-guard, N4 agent-without-owner feedback).
+ * state / stale-guard, N4 agent-without-owner feedback, keyboard scroll edge).
  */
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { FactorySnapshot } from "@maze/factory-control-shared";
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import type { TUI } from "@earendil-works/pi-tui";
+import type { TUI, TuiMouseEvent } from "@earendil-works/pi-tui";
 import type { DispatchPrepareResponse, PrepareResponse } from "./api.ts";
-import { fixtureSnapshot } from "./fixtures.ts";
+import { fixtureSnapshot, fixtureSnapshotForScrollEdge } from "./fixtures.ts";
 import { FactoryScreen } from "./screen.ts";
 
+const UP = "\u001b[A";
 const DOWN = "\u001b[B";
+const PGUP = "\u001b[5~";
+const PGDN = "\u001b[6~";
 const ENTER = "\r";
 const ESC = "\u001b";
-const W = 100;
+const W = 120;
 
 interface HarnessOptions {
   fetch?: () => Promise<FactorySnapshot>;
@@ -44,7 +47,10 @@ function makeHarness(opts: HarnessOptions = {}) {
     theme,
     kb: {
       matches: (data, binding) =>
+        (binding === "tui.select.up" && data === UP) ||
         (binding === "tui.select.down" && data === DOWN) ||
+        (binding === "tui.select.pageUp" && data === PGUP) ||
+        (binding === "tui.select.pageDown" && data === PGDN) ||
         (binding === "tui.select.confirm" && data === ENTER) ||
         (binding === "tui.select.cancel" && data === ESC),
     },
@@ -195,4 +201,127 @@ test("agent row with no owning unit surfaces feedback (N4)", async (t) => {
   h.screen.handleInput(DOWN); // select second agent (idle-x, no owning unit)
   h.screen.handleInput(ENTER);
   assert.ok(h.notifies.some((m) => m.includes("No owning unit")), `expected notify, got: ${h.notifies.join(" | ")}`);
+});
+
+test("board keyboard scrolling reaches trailing Orphaned/Closed sections (scroll edge)", async (t) => {
+  const h = makeHarness({ fetch: () => Promise.resolve(fixtureSnapshotForScrollEdge()) });
+  t.after(() => h.screen.dispose());
+  await settle();
+
+  const first = h.screen.render(W).join("\n");
+  assert.ok(first.includes("Spec (22)"), `expected many spec cards, got:\n${first}`);
+  assert.ok(!first.includes("Orphaned (2)"), "trailing sections must start below the fold");
+  assert.ok(!first.includes("Closed issues (2)"), "trailing sections must start below the fold");
+
+  // Move selection to the last unit (Done column T4-merged).
+  for (let i = 0; i < 24; i++) h.screen.handleInput(DOWN);
+  const atLast = h.screen.render(W).join("\n");
+  assert.ok(atLast.includes("› T4-merged"), `last unit must be selected, got:\n${atLast}`);
+  assert.ok(!atLast.includes("Orphaned (2)"), "selection movement alone must not reveal trailing sections");
+
+  // One Down at the edge scrolls the viewport into the trailing sections.
+  h.screen.handleInput(DOWN);
+  const scrolled = h.screen.render(W).join("\n");
+  assert.ok(scrolled !== atLast, "edge Down must change the visible lines");
+  assert.ok(scrolled.includes("Orphaned (2)"), `expected Orphaned section, got:\n${scrolled}`);
+  assert.ok(scrolled.includes("Closed issues (2)"), `expected Closed issues section, got:\n${scrolled}`);
+  assert.ok(scrolled.includes("  #53 Closed issue without a unit [done]"), `got:\n${scrolled}`);
+
+  // Repeated Down clamps at the true bottom (same output, no error).
+  for (let i = 0; i < 5; i++) h.screen.handleInput(DOWN);
+  const bottom = h.screen.render(W).join("\n");
+  assert.ok(bottom.includes("Closed issues (2)"), `bottom must show Closed issues, got:\n${bottom}`);
+  assert.ok(bottom.includes("  #60 Another closed orphan issue [closed]"), `got:\n${bottom}`);
+  h.screen.handleInput(DOWN);
+  const clamped = h.screen.render(W).join("\n");
+  assert.equal(clamped, bottom, "further Down presses must clamp without changing output");
+
+  // Up moves selection back up; PageUp restores selection visibility at the top.
+  h.screen.handleInput(UP);
+  const upOne = h.screen.render(W).join("\n");
+  assert.ok(upOne.includes("› #7 Add sound effects"), `Up from bottom must move selection to T3-review, got:\n${upOne}`);
+  h.screen.handleInput(PGUP);
+  const top = h.screen.render(W).join("\n");
+  assert.ok(top.includes("› #12 Mobile touch controls"), `PageUp must restore first-unit selection, got:\n${top}`);
+  assert.ok(!top.includes("Orphaned (2)"), "viewport should be back near the top");
+  h.screen.handleInput(PGUP);
+  const absoluteTop = h.screen.render(W).join("\n");
+  assert.ok(absoluteTop.includes("Spec (22)"), `expected column header at the very top, got:\n${absoluteTop}`);
+  h.screen.handleInput(PGUP);
+  const topClamped = h.screen.render(W).join("\n");
+  assert.equal(topClamped, absoluteTop, "further PageUp presses must clamp at the top");
+});
+
+test("board trailing sections are informational: click no-op, Enter opens the selected unit", async (t) => {
+  const h = makeHarness({ fetch: () => Promise.resolve(fixtureSnapshotForScrollEdge()) });
+  t.after(() => h.screen.dispose());
+  await settle();
+
+  // First render establishes the viewport/region so edge scrolling applies.
+  h.screen.render(W);
+
+  // Move to the last unit then scroll to the bottom so section rows are on screen.
+  for (let i = 0; i < 24; i++) h.screen.handleInput(DOWN);
+  h.screen.handleInput(DOWN); // edge scroll to bottom
+  const bottom = h.screen.render(W).join("\n");
+  assert.ok(bottom.includes("Orphaned (2)"), `expected sections visible, got:\n${bottom}`);
+
+  // Click on the Orphaned section header row: head=6, section row 34, scrollTop=10.
+  const mouse: TuiMouseEvent = {
+    type: "click",
+    button: "left",
+    x: 2,
+    y: 6 + (34 - 10),
+    screenX: 2,
+    screenY: 30,
+    width: W,
+    height: 40,
+    shift: false,
+    alt: false,
+    ctrl: false,
+  };
+  h.screen.handleMouse(mouse);
+  const afterClick = h.screen.render(W).join("\n");
+  assert.ok(afterClick.includes("› T4-merged"), "clicking a section must not change selection");
+  assert.equal(afterClick, bottom, "section click must be a no-op");
+
+  // Enter operates on the still-selected unit (opens its detail), not a section.
+  h.screen.handleInput(ENTER);
+  const detail = h.screen.render(W).join("\n");
+  assert.ok(detail.includes("T4-merged"), `Enter must open the selected unit detail, got:\n${detail}`);
+  assert.ok(!detail.includes("Orphaned (2)"), "detail view has no trailing sections");
+});
+
+test("mouse wheel scrolling still works independently of selection (no regression)", async (t) => {
+  const h = makeHarness({ fetch: () => Promise.resolve(fixtureSnapshotForScrollEdge()) });
+  t.after(() => h.screen.dispose());
+  await settle();
+
+  const first = h.screen.render(W).join("\n");
+  assert.ok(!first.includes("Closed issues (2)"), "trailing sections start below the fold");
+
+  const wheel = (delta: number): TuiMouseEvent => ({
+    type: "wheel",
+    button: "none",
+    x: 0,
+    y: 0,
+    screenX: 0,
+    screenY: 0,
+    width: W,
+    height: 40,
+    shift: false,
+    alt: false,
+    ctrl: false,
+    wheelDelta: delta,
+  });
+
+  h.screen.handleMouse(wheel(20)); // big scroll to the bottom
+  const bottom = h.screen.render(W).join("\n");
+  assert.ok(bottom.includes("Closed issues (2)"), `wheel down must reach the bottom, got:\n${bottom}`);
+  assert.ok(bottom.includes("  #60 Another closed orphan issue [closed]"), `got:\n${bottom}`);
+
+  h.screen.handleMouse(wheel(-20)); // back to the top
+  const top = h.screen.render(W).join("\n");
+  assert.ok(top.includes("Spec (22)"), `wheel up must return to the top, got:\n${top}`);
+  assert.ok(!top.includes("Orphaned (2)"), "wheel up must hide trailing sections again");
 });

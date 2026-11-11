@@ -163,6 +163,34 @@ export function fixtureSnapshotWithClosedIssues(overrides: Partial<FactorySnapsh
   };
 }
 
+/**
+ * Extra spec-stage units used to push the appended board sections (Orphaned /
+ * Closed issues) below the fold in keyboard-scroll tests (see
+ * factory-control-tui-scroll-edge.md).
+ */
+function extraSpecUnits(count: number): Unit[] {
+  const template = fixtureSnapshot().units.find((u) => u.id === "T1-spec");
+  if (template === undefined) throw new Error("fixture missing T1-spec");
+  return Array.from({ length: count }, (_, i) => {
+    const id = `S${String(i + 1).padStart(2, "0")}`;
+    return { ...template, id, title: `Fixture spec ${i + 1}`, specPath: `SPEC/${id}.md` };
+  });
+}
+
+/**
+ * Snapshot variant for keyboard-scroll tests: enough spec units that the
+ * Orphaned and Closed issues sections start below the viewport fold, with the
+ * last flat unit (a Done column card) just above them.
+ */
+export function fixtureSnapshotForScrollEdge(overrides: Partial<FactorySnapshot> = {}): FactorySnapshot {
+  const base = fixtureSnapshotWithClosedIssues();
+  return {
+    ...base,
+    units: [...base.units, ...extraSpecUnits(20)],
+    ...overrides,
+  };
+}
+
 export function fixtureSnapshot(overrides: Partial<FactorySnapshot> = {}): FactorySnapshot {
   return {
     generatedAt: new Date(Date.now() - 90_000).toISOString(),
