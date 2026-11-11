@@ -72,11 +72,15 @@ Report results; adjust this spec before Phase 1.
    human comments. Verify in Phase 1.
 3. **gh-aw can load profiles: yes (docs).** `{{#runtime-import .github/agents/<name>.agent.md}}`
    injects files under `.github/`; frontmatter fields such as `model:` are not applied.
-4. **CI approval: required.** CI and `pr-description.yml` runs on the Copilot branch
-   completed as `action_required` and the PR stayed a draft. Phase 1 must either turn off
-   the approval requirement for Copilot PRs in the repo's Copilot cloud agent settings or
-   have the gate workflow approve runs, and must mark the PR ready itself (the agent
-   leaves it as a draft).
+4. **CI approval: required by default.** CI and `pr-description.yml` runs on the Copilot
+   branch completed as `action_required`, and the API cannot approve them (`POST
+   .../runs/{id}/approve` returns 403 for non-fork runs). **Decision (David, 2026-11-10):
+   auto-approve.** Repo Settings → Copilot → cloud agent → Policies → disable
+   "Require approval for workflow runs" (admin, UI only). Compensating guardrail:
+   `agent-gate.yml` labels any agent PR that changes `.github/workflows/`,
+   `.github/agents/`, `.github/skills/`, or `deploy/` with `agent:needs-human` and never
+   auto-merges it. Secrets must not be reachable from agent branches: move `DO_API_TOKEN` to a `production` environment secret and `COPILOT_ASSIGN_TOKEN` to an `agent` environment, both limited to deployments from `main` (verified 2026-11-10: both were repo-level).
+   The gate workflow must also mark the PR ready itself (the agent leaves it as a draft).
 5. **Orchestrator delegation in-session: not yet tested.**
 
 **Phase 1: build the chain** (files below). **Phase 2: docs + D056.**
