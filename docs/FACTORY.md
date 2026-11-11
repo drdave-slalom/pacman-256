@@ -138,8 +138,8 @@ GitHub Issues is the factory tracker (D055; scoping profile
   the issue. Bugs use the `bug` form; blank issues are disabled
   (`.github/ISSUE_TEMPLATE/`).
 - **PRs close issues.** PRs fill `.github/pull_request_template.md` and include
-  `Closes #N` when an issue exists. Leave the auto-generated description
-  markers at the end for `pr-description.yml`.
+  `Closes #N` when an issue exists, or "No issue" if none. Leave the
+  auto-generated description markers at the end for `pr-description.yml`.
 - **Labels** are defined in `.github/labels.yml`: `type:*`
   (feature/bug/chore/docs), `role:*` (builder/qa/review/design/art/docs),
   `lane:A`/`lane:B`/`lane:C`, `status:*` (spec/ready/in-progress/review),
@@ -454,8 +454,9 @@ For Herdr/Pi, replace “Copilot subagent” with `delegate_agent`, use the
 matching `.pi/agents/` definition, and pass the result reference in `files`.
 
 5. Integrate accepted work with human approval, after review and QA: open a PR
-   with the `open-pr` skill (body fills the PR template: `Closes #N`, spec
-   link, QA, review, reconciliation, follow-ups). Merge `factory/t5-countdown` directly into `main` only
+   with the `open-pr` skill (body fills the PR template: `Closes #N` when an
+   issue exists, or "No issue" if none, spec link, QA, review, reconciliation,
+   follow-ups). Merge `factory/t5-countdown` directly into `main` only
    with explicit user approval. Run the build and record in
    `docs/DECISIONS.md`.
 6. Watch CI as described in gate 3: `gh pr checks <pr> --watch` for a PR, or
