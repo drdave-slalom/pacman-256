@@ -117,6 +117,7 @@ test("renderPipelineStrip shows a single dim no-units line for an empty board", 
 test("renderPipelineStrip excludes Unknown/Orphaned stages", () => {
   const unknownUnit: Unit = {
     id: "U-unknown",
+    kind: "spec",
     stage: "unknown",
     flags: {
       reviewPending: false,

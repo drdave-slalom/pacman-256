@@ -100,8 +100,35 @@ export interface UnitPr {
   url: string;
 }
 
+export type UnitKind = "spec" | "issue" | "hybrid" | "unknown";
+
+export interface IssueLabels {
+  type?: string;        // type:feature|bug|chore|docs
+  role?: string[];      // role:builder|qa|review|design|art|docs (0..n)
+  lane?: string;        // lane:A|B|C
+  status?: string;      // status:spec|ready|in-progress|review
+  blocked: boolean;     // label "blocked"
+  followUp: boolean;    // label "follow-up"
+  playtest: boolean;    // label "playtest"
+  raw: string[];        // every label name, verbatim
+}
+
+export interface IssueCard {
+  number: number;
+  title: string;
+  state: "open" | "closed" | "unknown";
+  url: string;
+  bodyExcerpt?: string; // trimmed first ~200 chars of body (defensive)
+  labels: IssueLabels;
+  assignees: string[];
+  milestone?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface Unit {
   id: string;
+  kind: UnitKind;
   specPath?: string;
   title?: string;
   goal?: string;
@@ -114,6 +141,7 @@ export interface Unit {
   agents: AgentRecord[];
   handoffs: HandoffRef[];
   pr?: UnitPr;
+  issue?: IssueCard; // set when unit is seeded from or linked to an issue
   attention: Attention[];
 }
 
@@ -157,6 +185,7 @@ export interface FactorySnapshot {
   generatedAt: string;
   repo: RepoFacts;
   units: Unit[];
+  issues: IssueCard[]; // all ingested issues (open + closed), raw
   agents: AgentRecord[];
   prs: PullRequest[];
   orphaned: OrphanedBucket;

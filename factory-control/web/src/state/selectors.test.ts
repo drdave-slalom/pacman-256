@@ -107,6 +107,7 @@ test("suggestNextAction is derived from flags/attention and display-only", () =>
 
   const needsDispatch: Unit = {
     id: "T99-dispatch",
+    kind: "spec",
     stage: "spec",
     flags: { reviewPending: false, qaPending: false, ciRed: false, readyToMerge: false, readyForCleanup: false, needsDispatch: true, blockedAgent: false },
     agents: [],
