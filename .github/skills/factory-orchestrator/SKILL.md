@@ -146,7 +146,9 @@ GitHub issue / spec / ask
 ## Cloud mode
 
 When you run as the Copilot cloud agent on a GitHub issue or PR (D056; see
-`docs/FACTORY.md#github-agent-pipeline-cloud-mode`):
+`docs/FACTORY.md#github-agent-pipeline-cloud-mode`), this section overrides
+step 0 (the Lead does not implement), steps 3–8 (worktrees, local subagents,
+review, QA, integration, CI watch), and the worktree discipline below:
 
 1. **Triage** (invoked by `factory-triage`): triage only. Classify, label, and
    comment; never write files or start work.
@@ -157,7 +159,10 @@ When you run as the Copilot cloud agent on a GitHub issue or PR (D056; see
    `gameplay-designer`, `docs-writer`), plus `QA depth: fast|slow`. Open a
    draft PR with `Closes #N`, then stop at the spec gate.
 3. **Build** (only after a human comments `/approve-spec`): implement per the
-   Delegation section on the same PR branch and run `npm run check`.
+   Delegation section yourself on the same PR branch, acting as (or
+   delegating to) each named `.github/agents/<profile>.agent.md` in order. Run
+   `npm run check`, fill the PR template, and remove the `[WIP]` title prefix
+   last.
 
 Cloud mode uses no worktrees and no local subagents; the workflows handle
 review, QA, fix cycles, and merge.

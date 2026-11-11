@@ -264,17 +264,23 @@ write only through gh-aw safe outputs.
 - Variable `AGENT_PIPELINE_ENABLED` = `true`. Optional: `AGENT_MAX_ACTIVE`
   (default 3) and `AGENT_MERGE_REVIEWER` (default: the repo owner).
 - Labels from `.github/labels.yml` synced (`node scripts/sync-labels.mjs`).
+- Do **not** set `GH_AW_GITHUB_TOKEN`: it changes the identity the gh-aw
+  reviewer posts as, so the gate no longer recognizes its reviews and verdicts.
+- While "Allow GitHub Actions to create and approve pull requests" is on, any
+  workflow can satisfy a required-approval rule, so do not rely on required
+  approvals as a human gate; human gates are `agent:go`, `/approve-spec`, and
+  `agent:needs-human`.
 
 | Step | Trigger | Result |
 |---|---|---|
 | 0. Triage | Issue opened/reopened by a triage+ collaborator (others are not triaged) | `factory-triage` (orchestrator profile, read-only) adds `type:*`/`lane:*`/`role:*` labels and one triage comment; labels `status:spec` if ready or `agent:needs-human` if gaps. Never starts work. |
-| 1. Queue | A triage+ user adds `agent:go` | `agent-dispatch.yml` assigns Copilot (`factory-orchestrator` profile, model `auto`) to write only `SPEC/<id>-<slug>.md` with a `## Delegation` section and open a draft PR with `Closes #N`. `agent:go` → `agent:active` + `status:spec`. |
-| 2. Spec gate | A write+ user comments `/approve-spec` on the PR | `agent-gate.yml` checks the PR changes exactly one `SPEC/*.md` with a valid Delegation section (otherwise `agent:needs-human`), re-adds `[WIP] ` to the PR title, mirrors Delegation to `role:*` labels, sets `status:ready`, and posts one `@copilot` build comment. |
+| 1. Queue | A triage+ user (not a bot) adds `agent:go` | `agent-dispatch.yml` assigns Copilot (`factory-orchestrator` profile, model `auto`) to write only `SPEC/<id>-<slug>.md` with a `## Delegation` section and open a draft PR with `Closes #N`. `agent:go` → `agent:active` + `status:spec`; stale `cycle:*`, `status:ready`/`status:review`, and `role:*` labels are cleared. |
+| 2. Spec gate | A write+ user (not a bot) comments `/approve-spec`, or `/approve-spec <sha>` which must match the PR head | Refused while the PR title starts with `[WIP]` (Copilot is still writing). `agent-gate.yml` requires exactly one linked issue with `agent:active` and binds the PR to it, and checks the PR changes exactly one `SPEC/*.md` with a valid Delegation section; otherwise `agent:needs-human`. It then re-adds `[WIP] ` to the PR title, mirrors Delegation to `role:*` labels, sets `status:ready`, and posts one `@copilot` build comment. |
 | 3. Build | That `@copilot` comment | Copilot implements per the Delegation, acting as each named `.github/agents/<profile>.agent.md` in order (delegating to that custom agent if available), runs `npm run check`, fills the PR template, and removes `[WIP]` from the title last. When `[WIP]` is gone, the gate marks the PR ready and sets `status:review`. |
 | 4. Review + QA | PR ready / new push | `factory-review` submits a `github-actions[bot]` APPROVE or REQUEST_CHANGES review on the head commit (`[blocker]/[should]/[nit]`). `factory-qa` runs `npm ci && npm run check` plus focused tests; its `qa-verdict` job posts `<!-- factory-qa:pass\|fail -->` with `Head: <sha>`. The gate trusts only `github-actions[bot]` verdicts for the current head. |
-| 5. Fix cycles | Changes requested, QA fail, or failing required checks | `cycle:1`, then `cycle:2` (D050); one `@copilot` comment lists the blockers per head commit. Blockers after `cycle:2` → `agent:needs-human`. Review/QA finishing without a verdict → `agent:needs-human`. |
-| 6. Merge | Required CI green, Copilot code review present, factory review approved, QA pass, no `agent:needs-human` | Auto-merge (squash, enabled with `COPILOT_ASSIGN_TOKEN` so the merge triggers CI, deploy, and close-out) only when the issue has `type:docs`, `type:chore`, or `follow-up` and **not** `type:feature`, `type:bug`, or `playtest`; the strictest label wins. If GitHub reports the PR already clean, the gate squash-merges directly. PRs touching sensitive paths (`.github/`, `deploy/`, `scripts/`, `factory-control/server/`, or any `Dockerfile`, `package.json`, `package-lock.json`) always need a human. Otherwise: `agent:needs-human` plus a review request to `AGENT_MERGE_REVIEWER`. |
-| 7. Close-out | PR merged | `Closes #N` closes the issue; Follow-ups items become `follow-up` issues; `agent:active` and `status:*` are removed. A PR closed unmerged removes `agent:active` and adds `agent:needs-human`. |
+| 5. Fix cycles | Changes requested, QA fail, or failing required checks | `cycle:1`, then `cycle:2` (D050). The gate turns the PR back to draft with `[WIP]` and `status:ready` and posts one `@copilot` comment listing the blockers. Copilot removes `[WIP]` last, which triggers exactly one re-review, so intermediate pushes don't burn cycles. Blockers after `cycle:2` → `agent:needs-human`. Review/QA finishing without a verdict → `agent:needs-human`. |
+| 6. Merge | Required CI green, Copilot code review present, factory review approved, QA pass, no `agent:needs-human` | Auto-merge (squash, enabled with `COPILOT_ASSIGN_TOKEN` so the merge triggers CI, deploy, and close-out; bound to the reviewed head SHA, so any new push disables it and needs fresh review and QA) only when the issue has `type:docs`, `type:chore`, or `follow-up` and **not** `type:feature`, `type:bug`, or `playtest`; the strictest label wins. If GitHub reports the PR already clean, the gate squash-merges directly. PRs touching sensitive paths in any commit of the PR (`.github/`, `deploy/`, `scripts/`, `factory-control/server/`, or at any depth and case-insensitive: `Dockerfile`, `Dockerfile.*`, `.dockerignore`, `.npmrc`, `package.json`, `package-lock.json`) always need a human. Otherwise: `agent:needs-human` plus a review request to `AGENT_MERGE_REVIEWER`. |
+| 7. Close-out | PR merged | `Closes #N` closes the issue; Follow-ups items become `follow-up` issues; `agent:active`, `status:*`, `cycle:*`, and `agent:needs-human` are removed. A PR closed unmerged removes `agent:active`, `cycle:*`, `status:ready`/`status:review`, and `role:*`, and adds `agent:needs-human`. |
 
 **Delegation section.** The spec's `## Delegation` lists one line per step,
 `- <profile>: <task>` (profiles: `builder`, `artist`, `gameplay-designer`,
@@ -297,17 +303,21 @@ is `true`. Unset it or set any other value to stop all pipeline actions.
 - Re-check gates (for example after a late Copilot code review): run
   `agent-gate.yml` manually with input `pr_number`
   (`gh workflow run agent-gate.yml -f pr_number=<n>`).
-- Restart dispatch: the issue must be open, not assigned to Copilot, and
-  without `agent:active` or `agent:needs-human`; then a triage+ user removes
-  and re-adds `agent:go`. With `agent:needs-human` present, dispatch only
+- Restart dispatch (for example after a PR was closed unmerged): close any
+  open agent PR for the issue, unassign Copilot, remove `agent:active` and
+  `agent:needs-human`, then a triage+ user removes and re-adds `agent:go`. The
+  issue must be open. Dispatch clears stale `cycle:*`, `status:ready`/`status:review`,
+  and `role:*` labels itself. With `agent:needs-human` present, dispatch only
   comments and does nothing. When the `AGENT_MAX_ACTIVE` limit is reached,
   `agent:go` stays queued; remove and re-add it when a slot frees up.
-- `/approve-spec` is ignored unless the issue has `status:spec`; with
-  `agent:needs-human` present, remove it and comment `/approve-spec` again.
+- `/approve-spec` is ignored unless the issue has `status:spec` and the PR
+  title has no `[WIP]` prefix; with `agent:needs-human` present, remove it and
+  comment `/approve-spec` again.
 
 **Permissions.** Only triage+ users can trigger `agent:go`; only write+ users
-can `/approve-spec`. Workflows recheck permissions via the API and act only on
-Copilot-authored PRs whose linked issue has `agent:active`. Issue and PR text is
+can `/approve-spec`; bot actors are ignored at both human gates. Workflows
+recheck permissions via the API and act only on Copilot-authored PRs bound to
+exactly one linked issue with `agent:active`. Issue and PR text is
 untrusted input.
 
 **Known limits.**
@@ -323,7 +333,11 @@ untrusted input.
   Copilot branches is off, so an agent PR that edits a `pull_request` workflow
   could read them. Mitigations: glue workflows run from base-branch definitions
   (`pull_request_target`, `workflow_run`, `issues`, `issue_comment`) and never
-  check out PR code, and sensitive-path PRs never auto-merge.
+  check out PR code, and sensitive-path PRs never auto-merge. Residual risk:
+  a workflow on an agent PR branch can still read repo secrets and, through
+  `GITHUB_TOKEN`, post as `github-actions[bot]` (the identity the gate trusts
+  for review and QA verdicts) until #47 is done and workflow-run approval is
+  re-enabled.
 
 ## Worktree isolation
 
