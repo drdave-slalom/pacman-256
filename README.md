@@ -276,6 +276,27 @@ client. In local dev, the Vite dev server serves the client and proxies
 Phaser currently causes a large-bundle warning during the client build; the build
 succeeds. Mobile download/performance optimization remains follow-up work.
 
+## Factory control (operation)
+
+The `factory-control/` workstream ships a control server (snapshot + guarded
+action API + read-only web mirror) and a **pi TUI extension** (`/factory`) for
+operating the factory from inside a pi session. See
+[`factory-control/README.md`](factory-control/README.md) and
+[`factory-control/tui/README.md`](factory-control/tui/README.md).
+
+Quick start:
+
+```bash
+npm run factory:control:serve   # control server (127.0.0.1:4780)
+# in a pi session (project trusted): open the Factory screen
+#   /factory          # live board
+#   /factory <query>  # filter units
+```
+
+The TUI extension is loaded via `.pi/extensions/factory-control.ts`; it only
+mutates through the M2 prepare/execute protocol and never re-renders the Herdr
+widget.
+
 ## GitHub Actions
 
 The [CI workflow](./.github/workflows/ci.yml) runs on pull requests, pushes to

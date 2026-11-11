@@ -74,22 +74,23 @@ factory-control/
   server/          # M0 + M2: snapshot aggregation + guarded action API
   web/             # M1: read-only Vite/React mirror
   shared/          # canonical snapshot types (server + web)
-  tui/             # M3: pi extension
+  tui/             # M3: pi extension (Factory screen + action menu)
   state/           # runtime state (audit log, dispatch queue) — gitignored
 ```
 
-Planned commands (defined when code lands): `npm run factory:control -- snapshot
-[--json]` is the snapshot CLI; `npm run factory:control:serve` starts the server
-(snapshot + web + action API); the TUI is a pi extension registered in the pi
-config.
+Commands: `npm run factory:control -- snapshot [--json]` is the snapshot CLI;
+`npm run factory:control:serve` starts the server (snapshot + web + action
+API); the TUI is a pi extension registered in the pi config (see
+[`tui/README.md`](tui/README.md)).
 
 ## Where the code goes and how it integrates
 
-- New npm workspaces `factory-control/server` and `factory-control/web` are added
-  to the root `package.json` `workspaces` list and to `tsconfig.tests.json` so
-  `npm run check` covers them. (Implementation detail; confirm during build.)
-- The TUI extension is a pi extension package (`factory-control/tui`) loaded by
-  the pi config.
+- npm workspaces `factory-control/server`, `factory-control/web`, and
+  `factory-control/tui` are registered in the root `package.json` `workspaces`
+  list and in `tsconfig.tests.json` so `npm run check` covers them.
+- The TUI extension (`factory-control/tui`) is loaded by pi via the
+  project-local shim `.pi/extensions/factory-control.ts` (auto-discovered once
+  the project is trusted); it re-exports `@maze/factory-control-tui`.
 
 ## Implementation route (factory gates apply)
 
